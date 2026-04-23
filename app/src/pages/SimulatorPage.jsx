@@ -16,10 +16,10 @@ import { formatDuration } from '../utils/formatting';
 
 const TARGET_LAW_OPTIONS = [
   { key: null, label: '없음' },
-  { key: '영검', label: '영검법체(劍)' },
-  { key: '화염', label: '현염법체(炎)' },
-  { key: '뇌전', label: '유뢰법체(雷)' },
-  { key: '백족', label: '백족법체' },
+  { key: '영검', label: '영검법체' },
+  { key: '화염', label: '현염법체' },
+  { key: '뇌전', label: '유뢰법체' },
+  // 백족법체는 상성 삼각(영검-유뢰-현염)과 별개 축이므로 상대 법체 옵션에서 제외
 ];
 
 // 내 카테고리 4+ 법체 → 상대가 이 계열이면 +20%
