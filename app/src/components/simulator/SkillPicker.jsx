@@ -14,15 +14,26 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
   function toggleSkill(fam, name) {
     const famCur = skillSel[fam] || [];
     const isSelected = famCur.includes(name);
-    let nextFam;
     if (isSelected) {
-      nextFam = famCur.filter((n) => n !== name);
-    } else {
-      if (totalSelected >= maxTotal) return;
-      if (famCur.length >= 4) return;
-      nextFam = [...famCur, name];
+      onChange({ ...skillSel, [fam]: famCur.filter((n) => n !== name) });
+      return;
     }
-    onChange({ ...skillSel, [fam]: nextFam });
+    // 해당 유파가 4개 꽉 찼으면 새 선택 불가 (유파당 최대 4)
+    if (famCur.length >= 4) return;
+    // 총 6개 꽉 찬 경우: 가장 먼저 선택된 신통 1개 자동 제거 후 새 것 추가 (swap)
+    let nextSel = { ...skillSel };
+    if (totalSelected >= maxTotal) {
+      // 선택 순서대로 flatten 해서 첫 번째 찾기
+      const allSelectedOrdered = Object.entries(skillSel).flatMap(([f, arr]) =>
+        (arr || []).map((n) => ({ fam: f, name: n }))
+      );
+      const oldest = allSelectedOrdered[0];
+      if (oldest) {
+        nextSel = { ...nextSel, [oldest.fam]: (nextSel[oldest.fam] || []).filter((n) => n !== oldest.name) };
+      }
+    }
+    nextSel = { ...nextSel, [fam]: [...(nextSel[fam] || []), name] };
+    onChange(nextSel);
   }
 
   // 유파 전체 선택 / 해제 — 해당 유파의 4개 신통을 잔여 슬롯까지 채움
@@ -41,30 +52,67 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
     onChange({ ...skillSel, [fam]: [...famCur, ...toAdd] });
   }
 
+  // 계열(카테고리) 전체 해제 — 해당 계열의 모든 유파 선택 해제
+  function clearCategory(cat) {
+    const fams = FAMILIES_BY_CAT[cat] || [];
+    const next = { ...skillSel };
+    for (const f of fams) delete next[f];
+    onChange(next);
+  }
+
+  // 계열에 선택된 신통 수
+  function catSelectedCount(cat) {
+    const fams = FAMILIES_BY_CAT[cat] || [];
+    return fams.reduce((sum, f) => sum + (skillSel[f]?.length || 0), 0);
+  }
+
   return (
     <div>
-      <div className="mb-3 flex items-center gap-3">
+      <div className="mb-3 flex items-center gap-3 flex-wrap">
         <span className={`text-sm font-bold ${totalSelected === maxTotal ? 'text-emerald-400' : 'text-amber-400'}`}>
           {totalSelected} / {maxTotal} 선택
         </span>
         {totalSelected !== maxTotal && (
           <span className="text-xs text-slate-500">신통을 총 {maxTotal}개 선택해주세요</span>
         )}
+        {totalSelected > 0 && (
+          <button
+            onClick={() => onChange({})}
+            className="ml-auto text-xs px-3 py-1 bg-rose-900/40 border border-rose-700/50 text-rose-300 hover:bg-rose-900/60 rounded font-semibold"
+            title="선택한 신통 전체 해제"
+          >
+            ↺ 전체 해제
+          </button>
+        )}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {CATEGORIES.map((cat) => (
+        {CATEGORIES.map((cat) => {
+          const catCount = catSelectedCount(cat);
+          return (
           <div key={cat} className="border border-slate-700 bg-slate-900/40 rounded-lg p-2">
-            <div className="relative group/cat inline-block mb-1.5 cursor-help">
-              <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
-              {CAT_LAW_BODY[cat] && (
-                <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
-                  <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
-                  <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
-                  <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
-                    <div>{CAT_LAW_BODY[cat].effect2}</div>
-                    <div>{CAT_LAW_BODY[cat].effect4}</div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="relative group/cat inline-block cursor-help">
+                <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
+                {catCount > 0 && <span className="text-[10px] text-amber-400 ml-1">({catCount})</span>}
+                {CAT_LAW_BODY[cat] && (
+                  <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
+                    <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
+                    <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
+                    <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
+                      <div>{CAT_LAW_BODY[cat].effect2}</div>
+                      <div>{CAT_LAW_BODY[cat].effect4}</div>
+                    </div>
                   </div>
-                </div>
+                )}
+              </div>
+              {catCount > 0 && (
+                <button
+                  onClick={() => clearCategory(cat)}
+                  className="text-[10px] px-2 py-0.5 rounded border bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60"
+                  title={`${cat} 계열 선택 전체 해제`}
+                >
+                  계열 해제
+                </button>
               )}
             </div>
             <div className="space-y-1">
@@ -111,8 +159,8 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                         const order = on ? Object.values(skillSel).flat().indexOf(name) : -1;
                         const opts = SKILL_OPTIONS[name] || null;
                         const hasOpts = opts && Object.keys(opts).length > 0;
-                        const canAdd = !on && totalSelected < maxTotal && chosen.length < 4;
-                        const disabled = !on && !canAdd;
+                        // 유파당 4개 꽉 찼을 때만 disable (총 6개 꽉 차도 swap 으로 대체 가능)
+                        const disabled = !on && chosen.length >= 4;
                         // 신통 이름에서 유파부분 제거 ("복룡·절화" → "절화")
                         const shortName = name.includes('·') ? name.split('·')[1] : name;
                         return (
@@ -175,7 +223,8 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

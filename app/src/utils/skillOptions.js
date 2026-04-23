@@ -207,7 +207,11 @@ export function lookupOption(bufKey) {
     if (opts[bufKey]) return { skill, option: bufKey, desc: opts[bufKey] };
   }
 
-  // 포맷 5: 특수 상태
+  // 포맷 5: 특수 상태 (검심통명, 순요, 관일 등) — STACK_DESCS 에서 fallback 조회
+  if (STACK_DESCS[bufKey]) {
+    return { skill: null, option: bufKey, desc: STACK_DESCS[bufKey] };
+  }
+
   return { skill: null, option: bufKey, desc: null };
 }
 

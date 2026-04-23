@@ -29,6 +29,16 @@ export default function SkillPoolPicker({ pool, onChange }) {
     onChange(next);
   }
 
+  function setAllInCat(cat, on) {
+    const next = new Set(pool);
+    for (const fam of FAMILIES_BY_CAT[cat]) {
+      for (const n of FAMILIES[fam].skills) {
+        if (on) next.add(n); else next.delete(n);
+      }
+    }
+    onChange(next);
+  }
+
   const selected = pool.size;
 
   return (
@@ -44,20 +54,35 @@ export default function SkillPoolPicker({ pool, onChange }) {
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {CATEGORIES.map((cat) => (
+        {CATEGORIES.map((cat) => {
+          const fams = FAMILIES_BY_CAT[cat];
+          const catAllSelected = fams.every((f) => FAMILIES[f].skills.every((n) => pool.has(n)));
+          return (
           <div key={cat} className="border border-slate-700 bg-slate-900/40 rounded-lg p-2">
-            <div className="relative group/cat inline-block mb-1.5 cursor-help">
-              <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
-              {CAT_LAW_BODY[cat] && (
-                <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
-                  <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
-                  <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
-                  <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
-                    <div>{CAT_LAW_BODY[cat].effect2}</div>
-                    <div>{CAT_LAW_BODY[cat].effect4}</div>
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="relative group/cat inline-block cursor-help">
+                <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
+                {CAT_LAW_BODY[cat] && (
+                  <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
+                    <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
+                    <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
+                    <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
+                      <div>{CAT_LAW_BODY[cat].effect2}</div>
+                      <div>{CAT_LAW_BODY[cat].effect4}</div>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+              <button
+                onClick={() => setAllInCat(cat, !catAllSelected)}
+                className={`text-[10px] px-2 py-0.5 rounded border transition ${
+                  catAllSelected
+                    ? 'bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60'
+                    : 'bg-slate-700/60 border-slate-600 text-slate-200 hover:bg-slate-700'
+                }`}
+              >
+                {catAllSelected ? '계열 해제' : '계열 전체'}
+              </button>
             </div>
             <div className="space-y-1">
               {sortFamsByTier(FAMILIES_BY_CAT[cat]).map((fam) => {
@@ -146,7 +171,8 @@ export default function SkillPoolPicker({ pool, onChange }) {
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

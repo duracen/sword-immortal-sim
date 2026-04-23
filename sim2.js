@@ -113,6 +113,10 @@ function newState() {
     수광종료처리: true,
     // 청명·투진 [순요] 10초 창 — 창 안의 매 신통 cast에서 crit 시 5초 atk+25
     순요End: 0,
+    // === 랜덤 크리 모드 cast별 추적 ===
+    _castAnyCrit: false,   // 이번 cast 에서 crit 최소 1회 발생 여부
+    _castCritCount: 0,     // 이번 cast 에서 crit 누적 횟수 (per-hit 판정 합)
+    _tahyunRoll: null,     // 이번 cast 의 태현잔화 roll 결과 (0~16, null이면 기댓값 사용)
     // 불씨 진무절화: 신통 2 시전마다 다음 신통 입히는피해 증가 (탑티어)
     진무절화카운터: 0,
     진무절화스택: 0,  // 현재 저장된 다음 신통 피해 증가치 (%)
@@ -346,8 +350,20 @@ function sumBuffDealt(state, isShintong = true) {
   for (const b of state.buffs) {
     if (b.endT > state.t && b.cat === 'dealt' && b.dmgMult) s += b.dmgMult * (b.stackCount || 1);
   }
-  // 불씨 세트: 태현잔화 (0~8/0~12/0~16 랜덤 → 기댓값 절반 4/6/8) — 탑티어만
-  if (isShintong) s += 불씨급수값(state, '태현잔화', [4, 6, 8]);
+  // 불씨 세트: 태현잔화 (0~8/0~12/0~16 랜덤)
+  // - 기댓값 모드: 절반 (4/6/8)
+  // - 랜덤 모드: cast 시작 시 0~2×expected 로 롤, cast 동안 캐시값 사용
+  if (isShintong) {
+    const 태현기댓값 = 불씨급수값(state, '태현잔화', [4, 6, 8]);
+    if (태현기댓값 > 0) {
+      if (CFG.randomCrit) {
+        // cast 시작 시 롤된 값 사용 (없으면 0 → 안전하게 기댓값 fallback)
+        s += (state._tahyunRoll ?? 태현기댓값);
+      } else {
+        s += 태현기댓값;
+      }
+    }
+  }
   return s;
 }
 function prune화상(state) {
@@ -546,22 +562,58 @@ function critMult(cr, cd) {
   return (100 - cr) / 100 * 1 + cr / 100 * (1 + cd / 100);
 }
 
-// ======================== crit 기댓값 트리거 ========================
-// 풍뢰/뇌정: 버프 활성 중 매 캐스트 시 crit 확률 기댓값만큼 천뢰/낙뢰 방출
+// 랜덤 크리 모드용 확률 스케일 헬퍼
+// - 랜덤 ON: Math.random() < p 이면 1, 아니면 0 (주사위)
+// - 랜덤 OFF: p 그대로 반환 (기댓값)
+function probScale(p) {
+  if (CFG.randomCrit) return (Math.random() < p) ? 1 : 0;
+  return p;
+}
+// 여러 번 반복하는 확률 카운트 (예: hits×crEff 기댓값 = 실제 crit 횟수)
+function randomTries(tries, p) {
+  if (CFG.randomCrit) {
+    let cnt = 0;
+    for (let i = 0; i < tries; i++) if (Math.random() < p) cnt++;
+    return cnt;
+  }
+  return tries * p; // 기댓값
+}
+
+// ======================== crit 트리거 ========================
+// 풍뢰/뇌정: 버프 활성 중 매 캐스트 시 crit 마다 천뢰/낙뢰 방출
+// - 기댓값 모드: crit 확률만큼 스케일 피해
+// - 랜덤 모드: 이번 cast 의 실제 crit 횟수만큼 full 피해 × N회
 function tickCritTriggers(state) {
-  const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
   const activeKeys = new Set(state.buffs.filter(b => b.endT > state.t).map(b => b.key));
-  // 청명·풍뢰 [풍뢰+천적 max]: crit 시 16+12=28% 물리 천뢰 (천적 계수 +12% 덧셈), 최대 14회
-  if (state.famSlots.청명 && activeKeys.has('청명풍뢰_풍뢰')) {
-    if ((state.풍뢰남은 || 0) > 0) {
-      const base = 16 + 12;
+  // 청명·풍뢰 [풍뢰+천적 max]: crit 시 16+12=28% 물리 천뢰, 최대 14회
+  if (state.famSlots.청명 && activeKeys.has('청명풍뢰_풍뢰') && (state.풍뢰남은 || 0) > 0) {
+    const base = 16 + 12;
+    if (CFG.randomCrit) {
+      const trigCount = Math.min(state._castCritCount || 0, state.풍뢰남은);
+      if (trigCount > 0) {
+        state.풍뢰남은 = Math.max(0, state.풍뢰남은 - trigCount);
+        for (let i = 0; i < trigCount; i++) {
+          record(state, dealDamage(state, base, { type: '천뢰' }), '풍뢰/뇌정(crit)');
+        }
+      }
+    } else {
+      const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
       record(state, dealDamage(state, base * crEff, { type: '천뢰' }), '풍뢰/뇌정(crit)');
       state.풍뢰남은 = Math.max(0, state.풍뢰남은 - crEff);
     }
   }
-  // 오뢰·용음 [뇌정+어뢰 max]: crit 시 15% 술법 낙뢰, 최대 12회 (6+어뢰6)
-  if (state.famSlots.오뢰 && activeKeys.has('오뢰용음_뇌정')) {
-    if ((state.뇌정남은 || 0) > 0) {
+  // 오뢰·용음 [뇌정+어뢰 max]: crit 시 15% 술법 낙뢰, 최대 12회
+  if (state.famSlots.오뢰 && activeKeys.has('오뢰용음_뇌정') && (state.뇌정남은 || 0) > 0) {
+    if (CFG.randomCrit) {
+      const trigCount = Math.min(state._castCritCount || 0, state.뇌정남은);
+      if (trigCount > 0) {
+        state.뇌정남은 = Math.max(0, state.뇌정남은 - trigCount);
+        for (let i = 0; i < trigCount; i++) {
+          record(state, dealDamage(state, 15, { type: '낙뢰' }), '풍뢰/뇌정(crit)');
+        }
+      }
+    } else {
+      const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
       record(state, dealDamage(state, 15 * crEff, { type: '낙뢰' }), '풍뢰/뇌정(crit)');
       state.뇌정남은 = Math.max(0, state.뇌정남은 - crEff);
     }
@@ -630,6 +682,11 @@ function dealDamage(state, base, opts = {}) {
     const roll = Math.random() * 100;
     isCrit = roll < cr;
     cMult = isCrit ? cd / 100 : 1;
+    // cast별 crit 누적 (유뢰법체/순요/풍뢰/뇌정 등 다운스트림 트리거용)
+    if (isCrit) {
+      state._castAnyCrit = true;
+      state._castCritCount = (state._castCritCount || 0) + 1;
+    }
   } else {
     cMult = critMult(cr, cd);
   }
@@ -658,7 +715,9 @@ function dealDamage(state, base, opts = {}) {
     finalPct += ncFinalDmg;
     if (state.catSlots.뇌전 >= 4) {
       const crEff = Math.min(cr, 100) / 100;
-      유뢰법체Final = crEff * CFG.유뢰법체_계열4개_최종피해; // crit 기댓값 × 20
+      // 랜덤 모드: isCrit 확정 기반 (crit 나면 full 20%, 아니면 0)
+      // 기댓값 모드: crit 확률 × 20% 스케일
+      유뢰법체Final = (CFG.randomCrit ? (isCrit ? 1 : 0) : crEff) * CFG.유뢰법체_계열4개_최종피해;
       finalPct += 유뢰법체Final;
     }
     if (state.catSlots.화염 >= 4) {
@@ -1282,15 +1341,16 @@ SK['균천·현봉'] = {
 SK['균천·파월'] = {
   fam: '균천', cat: '영검', main: 225,
   cast(s, slots) {
+    // [파월] 신통 시전 시 검세 +1 + atk 15% 5초 (최대 4회 발동)
     검세획득_균천(s, slots, 1);
-    // [파월] atk 15% 5초 max 4 (max tier)
     applyBuff(s, '균천파월_파월', { atk: 15 }, 5, 4);
     // [귀진] def-20% 10s (max tier)
     applyBuff(s, '균천파월_귀진', { defDebuff: 20 }, 10);
     // 본 신통 (술법 일반)
     record(s, dealDamage(s, 225));
-    // [여명] 100% 호무 추가 (max tier)
+    // [여명] 100% 호무 추가 + 검세 +1 (max tier)
     record(s, dealDamage(s, 100, { noSkillMult: true, type: '호무' }), '여명(호무)');
+    검세획득_균천(s, slots, 1);
     // [귀진] 60% 호무 추가 (max tier)
     record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '귀진(호무)');
     // [제월] 천검 즉시 + atk 26% 5초 (max tier)
@@ -2073,17 +2133,23 @@ SK['오뢰·호후'] = {
     const hits = SKILL_HITS['오뢰·호후'] || 3;  // 3명 광역
     // [뇌신] 낙뢰 35% 기본 1회 + 본 신통 치명타 발동마다 추가 1회 (최대 3회 추가)
     낙뢰발동(s, slots, 35);
-    // 추가 낙뢰: hits × crEff 기댓값만큼 발동 (최대 3회)
-    const 뇌신추가 = Math.min(hits * crEff, 3);
+    // 추가 낙뢰: hits 번 crit roll 후 실제 crit 수만큼 발동 (최대 3회)
+    const 뇌신추가 = Math.min(randomTries(hits, crEff), 3);
     if (뇌신추가 > 0) 낙뢰발동(s, slots, 35 * 뇌신추가);
     // [파군] 낙뢰 40% (max tier)
     낙뢰발동(s, slots, 40);
     // [성류] 본 신통으로 치명타 2회 이상 시 낙뢰 200% 술법 추가
-    // hits 중 crit ≥ 2일 확률 = 1 - P(0 crit) - P(1 crit)
-    const pNone = Math.pow(1 - crEff, hits);
-    const pOne = hits * crEff * Math.pow(1 - crEff, hits - 1);
-    const p성류 = Math.max(0, 1 - pNone - pOne);
-    if (p성류 > 0) 낙뢰발동(s, slots, 200 * p성류);
+    if (CFG.randomCrit) {
+      // 랜덤 모드: hits 번 roll, 2회 이상 crit 났으면 발동
+      let critRolls = 0;
+      for (let i = 0; i < hits; i++) if (Math.random() < crEff) critRolls++;
+      if (critRolls >= 2) 낙뢰발동(s, slots, 200);
+    } else {
+      const pNone = Math.pow(1 - crEff, hits);
+      const pOne = hits * crEff * Math.pow(1 - crEff, hits - 1);
+      const p성류 = Math.max(0, 1 - pNone - pOne);
+      if (p성류 > 0) 낙뢰발동(s, slots, 200 * p성류);
+    }
     // 본 신통 (3명 광역)
     record(s, dealDamage(s, 135, { localFinalCR: 로컬FinalCR }));
   }
@@ -2123,8 +2189,11 @@ SK['신소·운록'] = {
     applyBuff(s, '신소운록_뇌동', { cd: 15, shintongOnly: true }, 10);
     신소소모(s);
     // [벽력] crit 시 atk 40% 10초 (max tier)
+    // - 기댓값: crEff × 40 스케일 buff
+    // - 랜덤: crit 확률로 주사위 굴려 full 40 또는 없음
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
-    if (crEff > 0) applyBuff(s, '신소운록_벽력', { atk: 40 * crEff }, 10);
+    const 벽력val = probScale(crEff) * 40;
+    if (벽력val > 0) applyBuff(s, '신소운록_벽력', { atk: 벽력val }, 10);
     // 본 신통 + [파군] 본 신통 cd +35 (localCD)
     record(s, dealDamage(s, 135, { localCD: 35 }));
     // [전철] 범위 내 3명 81% 물리 추가
@@ -2154,9 +2223,19 @@ SK['신소·환뢰'] = {
     applyBuff(s, '신소환뢰_구소', { atk: 15 }, 5); // [구소] atk 15% (max tier)
     // [뇌전] 본 신통 cd +35 (max tier)
     // [호탕] crit 시 방어력 50% 감소 (max tier)
+    // 기댓값: 4히트 중 ≥1 crit 확률 × 50 스케일
+    // 랜덤: 4번 roll, 1회 이상 crit 이면 full 50
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
-    const p호탕 = 1 - Math.pow(1 - crEff, 4);
-    if (p호탕 > 0) applyBuff(s, '신소환뢰_호탕', { defDebuff: 50 * p호탕 }, 10);
+    let 호탕val;
+    if (CFG.randomCrit) {
+      let anyCrit = false;
+      for (let i = 0; i < 4; i++) if (Math.random() < crEff) { anyCrit = true; break; }
+      호탕val = anyCrit ? 50 : 0;
+    } else {
+      const p호탕 = 1 - Math.pow(1 - crEff, 4);
+      호탕val = 50 * p호탕;
+    }
+    if (호탕val > 0) applyBuff(s, '신소환뢰_호탕', { defDebuff: 호탕val }, 10);
     record(s, dealDamage(s, 128 * MH[4], { localCD: 35 }));
     // [풍세] 다음 신통 최종 피해 +20% (max tier) — record 후 설정
     s.nextCast.finalDmg += 20;
@@ -2169,16 +2248,28 @@ SK['신소·청삭'] = {
     const 천위활성 = 신소상태(s);
     신소소모(s);
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
-    const p = crEff;
-    const q = 1 - p;
-    const P_ge1 = 1 - Math.pow(q, 6);
-    const P_ge2 = P_ge1 - 6 * p * Math.pow(q, 5);
-    const P_ge3 = P_ge2 - 15 * p * p * Math.pow(q, 4);
-    // [칙뢰] 3명 24% 물리 + 본 신통 crit마다 24% 추가 (최대 3회 추가)
-    const 칙뢰추가기댓값 = P_ge1 + P_ge2 + P_ge3;
-    const 칙뢰 = 24 * (1 + 칙뢰추가기댓값);
-    // [풍뢰] 6회 반사 중 crit 3회 이상 시 3명 110% 물리 추가
-    const 풍뢰 = 110 * P_ge3;
+    let 칙뢰, 풍뢰;
+    if (CFG.randomCrit) {
+      // 6회 반사 각각 crit roll → 실제 crit 수
+      let critCount = 0;
+      for (let i = 0; i < 6; i++) if (Math.random() < crEff) critCount++;
+      // [칙뢰] 기본 24% + crit 수만큼 24% 추가 (최대 3회 추가)
+      const 칙뢰추가 = Math.min(critCount, 3);
+      칙뢰 = 24 * (1 + 칙뢰추가);
+      // [풍뢰] crit 3회 이상 시 110%
+      풍뢰 = critCount >= 3 ? 110 : 0;
+    } else {
+      const p = crEff;
+      const q = 1 - p;
+      const P_ge1 = 1 - Math.pow(q, 6);
+      const P_ge2 = P_ge1 - 6 * p * Math.pow(q, 5);
+      const P_ge3 = P_ge2 - 15 * p * p * Math.pow(q, 4);
+      // [칙뢰] 3명 24% 물리 + 본 신통 crit마다 24% 추가 (최대 3회 추가)
+      const 칙뢰추가기댓값 = P_ge1 + P_ge2 + P_ge3;
+      칙뢰 = 24 * (1 + 칙뢰추가기댓값);
+      // [풍뢰] 6회 반사 중 crit 3회 이상 시 3명 110% 물리 추가
+      풍뢰 = 110 * P_ge3;
+    }
     // [천위] 신소 상태 시 3명 140% 물리 추가
     const 천위 = 천위활성 ? 140 : 0;
     // 본 신통 (6회 반사) + 위능 cd+35 localCD
@@ -2559,7 +2650,8 @@ const TREASURES = {
     name: '환음요탑',
     cast(s) {
       // 대상 호신강기 보유 시 본 법보 피해 +25%
-      const mult = 1 + 0.25 * CFG.호신강기대상확률;
+      // 기댓값: 확률 × 25 / 랜덤: 주사위 roll → 발동 시 full 25
+      const mult = 1 + 0.25 * probScale(CFG.호신강기대상확률);
       record(s, dealDamage(s, 100 * mult));
     }
   },
@@ -2582,8 +2674,9 @@ const TREASURES = {
   오염혁선: {
     name: '오염혁선',
     cast(s) {
-      // 자신 호신강기 보유 시 본 법보 피해 +15% (60억 풀이라 거의 항상 활성)
-      const mult = 1 + 0.15 * CFG.자신호신강기확률;
+      // 자신 호신강기 보유 시 본 법보 피해 +15%
+      // 기댓값: 확률 × 15 / 랜덤: 주사위 roll → 발동 시 full 15
+      const mult = 1 + 0.15 * probScale(CFG.자신호신강기확률);
       record(s, dealDamage(s, 100 * mult));
     }
   },
@@ -2778,6 +2871,21 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         TRACE(state, 'CST', `▶ ${sk.name}\n           [시전 전 자원] ${beforeRsrc}\n           [시전 전 대상] ${beforeDebuffs}`);
         state.castCounts = state.castCounts || {};
         state.castCounts[sk.name] = (state.castCounts[sk.name] || 0) + 1;
+        // === 이 cast 의 crit 추적 + 확률 roll 초기화 ===
+        state._castAnyCrit = false;
+        state._castCritCount = 0;
+        // 태현잔화: cast 시작 시 1회 roll (랜덤 모드에서만), 캐시해서 dealDamage 여러 번 호출돼도 동일 값
+        if (CFG.randomCrit) {
+          const 태현기댓값 = 불씨급수값(state, '태현잔화', [4, 6, 8]);
+          if (태현기댓값 > 0) {
+            // 기댓값이 절반이므로 원문 max 는 2× 기댓값 → 0 ~ 2*expected 로 roll
+            state._tahyunRoll = Math.random() * 2 * 태현기댓값;
+          } else {
+            state._tahyunRoll = null;
+          }
+        } else {
+          state._tahyunRoll = null;
+        }
         // === 시전시 per-cast 작열부여 트리거 (cast 전에 처리) ===
         // [열산·순일 치황] per-cast: 20s간 신통 시전마다 작열 1중첩 44% (max tier)
         state._치황이미처리 = false;
@@ -2929,12 +3037,24 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           }
         }
         state._검광이미처리 = false;
-        // [뇌격] 지속 crit 기댓값 트리거: 15s간 crit 시 4% 물리 × 최대 20회
+        // [뇌격] 지속 crit 트리거: 15s간 crit 시 8% 물리 × 최대 20회
         if (state.famSlots.옥추 && state.뇌격End > state.t && state.뇌격남은 > 0) {
-          const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-          state.뇌격남은 -= crEff;
-          state._currentSource = '뇌격(지속)';
-          record(state, dealDamage(state, 8 * crEff, { noSkillMult: true })); // max tier: 8%
+          if (CFG.randomCrit) {
+            // 랜덤 모드: 이번 cast에서 실제 발생한 crit 횟수만큼 발동 (남은 제한 내)
+            const trigCount = Math.min(state._castCritCount || 0, state.뇌격남은);
+            if (trigCount > 0) {
+              state.뇌격남은 -= trigCount;
+              state._currentSource = '뇌격(지속)';
+              for (let i = 0; i < trigCount; i++) {
+                record(state, dealDamage(state, 8, { noSkillMult: true }));
+              }
+            }
+          } else {
+            const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
+            state.뇌격남은 -= crEff;
+            state._currentSource = '뇌격(지속)';
+            record(state, dealDamage(state, 8 * crEff, { noSkillMult: true }));
+          }
         }
         // 백족 공통 트리거 (살혼은 사해 보유 시 모든 신통 명중에서 발동)
         state._currentSource = '살혼';
@@ -2979,12 +3099,18 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // 창은 투진 cast 시점부터 열림 → 투진 자신 cast도 창에 포함 (crit 발생 시 5초 buff 시작)
         // 순요End > 0 체크 필수 — 초기값 0 이면 아직 투진 cast 안 됨
         if (state.순요End > 0 && state.순요End > state.t - 0.1) {
-          const crEff순요 = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-          const hits순요 = SKILL_HITS[sk.name] || 1;
-          // 이번 cast에서 crit 1회 이상 확률
-          const p순요 = 1 - Math.pow(1 - crEff순요, hits순요);
-          if (p순요 > 0) {
-            applyBuff(state, '청명투진_순요', { atk: 25 * p순요 }, 5);
+          if (CFG.randomCrit) {
+            // 랜덤 모드: 이번 cast 에서 crit 1회 이상 났으면 full atk+25 buff 발동
+            if (state._castAnyCrit) {
+              applyBuff(state, '청명투진_순요', { atk: 25 }, 5);
+            }
+          } else {
+            const crEff순요 = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
+            const hits순요 = SKILL_HITS[sk.name] || 1;
+            const p순요 = 1 - Math.pow(1 - crEff순요, hits순요);
+            if (p순요 > 0) {
+              applyBuff(state, '청명투진_순요', { atk: 25 * p순요 }, 5);
+            }
           }
         }
         // 불씨 진마성화: 신통 1 cast마다 amp 스택 +1 (max 10). 3개→1%/스택, 6개→3%/스택

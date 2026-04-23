@@ -629,20 +629,33 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
           </div>
         </div>
         <TargetLawBodyPicker value={targetLawBody} onChange={setTargetLawBody} />
-        <label
-          className="flex items-center gap-2 text-sm text-slate-300 cursor-help"
-          title="체크 시 매 cast 마다 치명타 여부를 주사위로 굴립니다 (실전 변동성 체험용). 체크 안 하면 치명타율에 따라 평균값으로 계산합니다 (기본, 결과 결정적)."
-        >
-          <input
-            type="checkbox"
-            checked={randomCrit}
-            onChange={(e) => setRandomCrit(e.target.checked)}
-          />
-          🎲 랜덤 크리 모드
-          <span className="text-[10px] text-slate-500 ml-1">
-            ※ 체크: 매 cast 치명타 주사위 굴림 · 기본: 치명타율대로 평균 계산 (결정적)
-          </span>
-        </label>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">확률 계산 방식</label>
+          <div className="flex gap-1">
+            {[
+              { key: false, label: '📊 기댓값 (기본)', hint: '모든 확률 기반 효과 (치명타, 태현잔화 랜덤 inc, 유뢰법체 crit 조건, 순요/풍뢰/뇌정/뇌격 crit 트리거, 뇌신·성류·호탕·칙뢰·풍뢰 다중 확률, 벽력, 환음요탑/오염혁선 호신강기 확률 등) 를 확률 × 값 스케일로 계산. 결정적이라 빌드 비교에 적합.' },
+              { key: true, label: '🎲 랜덤 시행', hint: '모든 확률 기반 효과를 실제 주사위 (Math.random) 로 roll 하여 발동 여부 결정. 매 실행마다 결과가 달라져 실전 변동성 체감 가능.' },
+            ].map((o) => (
+              <button
+                key={String(o.key)}
+                onClick={() => setRandomCrit(o.key)}
+                title={o.hint}
+                className={`px-3 py-1.5 rounded text-sm ${
+                  randomCrit === o.key
+                    ? (o.key === false ? 'bg-emerald-500 text-slate-950 font-bold' : 'bg-amber-500 text-slate-950 font-bold')
+                    : 'bg-slate-700'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+            {randomCrit
+              ? '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 주사위로 roll. 매 실행마다 다른 값.'
+              : '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 기댓값으로 스케일 계산. 결정적 (형혹 60% 폭파만 예외로 항상 랜덤).'}
+          </div>
+        </div>
       </section>
 
       {/* 시뮬 실행 버튼 (결과/로그 위) */}

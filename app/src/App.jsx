@@ -41,7 +41,8 @@ export default function App() {
             </div>
             <div>
               ※ 모든 수치는 <span className="text-slate-400">신통 최대 강화 · 공격력 1.6억 · 치명타율 30% · 치명타 배율 200%</span>
-              {' '}기준의 이론값이며, 기댓값 모드(치명타율대로 평균 계산)를 기본으로 합니다.
+              {' '}기준의 이론값이며, 기본은 <span className="text-slate-400">기댓값 모드</span>
+              {' '}(모든 확률 기반 효과 — 치명타·태현잔화·유뢰법체 조건·crit 트리거류 등 — 을 확률 × 값으로 스케일 계산) 입니다.
             </div>
             <div className="pt-2 text-[10px] text-slate-500 leading-relaxed border-t border-slate-800 mt-2">
               게임명 <span className="text-slate-300">"검선귀환"</span>, 신통·유파·법보 명칭, 아이콘, 스킬 설명 및
