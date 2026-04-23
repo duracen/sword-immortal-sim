@@ -14,26 +14,15 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
   function toggleSkill(fam, name) {
     const famCur = skillSel[fam] || [];
     const isSelected = famCur.includes(name);
+    let nextFam;
     if (isSelected) {
-      onChange({ ...skillSel, [fam]: famCur.filter((n) => n !== name) });
-      return;
+      nextFam = famCur.filter((n) => n !== name);
+    } else {
+      if (totalSelected >= maxTotal) return;
+      if (famCur.length >= 4) return;
+      nextFam = [...famCur, name];
     }
-    // 해당 유파가 4개 꽉 찼으면 새 선택 불가 (유파당 최대 4)
-    if (famCur.length >= 4) return;
-    // 총 6개 꽉 찬 경우: 가장 먼저 선택된 신통 1개 자동 제거 후 새 것 추가 (swap)
-    let nextSel = { ...skillSel };
-    if (totalSelected >= maxTotal) {
-      // 선택 순서대로 flatten 해서 첫 번째 찾기
-      const allSelectedOrdered = Object.entries(skillSel).flatMap(([f, arr]) =>
-        (arr || []).map((n) => ({ fam: f, name: n }))
-      );
-      const oldest = allSelectedOrdered[0];
-      if (oldest) {
-        nextSel = { ...nextSel, [oldest.fam]: (nextSel[oldest.fam] || []).filter((n) => n !== oldest.name) };
-      }
-    }
-    nextSel = { ...nextSel, [fam]: [...(nextSel[fam] || []), name] };
-    onChange(nextSel);
+    onChange({ ...skillSel, [fam]: nextFam });
   }
 
   // 유파 전체 선택 / 해제 — 해당 유파의 4개 신통을 잔여 슬롯까지 채움
@@ -159,8 +148,8 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                         const order = on ? Object.values(skillSel).flat().indexOf(name) : -1;
                         const opts = SKILL_OPTIONS[name] || null;
                         const hasOpts = opts && Object.keys(opts).length > 0;
-                        // 유파당 4개 꽉 찼을 때만 disable (총 6개 꽉 차도 swap 으로 대체 가능)
-                        const disabled = !on && chosen.length >= 4;
+                        const canAdd = !on && totalSelected < maxTotal && chosen.length < 4;
+                        const disabled = !on && !canAdd;
                         // 신통 이름에서 유파부분 제거 ("복룡·절화" → "절화")
                         const shortName = name.includes('·') ? name.split('·')[1] : name;
                         return (

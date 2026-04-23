@@ -513,6 +513,8 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   );
 
   const canRun = totalSkillCount === 6 && !validationErr && treasures.length === 3;
+  // 신통 6개만 선택해도 시전 순서 편집 가능 (법보는 나중에 추가)
+  const canEditOrder = totalSkillCount === 6 && !validationErr;
 
   const selectedSkills = useMemo(() => {
     const out = [];
@@ -528,10 +530,13 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   );
   const lastSigRef = useRef(null);
   useEffect(() => {
-    if (!canRun) return;
+    if (!canEditOrder) return;
     if (lastSigRef.current === orderSig) return; // 같은 빌드·법보 조합이면 사용자가 편집한 순서 유지
     lastSigRef.current = orderSig;
-    const ord = defaultOrder();
+    // 신통 6개 + 법보 선택 수만큼의 순서 배열 생성 (법보 부족해도 신통만으로 표시)
+    const ord = [];
+    for (let i = 0; i < 6; i++) ord.push({ kind: 'skill', idx: i });
+    for (let i = 0; i < treasures.length; i++) ord.push({ kind: 'treasure', idx: i });
     const decorated = ord.map((it) => {
       if (it.kind === 'skill') {
         const s = selectedSkills[it.idx];
@@ -540,7 +545,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       return { ...it, label: treasures[it.idx], cat: '법보' };
     });
     setOrder(decorated);
-  }, [canRun, orderSig, selectedSkills, treasures]);
+  }, [canEditOrder, orderSig, selectedSkills, treasures]);
 
   const { result, running, run } = useSimulation();
 
@@ -604,7 +609,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <BulssiPicker value={불씨} onChange={set불씨} />
       </section>
 
-      {canRun && order && (
+      {canEditOrder && order && (
         <section>
           <h2 className="text-lg font-bold mb-3 text-amber-400">4. 시전 순서 (드래그로 변경)</h2>
           <OrderEditor items={order} onChange={setOrder} />
