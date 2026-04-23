@@ -258,18 +258,20 @@ export default function CastTimelineSummary({ events }) {
   for (let t = 0; t <= maxT; t += 5) ticks.push(t);
 
   return (
-    <div className="bg-slate-900 rounded-xl p-4 border border-slate-700">
+    <div className="bg-slate-900 rounded-xl p-2 sm:p-4 border border-slate-700">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span>🎞️</span>
-          <span className="font-bold text-slate-100">시전 타임라인</span>
-          <span className="text-xs text-slate-500">
+          <span className="font-bold text-slate-100 text-sm sm:text-base">시전 타임라인</span>
+          <span className="text-[10px] sm:text-xs text-slate-500">
             {casts.length}회 시전 · {buffs.length}개 버프
           </span>
         </div>
       </div>
 
-      <div className="relative bg-slate-950 rounded-lg p-3">
+      {/* 모바일에서 가로 스크롤 가능하도록 overflow-x-auto + min-width */}
+      <div className="overflow-x-auto -mx-2 sm:mx-0">
+        <div className="relative bg-slate-950 rounded-lg p-3 min-w-[760px] mx-2 sm:mx-0">
         {/* 시간축 라벨 */}
         <div className="relative h-5 mb-1 border-b border-slate-700">
           {ticks.map((t) => (
@@ -683,6 +685,7 @@ export default function CastTimelineSummary({ events }) {
             </div>
           );
         })()}
+        </div>
       </div>
 
       <div className="text-[10px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">

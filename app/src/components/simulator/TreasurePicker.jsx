@@ -45,7 +45,7 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
                 )}
               </button>
               {desc && (
-                <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-72 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
+                <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-72 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
                   <div className="text-xs font-bold text-yellow-300 mb-1">📿 {tr}</div>
                   <div className="text-[11px] text-slate-200 leading-relaxed">{desc}</div>
                 </div>

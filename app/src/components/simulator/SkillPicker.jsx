@@ -57,7 +57,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
             <div className="relative group/cat inline-block mb-1.5 cursor-help">
               <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
               {CAT_LAW_BODY[cat] && (
-                <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
+                <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
                   <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
                   <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
                   <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
@@ -91,7 +91,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                         </span>
                       )}
                       {FAMILY_EFFECTS[fam] && (
-                        <div className="hidden group-hover/fam:block absolute left-0 top-full mt-1 z-[200] w-96 p-3 bg-slate-950 border border-blue-600 rounded-lg shadow-xl pointer-events-none">
+                        <div className="hidden group-hover/fam:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-blue-600 rounded-lg shadow-xl pointer-events-none">
                           <div className="text-xs font-bold text-blue-300 mb-1">
                             🏛 {fam} 유파 효과
                             {FAMILY_TIER[fam] && <span className="text-[10px] text-slate-400 font-normal ml-2">({FAMILY_TIER[fam]})</span>}
@@ -138,7 +138,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                               </span>
                             </button>
                             {hasOpts && (
-                              <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
+                              <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
                                 <div className="text-xs font-bold text-yellow-300 mb-2">
                                   ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
                                 </div>

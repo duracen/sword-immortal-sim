@@ -4,15 +4,15 @@ export default function App() {
   return (
     <div className="min-h-full flex flex-col">
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center gap-6">
-          <h1 className="text-xl font-bold text-amber-400">검선귀환 신통 시뮬레이터</h1>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 flex items-center gap-6">
+          <h1 className="text-base sm:text-xl font-bold text-amber-400">검선귀환 신통 시뮬레이터</h1>
         </div>
       </header>
-      <main className="flex-1 max-w-7xl w-full mx-auto px-6 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6">
         <SimulatorPage />
       </main>
       <footer className="border-t border-slate-800 bg-slate-900/60 mt-8">
-        <div className="max-w-7xl mx-auto px-6 py-6 text-xs text-slate-400 leading-relaxed">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-6 text-xs text-slate-400 leading-relaxed">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
               <span className="text-amber-400 font-bold">검선귀환 신통 시뮬레이터</span>
