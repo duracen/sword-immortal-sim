@@ -264,10 +264,10 @@ export default function DamageBreakdown({ dmgEvents }) {
                 <span className="text-slate-100 font-medium truncate min-w-0 flex-1 mr-2">
                   <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" style={{ background: baseColor }} />
                   {g.parent}
-                  <span className="text-slate-500 ml-1.5 text-[11px]">({g.segs.length}항목)</span>
+                  <span className="text-slate-300 ml-1.5 text-[11px]">({g.segs.length}항목)</span>
                 </span>
                 <span className="text-amber-300 font-semibold shrink-0">{formatKR(g.total)}</span>
-                <span className="text-slate-500 ml-1 shrink-0 text-[11px]">{g.pct.toFixed(1)}%</span>
+                <span className="text-slate-300 ml-1 shrink-0 text-[11px]">{g.pct.toFixed(1)}%</span>
               </div>
               {/* 누적 바 — 자식 세그먼트별 색 다름 */}
               <div className="bg-slate-900 rounded h-3 sm:h-3.5 overflow-hidden flex" style={{ width: `${widthPct}%` }}>
@@ -321,10 +321,10 @@ export default function DamageBreakdown({ dmgEvents }) {
               {flat.map((d, i) => (
                 <Fragment key={`${d.parent}|${i}`}>
                   <tr className="border-b border-slate-800/70 hover:bg-slate-900/40">
-                    <td className="py-1 px-2 text-slate-500">{i + 1}</td>
+                    <td className="py-1 px-2 text-slate-300">{i + 1}</td>
                     <td className="py-1 px-2 text-slate-200 font-medium">
                       {d.parent}
-                      <span className="text-slate-500 ml-1.5 text-[11px]">({d.segs.length}항목)</span>
+                      <span className="text-slate-300 ml-1.5 text-[11px]">({d.segs.length}항목)</span>
                     </td>
                     <td className="py-1 px-2 text-right text-amber-300 font-semibold">{formatKR(d.total)}</td>
                     <td className="py-1 px-2 text-right text-slate-400">{d.pct.toFixed(2)}%</td>
@@ -337,9 +337,9 @@ export default function DamageBreakdown({ dmgEvents }) {
                       <td colSpan={5} className="py-1 px-2 text-[11px] text-slate-400 font-mono">
                         {d.segs.map((seg) => (
                           <span key={seg.child} className="mr-3 inline-block">
-                            <span className="text-slate-500">{seg.child}</span>{' '}
+                            <span className="text-slate-300">{seg.child}</span>{' '}
                             <span className="text-slate-300">{formatKR(seg.value)}</span>{' '}
-                            <span className="text-slate-600">({seg.count}회 · {seg.pct.toFixed(1)}%)</span>
+                            <span className="text-slate-400">({seg.count}회 · {seg.pct.toFixed(1)}%)</span>
                           </span>
                         ))}
                       </td>

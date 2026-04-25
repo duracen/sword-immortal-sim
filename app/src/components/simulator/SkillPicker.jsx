@@ -62,7 +62,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
           {totalSelected} / {maxTotal} 선택
         </span>
         {totalSelected !== maxTotal && (
-          <span className="text-xs text-slate-500">신통을 총 {maxTotal}개 선택해주세요</span>
+          <span className="text-xs text-slate-300">신통을 총 {maxTotal}개 선택해주세요</span>
         )}
         {totalSelected > 0 && (
           <button
@@ -162,7 +162,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                                 on
                                   ? 'bg-amber-500/20 border-amber-500 text-amber-200'
                                   : disabled
-                                    ? 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed'
+                                    ? 'bg-slate-900/40 border-slate-800 text-slate-400 cursor-not-allowed'
                                     : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
                               }`}
                             >
@@ -203,7 +203,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                           ? 'bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60'
                           : canAddSome
                             ? 'bg-slate-700/60 border-slate-600 text-slate-300 hover:bg-slate-700'
-                            : 'bg-slate-900/40 border-slate-800 text-slate-600 cursor-not-allowed'
+                            : 'bg-slate-900/40 border-slate-800 text-slate-400 cursor-not-allowed'
                       }`}
                     >
                       {allSelected ? '해제' : '전체'}

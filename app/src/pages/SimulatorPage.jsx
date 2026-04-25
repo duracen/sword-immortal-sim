@@ -29,7 +29,7 @@ function TargetLawBodyPicker({ value, onChange }) {
   return (
     <div>
       <label className="block text-xs text-slate-400 mb-1">
-        상대 법체 <span className="text-slate-500">(내가 상성 우위면 입히는 피해 +20%)</span>
+        상대 법체 <span className="text-slate-300">(내가 상성 우위면 입히는 피해 +20%)</span>
       </label>
       <div className="flex gap-1 flex-wrap">
         {TARGET_LAW_OPTIONS.map((o) => (
@@ -191,7 +191,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
               }}
             />
             <span className="font-semibold">법보 위치 고정</span>
-            <span className="text-[11px] text-slate-500">
+            <span className="text-[11px] text-slate-300">
               (체크 시 법보는 7/8/9번 위치만 사용 · 법보 순서는 전수탐색 → 신통 6! × 법보 3! = 4,320 / 미고정 9!=362,880 대비 84배 빠름)
             </span>
           </label>
@@ -227,7 +227,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           <TargetLawBodyPicker value={targetLawBody} onChange={setTargetLawBody} />
           <div>
             <label className="block text-xs text-slate-400 mb-1">
-              내 법체 활성화 조건 <span className="text-slate-500">(4슬롯 이상일 때 법체 효과 발동)</span>
+              내 법체 활성화 조건 <span className="text-slate-300">(4슬롯 이상일 때 법체 효과 발동)</span>
             </label>
             <div className="flex gap-1 flex-wrap">
               {[
@@ -385,7 +385,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                       </span>
                     </div>
                     {sp.skillLabel && (
-                      <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">
+                      <div className="text-[11px] text-slate-300 font-mono mt-0.5 truncate">
                         {sp.skillLabel}
                       </div>
                     )}
@@ -395,7 +395,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                     {/* 순서 전수탐색 진행률 (정밀 모드, 작은 탐색에서만 노출) */}
                     {sp.orderTotal > 0 && (
                       <div className="mt-0.5">
-                        <div className="flex justify-between text-[11px] text-slate-500 font-mono">
+                        <div className="flex justify-between text-[11px] text-slate-300 font-mono">
                           <span>순서 전수탐색</span>
                           <span>
                             {sp.orderDone.toLocaleString()} / {sp.orderTotal.toLocaleString()} ({orderPct.toFixed(1)}%)
@@ -701,7 +701,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
               </button>
             ))}
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+          <div className="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
             {randomCrit
               ? '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 주사위로 roll. 매 실행마다 다른 값.'
               : '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 기댓값으로 스케일 계산. 결정적 (형혹 60% 폭파만 예외로 항상 랜덤).'}

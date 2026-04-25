@@ -72,7 +72,7 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-slate-300">
           신통 {skills.map((s) => s.name).join(', ')} / 법보 {treasures.join(', ')}
           {randomCrit && <span className="ml-2 text-amber-400">· 🎲 랜덤 크리</span>}
         </span>

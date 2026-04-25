@@ -27,7 +27,7 @@ export default function ResultSummary({ result, highlight }) {
           >
             <div className="text-sm text-slate-400">{x.label} 누적</div>
             <div className={`text-2xl font-bold ${x.color}`}>{formatKR(x.v)}</div>
-            <div className="text-xs text-slate-500 mt-1">{formatFull(x.v)}</div>
+            <div className="text-xs text-slate-300 mt-1">{formatFull(x.v)}</div>
           </div>
         );
       })}

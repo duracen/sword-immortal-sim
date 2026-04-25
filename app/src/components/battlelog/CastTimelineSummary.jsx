@@ -294,7 +294,7 @@ export default function CastTimelineSummary({ events }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span>🎞️</span>
           <span className="font-bold text-slate-100 text-sm sm:text-base">시전 타임라인</span>
-          <span className="text-[11px] sm:text-xs text-slate-500">
+          <span className="text-[11px] sm:text-xs text-slate-300">
             {casts.length}회 시전 · {buffs.length}개 버프
           </span>
         </div>
@@ -308,7 +308,7 @@ export default function CastTimelineSummary({ events }) {
           {ticks.map((t) => (
             <div
               key={t}
-              className="absolute text-[11px] text-slate-500 font-mono"
+              className="absolute text-[11px] text-slate-300 font-mono"
               style={{ left: `${(t / maxT) * 100}%`, transform: 'translateX(-50%)' }}
             >
               {t}s
@@ -346,7 +346,7 @@ export default function CastTimelineSummary({ events }) {
                 style={{ left: `${leftPct}%` }}
               >
                 <div className={`w-2 h-2 rounded-full ${color} ring-2 ring-slate-900`} />
-                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                <div className="text-[10px] text-slate-300 font-mono mt-0.5">
                   {c.t.toFixed(0)}s
                 </div>
                 <div className="text-[11px] text-slate-200 mt-0.5 whitespace-nowrap">
@@ -408,7 +408,7 @@ export default function CastTimelineSummary({ events }) {
             className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
             style={{ height: `${Math.max(1, triggerLaneCount) * 22 + 8}px` }}
           >
-            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
+            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
               유파 효과
             </div>
             {triggers.map((tg, i) => {
@@ -488,7 +488,7 @@ export default function CastTimelineSummary({ events }) {
             className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
             style={{ height: `${Math.max(1, stackLaneCount) * 20 + 8}px` }}
           >
-            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
+            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
               자원 스택
             </div>
             {stacks.map((s, i) => {
@@ -529,7 +529,7 @@ export default function CastTimelineSummary({ events }) {
                       </div>
                     )}
                     {trajectory && (
-                      <div className="text-[11px] text-slate-500 font-mono leading-tight mt-1 border-t border-slate-800 pt-1">
+                      <div className="text-[11px] text-slate-300 font-mono leading-tight mt-1 border-t border-slate-800 pt-1">
                         📈 {trajectory}
                       </div>
                     )}
@@ -546,7 +546,7 @@ export default function CastTimelineSummary({ events }) {
             className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
             style={{ height: `${Math.max(1, bulssiLaneCount) * 20 + 8}px` }}
           >
-            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
+            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
               불씨
             </div>
             {bulssi.map((b, i) => {
@@ -588,7 +588,7 @@ export default function CastTimelineSummary({ events }) {
                         {lookup.desc}
                       </div>
                     ) : (
-                      <div className="text-[11px] text-slate-500 italic">불씨 설명 없음</div>
+                      <div className="text-[11px] text-slate-300 italic">불씨 설명 없음</div>
                     )}
                   </div>
                 </div>
@@ -602,7 +602,7 @@ export default function CastTimelineSummary({ events }) {
           className="relative mb-1 border-t border-dashed border-slate-700 pt-2"
           style={{ height: `${Math.max(1, laneCount) * 20 + 8}px` }}
         >
-          <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
+          <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
             버프
           </div>
           {buffs.map((b, i) => {
@@ -648,7 +648,7 @@ export default function CastTimelineSummary({ events }) {
                       {lookup.desc}
                     </div>
                   ) : (
-                    <div className="text-[11px] text-slate-500 italic">옵션 설명 없음</div>
+                    <div className="text-[11px] text-slate-300 italic">옵션 설명 없음</div>
                   )}
                 </div>
               </div>
@@ -673,7 +673,7 @@ export default function CastTimelineSummary({ events }) {
           ];
           return (
             <div className="relative mt-2 border-t border-dashed border-slate-700 pt-2" style={{ minHeight: '220px' }}>
-              <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
+              <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
                 활성 버프 수치 (시전 직후)
               </div>
               {casts.map((c, i) => {
@@ -721,7 +721,7 @@ export default function CastTimelineSummary({ events }) {
         </div>
       </div>
 
-      <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">
+      <div className="text-[11px] text-slate-300 mt-2 flex items-center gap-3 flex-wrap">
         <span>🔵 영검</span>
         <span>🔴 화염</span>
         <span>🟣 뇌전</span>

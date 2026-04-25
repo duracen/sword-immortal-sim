@@ -92,7 +92,7 @@ export default function WinnerPodium({ results, sortBy }) {
               )}
               <div className="text-xs text-slate-400 mb-1">법보: {r.treasures}</div>
               {r.order && (
-                <div className="text-[11px] text-slate-500 font-mono mb-2 leading-tight">시전: {r.order}</div>
+                <div className="text-[11px] text-slate-300 font-mono mb-2 leading-tight">시전: {r.order}</div>
               )}
               <div className="text-amber-300 text-lg font-bold">
                 {formatKR(r[key])}{' '}

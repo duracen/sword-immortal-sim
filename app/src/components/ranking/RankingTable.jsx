@@ -44,14 +44,14 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                     </span>
                     {r.label}
                     {r.orderRank && r.orderRank > 1 && (
-                      <span className="ml-2 text-[11px] text-slate-500">(순서 #{r.orderRank})</span>
+                      <span className="ml-2 text-[11px] text-slate-300">(순서 #{r.orderRank})</span>
                     )}
                   </div>
                   {r.skillLabel && (
-                    <div className="text-[11px] text-slate-500 font-mono mt-0.5">{r.skillLabel}</div>
+                    <div className="text-[11px] text-slate-300 font-mono mt-0.5">{r.skillLabel}</div>
                   )}
                   {r.order && (
-                    <div className="text-[11px] text-slate-600 font-mono mt-0.5 leading-tight">시전: {r.order}</div>
+                    <div className="text-[11px] text-slate-400 font-mono mt-0.5 leading-tight">시전: {r.order}</div>
                   )}
                 </td>
                 <td className="py-2 px-2 text-slate-400 text-xs">{r.treasures}</td>
@@ -89,15 +89,15 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
               </span>
               <span className="font-medium text-slate-100 text-sm break-keep">{r.label}</span>
               {r.orderRank && r.orderRank > 1 && (
-                <span className="text-[10px] text-slate-500">(#{r.orderRank})</span>
+                <span className="text-[10px] text-slate-300">(#{r.orderRank})</span>
               )}
             </div>
             {r.skillLabel && (
               <div className="text-[11px] text-slate-400 font-mono mb-1 leading-tight">{r.skillLabel}</div>
             )}
-            <div className="text-[11px] text-slate-500 mb-1">법보: {r.treasures}</div>
+            <div className="text-[11px] text-slate-300 mb-1">법보: {r.treasures}</div>
             {r.order && (
-              <div className="text-[10px] text-slate-600 font-mono leading-tight mb-2">시전: {r.order}</div>
+              <div className="text-[10px] text-slate-400 font-mono leading-tight mb-2">시전: {r.order}</div>
             )}
             {/* 시간별 누적 — 가로 4분할 */}
             <div className="grid grid-cols-4 gap-1 mb-2">
@@ -108,7 +108,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                 { lbl: '180초', v: r.s180, on: sortBy === '180' },
               ].map((x) => (
                 <div key={x.lbl} className={`rounded px-1 py-0.5 text-center min-w-0 ${x.on ? 'bg-amber-500/20 border border-amber-400/50' : 'bg-slate-900/50'}`}>
-                  <div className="text-[8px] text-slate-500">{x.lbl}</div>
+                  <div className="text-[8px] text-slate-300">{x.lbl}</div>
                   <div className={`text-[11px] font-bold truncate ${x.on ? 'text-amber-300' : 'text-slate-300'}`}>
                     {formatKR(x.v) || '-'}
                   </div>
@@ -128,7 +128,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
       </div>
 
       {sorted.length > limit && (
-        <div className="text-center text-xs text-slate-500 mt-3">
+        <div className="text-center text-xs text-slate-300 mt-3">
           상위 {limit}개만 표시 중 (전체 {sorted.length}개)
         </div>
       )}

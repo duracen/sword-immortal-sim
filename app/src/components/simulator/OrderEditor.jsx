@@ -36,7 +36,7 @@ export default function OrderEditor({ items, onChange }) {
             } ${dragIdx === i ? 'opacity-50' : ''}`}
           >
             <div className="flex items-center gap-1 mb-1">
-              <span className="text-slate-500 text-[11px]">#{i + 1}</span>
+              <span className="text-slate-300 text-[11px]">#{i + 1}</span>
               <span
                 className={`text-[11px] px-1 rounded ${
                   it.kind === 'skill' ? 'bg-slate-700 text-slate-300' : 'bg-amber-700 text-amber-100'
@@ -47,7 +47,7 @@ export default function OrderEditor({ items, onChange }) {
             </div>
             <span className="text-xs font-medium text-slate-100 text-center whitespace-nowrap">{it.label}</span>
           </div>
-          {i < items.length - 1 && <span className="text-slate-600 text-lg">→</span>}
+          {i < items.length - 1 && <span className="text-slate-400 text-lg">→</span>}
         </div>
       ))}
     </div>
