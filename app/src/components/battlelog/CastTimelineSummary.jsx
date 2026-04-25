@@ -38,14 +38,22 @@ function canonicalDisplayKey(rawKey) {
 
 // STK 메시지에서 자원명과 증감량 파싱
 function parseStkMsg(msg) {
-  // "작열 +1 [src] → 현재 3중첩..." 또는 "🔥작열 +1..."
-  let m = msg.match(/^🔥?([^\s+]+)\s*\+(\d+(?:\.\d+)?)/);
+  // 선두 이모지/심볼 제거 (🔥 ☠️ 💥 등)
+  const stripped = msg.replace(/^[^\p{Letter}\p{Number}]+/u, '');
+  // "💥격발 [강령] 독고 -2 (잔여 0.50) → 만고귀종..." — 격발은 자원 차감으로 처리
+  let m = stripped.match(/^격발\s*\[([^\]]+)\]\s*독고\s*-(\d+(?:\.\d+)?)/);
+  if (m) return { key: `독고·${m[1]}`, delta: -parseFloat(m[2]), refresh: false };
+  // "독고 +2.50 (요청 ...) → ..." — 4종 균등분포이므로 delta/4 씩 4개로 처리하지 않고 합계로 표시
+  m = stripped.match(/^독고\s*\+(\d+(?:\.\d+)?)/);
+  if (m) return { key: '독고', delta: parseFloat(m[1]), refresh: false };
+  // "작열 +1 [src] → 현재 3중첩..." 등 일반 +N 패턴
+  m = stripped.match(/^([^\s+]+)\s*\+(\d+(?:\.\d+)?)/);
   if (m) return { key: m[1], delta: parseFloat(m[2]), refresh: false };
   // "검세 1→2" / "검세 1→2 (TTL=20s reset)"
-  m = msg.match(/^([^\s]+)\s+(\d+(?:\.\d+)?)→(\d+(?:\.\d+)?)/);
+  m = stripped.match(/^([^\s]+)\s+(\d+(?:\.\d+)?)→(\d+(?:\.\d+)?)/);
   if (m) return { key: m[1], delta: parseFloat(m[3]) - parseFloat(m[2]), refresh: false };
   // "뇌인 4↻ (TTL=20s reset, 최대치 유지)" — 최대치 유지 중 TTL 갱신
-  m = msg.match(/^([^\s]+)\s+(\d+(?:\.\d+)?)↻/);
+  m = stripped.match(/^([^\s]+)\s+(\d+(?:\.\d+)?)↻/);
   if (m) return { key: m[1], delta: 0, refresh: true };
   return null;
 }

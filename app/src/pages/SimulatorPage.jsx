@@ -105,6 +105,17 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
     통명묘화: 0, 진무절화: 0, 태현잔화: 0, 유리현화: 0, 진마성화: 0,
   });
   const [selected, setSelected] = useState(null); // 로그 보기용
+  const battleLogRef = useRef(null);
+  // selected 변경 → BattleLogPanel 영역으로 스크롤
+  useEffect(() => {
+    if (selected && battleLogRef.current) {
+      // 약간의 지연 (BattleLogPanel 렌더링 완료 대기)
+      const t = setTimeout(() => {
+        battleLogRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [selected]);
   const { results, progress, subProgress, running, startTime, start, cancel, workerCount, error, phase } = useRanking();
 
   const sortBy = ['45', '60', '120', '180'][markerIdx];
@@ -398,16 +409,18 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           )}
 
           {selected && (
-            <BattleLogPanel
-              title={selected.label}
-              build={selected.build}
-              skills={selected.skills.map((n) => ({ name: n, fam: SK[n].fam }))}
-              treasures={selected.treasuresArr}
-              order={selected.orderArr}
-              targetLawBody={targetLawBody}
-              maxTime={MARKER_TIMES[markerIdx]}
-              onClose={() => setSelected(null)}
-            />
+            <div ref={battleLogRef}>
+              <BattleLogPanel
+                title={selected.label}
+                build={selected.build}
+                skills={selected.skills.map((n) => ({ name: n, fam: SK[n].fam }))}
+                treasures={selected.treasuresArr}
+                order={selected.orderArr}
+                targetLawBody={targetLawBody}
+                maxTime={MARKER_TIMES[markerIdx]}
+                onClose={() => setSelected(null)}
+              />
+            </div>
           )}
         </>
       )}

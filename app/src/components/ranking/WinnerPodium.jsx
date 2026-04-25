@@ -28,21 +28,21 @@ export default function WinnerPodium({ results, sortBy }) {
     <div className="space-y-4">
       {/* 1위 메인 카드 */}
       <div
-        className={`relative rounded-xl p-6 bg-gradient-to-br ${CAT_COLORS[winner.cat] || 'from-slate-700 to-slate-900'} border-2 border-amber-400 shadow-2xl shadow-amber-500/20`}
+        className={`relative rounded-xl p-4 sm:p-6 bg-gradient-to-br ${CAT_COLORS[winner.cat] || 'from-slate-700 to-slate-900'} border-2 border-amber-400 shadow-2xl shadow-amber-500/20`}
       >
-        <div className="absolute top-3 right-4 text-4xl">{MEDALS[0]}</div>
+        <div className="absolute top-3 right-4 text-3xl sm:text-4xl">{MEDALS[0]}</div>
         <div className="flex items-center gap-3 mb-3">
           <span className={`text-xs px-2 py-0.5 rounded text-white ${CAT_BADGE[winner.cat] || 'bg-slate-600'}`}>
             {winner.cat}
           </span>
           <span className="text-sm text-slate-200">최적 빌드</span>
         </div>
-        <div className="text-2xl font-bold text-white mb-1">{winner.label}</div>
+        <div className="text-lg sm:text-2xl font-bold text-white mb-1 break-keep">{winner.label}</div>
         {winner.skillLabel && (
           <div className="text-xs text-slate-100/70 font-mono mb-2">{winner.skillLabel}</div>
         )}
         <div className="text-sm text-slate-200 mb-3">법보: {winner.treasures}</div>
-        <div className="grid grid-cols-4 gap-3 mb-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3">
           {[
             { label: '45초', v: winner.s45, hl: sortBy === '45' },
             { label: '60초', v: winner.s60, hl: sortBy === '60' },
@@ -51,10 +51,10 @@ export default function WinnerPodium({ results, sortBy }) {
           ].map((x) => (
             <div
               key={x.label}
-              className={`rounded-lg p-3 ${x.hl ? 'bg-amber-500/30 border border-amber-300' : 'bg-black/30'}`}
+              className={`rounded-lg p-2 sm:p-3 min-w-0 ${x.hl ? 'bg-amber-500/30 border border-amber-300' : 'bg-black/30'}`}
             >
               <div className="text-xs text-slate-300">{x.label}</div>
-              <div className={`text-xl font-bold ${x.hl ? 'text-amber-200' : 'text-white'}`}>
+              <div className={`text-base sm:text-xl font-bold truncate ${x.hl ? 'text-amber-200' : 'text-white'}`}>
                 {formatKR(x.v)}
               </div>
             </div>

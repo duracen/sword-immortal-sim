@@ -228,6 +228,11 @@ function hpLowFactor(state) { return 1 - hpRatio(state); }
 // HP가 threshold 이하인지 (예: 0.60 = HP 60% 이하)
 function hpBelow(state, threshold) { return hpRatio(state) <= threshold; }
 
+// 유파 효과 활성 조건 — 해당 유파 신통 2개 이상 장착 시
+function famActive(state, fam) { return (state.famSlots[fam] || 0) >= 2; }
+// 활성 시 슬롯 개수, 비활성 시 0 — 슬롯 스케일링용
+function famActiveSlots(state, fam) { return famActive(state, fam) ? (state.famSlots[fam] || 0) : 0; }
+
 function sumBuffAtk(state) {
   let s = 0;
   for (const b of state.buffs) if (b.endT > state.t && b.atk) s += b.atk * (b.stackCount || 1);
@@ -246,8 +251,8 @@ function sumBuffCR(state, isShintong = true) {
     if (b.shintongOnly && !isShintong) continue;
     s += b.cr * (b.stackCount || 1);
   }
-  // 뇌인 스택: "1중첩당 20초 동안 신통 시전 시 치명타율 5% 증가" → 신통 전용
-  if (state.famSlots.청명 && isShintong) s += state.stacks.뇌인 * 5;
+  // 뇌인 스택: "1중첩당 20초 동안 신통 시전 시 치명타율 5% 증가" → 신통 전용 (청명 ≥2)
+  if (famActive(state, '청명') && isShintong) s += state.stacks.뇌인 * 5;
   // 공명 기본 효과 (뇌전 2+): "신통 시전 시 치명타율 +11%" → 신통 전용
   if ((state.catSlots.뇌전 || 0) >= 2 && isShintong) s += 11;
   return s;
@@ -282,20 +287,20 @@ function sumShintongInc(state) {
   for (const b of state.buffs) {
     if (b.endT > state.t && b.cat === 'inc' && b.dmgMult) s += b.dmgMult * (b.stackCount || 1);
   }
-  // 옥추 스택: 1%/스택
-  if (state.famSlots.옥추) s += state.stacks.옥추;
-  // 옥추 유파 slot×2.5% (옥추 보유 시)
-  if (state.famSlots.옥추 && state.stacks.옥추 > 0) s += state.famSlots.옥추 * 2.5;
-  // 신소 유파 slot×4% (신소 효과 보유 시)
-  if (state.famSlots.신소 && state.stacks.신소 > 0) s += state.famSlots.신소 * 4;
-  // 참허 유파 slot×3% (검심통명 중)
-  if (state.famSlots.참허 && state.stacks.검심통명) s += state.famSlots.참허 * 3;
-  // 복룡 유파 slot×4% (현재 생명력 70% 이하)
-  if (state.famSlots.복룡 && hpBelow(state, 0.70)) s += state.famSlots.복룡 * 4;
+  // 옥추 스택: 1%/스택 (옥추 ≥2)
+  if (famActive(state, '옥추')) s += state.stacks.옥추;
+  // 옥추 유파 slot×2.5% (옥추 보유 시, 옥추 ≥2)
+  if (famActive(state, '옥추') && state.stacks.옥추 > 0) s += state.famSlots.옥추 * 2.5;
+  // 신소 유파 slot×4% (신소 효과 보유 시, 신소 ≥2)
+  if (famActive(state, '신소') && state.stacks.신소 > 0) s += state.famSlots.신소 * 4;
+  // 참허 유파 slot×3% (검심통명 중, 참허 ≥2)
+  if (famActive(state, '참허') && state.stacks.검심통명) s += state.famSlots.참허 * 3;
+  // 복룡 유파 slot×4% (HP 70%↓, 복룡 ≥2)
+  if (famActive(state, '복룡') && hpBelow(state, 0.70)) s += state.famSlots.복룡 * 4;
   // 공명 영검 2+: 신통 피해 +7~12.5% (저체력 선형)
   s += 공명inc(state);
-  // 독고 디버프: 강체(신통 피해 감면 감소), 환체(방어 감소) — 우리 신통 피해에 inc로 환산
-  if (state.famSlots.주술) {
+  // 독고 디버프: 강체(신통 피해 감면 감소), 환체(방어 감소) — 우리 신통 피해에 inc로 환산 (주술 ≥2)
+  if (famActive(state, '주술')) {
     pruneDokgo(state);
     s += (state.독고.강체 || 0) * 2.5;
     s += (state.독고.환체 || 0) * 2.5;
@@ -306,39 +311,40 @@ function sumShintongInc(state) {
 function sumBuffInc(state) { return sumShintongInc(state); }
 
 // 유형별 피해 증가 (scope: 해당 유형만) — 천뢰/낙뢰/작열DoT/작열폭발/염양/살혼/호무/천검
+// 모든 유파 효과는 해당 유파 ≥2 슬롯에서만 발동
 function sumTypeDmg(state, type) {
   let s = 0;
   switch (type) {
     case '천뢰':
-      s += (state.famSlots.청명 || 0) * 10; // 청명 유파
+      s += famActiveSlots(state, '청명') * 10; // 청명 유파 (≥2)
       // [투진] 투진: 20초간 천뢰 피해 +40%
       if (state.buffs.some(b => b.key === '청명투진_투진' && b.endT > state.t)) s += 40;
       break;
     case '낙뢰':
-      s += (state.famSlots.오뢰 || 0) * 10; // 오뢰 유파
+      s += famActiveSlots(state, '오뢰') * 10; // 오뢰 유파 (≥2)
       // [용음] 천뢰: 20초간 낙뢰 피해 +80% (key: 오뢰용음_낙뢰증폭)
       if (state.buffs.some(b => b.key === '오뢰용음_낙뢰증폭' && b.endT > state.t)) s += 80;
       break;
     case '작열DoT':
-      s += (state.famSlots.이화 || 0) * 10; // 이화 유파
+      s += famActiveSlots(state, '이화') * 10; // 이화 유파 (≥2)
       // [염우] 열염: 15초간 작열 DoT +50%
       if (state.buffs.some(b => b.key === '이화염우_열염' && b.endT > state.t)) s += 50;
       break;
     case '작열폭발':
-      s += (state.famSlots.형혹 || 0) * 10; // 형혹 유파
-      s += (state.famSlots.천로 || 0) * 15; // 천로 유파
+      s += famActiveSlots(state, '형혹') * 10; // 형혹 유파 (≥2)
+      s += famActiveSlots(state, '천로') * 15; // 천로 유파 (≥2)
       break;
     case '염양':
-      s += (state.famSlots.열산 || 0) * 10; // 열산 유파
+      s += famActiveSlots(state, '열산') * 10; // 열산 유파 (≥2)
       break;
     case '살혼':
-      s += (state.famSlots.사해 || 0) * 10; // 사해 유파
+      s += famActiveSlots(state, '사해') * 10; // 사해 유파 (≥2)
       break;
     case '호무':
-      s += (state.famSlots.중광 || 0) * 10; // 중광 유파
+      s += famActiveSlots(state, '중광') * 10; // 중광 유파 (≥2)
       break;
     case '천검':
-      s += (state.famSlots.균천 || 0) * 10; // 균천 유파
+      s += famActiveSlots(state, '균천') * 10; // 균천 유파 (≥2)
       break;
   }
   return s;
@@ -401,8 +407,8 @@ function sumBuffAmp(state) {
   for (const b of state.buffs) {
     if (b.endT > state.t && b.cat === 'amp' && b.dmgMult) s += b.dmgMult * (b.stackCount || 1);
   }
-  // 검세 스택: 1.5%/스택 (docx "1중첩당 신통 피해 심화 1.50% 증가")
-  if (state.famSlots.균천) s += state.stacks.검세 * 1.5;
+  // 검세 스택: 1.5%/스택 (docx "1중첩당 신통 피해 심화 1.50% 증가") (균천 ≥2)
+  if (famActive(state, '균천')) s += state.stacks.검세 * 1.5;
   // 불씨 세트: 개수별 탑티어 효과만 적용 (누적 아님)
   s += 불씨급수값(state, '통명묘화', [4, 6, 8]);
   s += 불씨급수값(state, '유리현화', [5, 10, 15]);
@@ -593,12 +599,12 @@ function tickCritTriggers(state) {
       if (trigCount > 0) {
         state.풍뢰남은 = Math.max(0, state.풍뢰남은 - trigCount);
         for (let i = 0; i < trigCount; i++) {
-          record(state, dealDamage(state, base, { type: '천뢰' }), '풍뢰/뇌정(crit)');
+          record(state, dealDamage(state, base, { type: '천뢰' }), '천뢰←풍뢰(crit)');
         }
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      record(state, dealDamage(state, base * crEff, { type: '천뢰' }), '풍뢰/뇌정(crit)');
+      record(state, dealDamage(state, base * crEff, { type: '천뢰' }), '천뢰←풍뢰(crit)');
       state.풍뢰남은 = Math.max(0, state.풍뢰남은 - crEff);
     }
   }
@@ -609,12 +615,12 @@ function tickCritTriggers(state) {
       if (trigCount > 0) {
         state.뇌정남은 = Math.max(0, state.뇌정남은 - trigCount);
         for (let i = 0; i < trigCount; i++) {
-          record(state, dealDamage(state, 15, { type: '낙뢰' }), '풍뢰/뇌정(crit)');
+          record(state, dealDamage(state, 15, { type: '낙뢰' }), '낙뢰←뇌정(crit)');
         }
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      record(state, dealDamage(state, 15 * crEff, { type: '낙뢰' }), '풍뢰/뇌정(crit)');
+      record(state, dealDamage(state, 15 * crEff, { type: '낙뢰' }), '낙뢰←뇌정(crit)');
       state.뇌정남은 = Math.max(0, state.뇌정남은 - crEff);
     }
   }
@@ -947,14 +953,14 @@ function detailedBuffBreakdown(state, bd) {
       const incContrib = 공명inc(state);
       if (incContrib) cat.신통피해.push(`공명영검2+${incContrib.toFixed(1)}`);
     }
-    if (state.famSlots.옥추 && state.stacks.옥추) {
+    if (famActive(state, '옥추') && state.stacks.옥추) {
       cat.신통피해.push(`옥추×${state.stacks.옥추}+${state.stacks.옥추}`);
       cat.신통피해.push(`옥추유파+${state.famSlots.옥추 * 2.5}`);
     }
-    if (state.famSlots.신소 && state.stacks.신소) cat.신통피해.push(`신소유파+${state.famSlots.신소 * 4}`);
-    if (state.famSlots.참허 && state.stacks.검심통명) cat.신통피해.push(`참허유파+${state.famSlots.참허 * 3}`);
-    if (state.famSlots.복룡 && hpBelow(state, 0.70)) cat.신통피해.push(`복룡유파+${state.famSlots.복룡 * 4}`);
-    if (state.famSlots.주술) {
+    if (famActive(state, '신소') && state.stacks.신소) cat.신통피해.push(`신소유파+${state.famSlots.신소 * 4}`);
+    if (famActive(state, '참허') && state.stacks.검심통명) cat.신통피해.push(`참허유파+${state.famSlots.참허 * 3}`);
+    if (famActive(state, '복룡') && hpBelow(state, 0.70)) cat.신통피해.push(`복룡유파+${state.famSlots.복룡 * 4}`);
+    if (famActive(state, '주술')) {
       const 강 = (state.독고?.강체 || 0), 환 = (state.독고?.환체 || 0);
       if (강) cat.신통피해.push(`강체독고×${강.toFixed(0)}+${(강*2.5).toFixed(0)}`);
       if (환) cat.신통피해.push(`환체독고×${환.toFixed(0)}+${(환*2.5).toFixed(0)}`);
@@ -963,7 +969,7 @@ function detailedBuffBreakdown(state, bd) {
   // 공명뇌전2 / 뇌인 스택은 "신통 시전 시" → 신통 피해에만 표시
   if (isShintong) {
     if ((state.catSlots.뇌전 || 0) >= 2) cat.cr.push('공명뇌전2+11');
-    if (state.famSlots.청명 && state.stacks.뇌인) cat.cr.push(`뇌인×${state.stacks.뇌인}+${state.stacks.뇌인 * 5}`);
+    if (famActive(state, '청명') && state.stacks.뇌인) cat.cr.push(`뇌인×${state.stacks.뇌인}+${state.stacks.뇌인 * 5}`);
   }
   // 불씨 세트 효과 표시 — 탑티어 값만 (state.불씨 또는 CFG.불씨 fallback)
   const 불씨Src = (state.불씨) || CFG.불씨 || {};
@@ -998,25 +1004,25 @@ function detailedBuffBreakdown(state, bd) {
   }
   // 유형별 피해 증가 (해당 피해 유형만)
   if (bd?.type === '천뢰') {
-    if (state.famSlots.청명) cat.유형피해.push(`청명유파+${state.famSlots.청명 * 10}`);
+    if (famActive(state, '청명')) cat.유형피해.push(`청명유파+${state.famSlots.청명 * 10}`);
     if (state.buffs.some(b => b.key === '청명투진_투진' && b.endT > state.t)) cat.유형피해.push('투진+40');
   }
   if (bd?.type === '낙뢰') {
-    if (state.famSlots.오뢰) cat.유형피해.push(`오뢰유파+${state.famSlots.오뢰 * 10}`);
+    if (famActive(state, '오뢰')) cat.유형피해.push(`오뢰유파+${state.famSlots.오뢰 * 10}`);
     if (state.buffs.some(b => b.key === '오뢰용음_낙뢰증폭' && b.endT > state.t)) cat.유형피해.push('용음·천뢰+80');
   }
   if (bd?.type === '작열DoT') {
-    if (state.famSlots.이화) cat.유형피해.push(`이화유파+${state.famSlots.이화 * 10}`);
+    if (famActive(state, '이화')) cat.유형피해.push(`이화유파+${state.famSlots.이화 * 10}`);
     if (state.buffs.some(b => b.key === '이화염우_열염' && b.endT > state.t)) cat.유형피해.push('열염+50');
   }
   if (bd?.type === '작열폭발') {
-    if (state.famSlots.형혹) cat.유형피해.push(`형혹유파+${state.famSlots.형혹 * 10}`);
-    if (state.famSlots.천로) cat.유형피해.push(`천로유파+${state.famSlots.천로 * 15}`);
+    if (famActive(state, '형혹')) cat.유형피해.push(`형혹유파+${state.famSlots.형혹 * 10}`);
+    if (famActive(state, '천로')) cat.유형피해.push(`천로유파+${state.famSlots.천로 * 15}`);
   }
-  if (bd?.type === '염양' && state.famSlots.열산) cat.유형피해.push(`열산유파+${state.famSlots.열산 * 10}`);
-  if (bd?.type === '살혼' && state.famSlots.사해) cat.유형피해.push(`사해유파+${state.famSlots.사해 * 10}`);
-  if (bd?.type === '호무' && state.famSlots.중광) cat.유형피해.push(`중광유파+${state.famSlots.중광 * 10}`);
-  if (bd?.type === '천검' && state.famSlots.균천) cat.유형피해.push(`균천유파+${state.famSlots.균천 * 10}`);
+  if (bd?.type === '염양' && famActive(state, '열산')) cat.유형피해.push(`열산유파+${state.famSlots.열산 * 10}`);
+  if (bd?.type === '살혼' && famActive(state, '사해')) cat.유형피해.push(`사해유파+${state.famSlots.사해 * 10}`);
+  if (bd?.type === '호무' && famActive(state, '중광')) cat.유형피해.push(`중광유파+${state.famSlots.중광 * 10}`);
+  if (bd?.type === '천검' && famActive(state, '균천')) cat.유형피해.push(`균천유파+${state.famSlots.균천 * 10}`);
   if (bd?.localTypePct) cat.유형피해.push(`local+${bd.localTypePct}`);
   // 방어 감면 (화상·염양방감)
   if ((state.catSlots.화염 || 0) >= 2 && state.화상) cat.def.push(`화상×${state.화상}-${state.화상 * 2}`);
@@ -1059,7 +1065,10 @@ function record(state, amount, source) {
   state.totalDmg = (state.totalDmg || 0) + amount;
   state.dmgEvents = state.dmgEvents || [];
   const src = source || state._currentSource || '?';
-  state.dmgEvents.push({ t: state.t, amt: amount, src });
+  // activeCast: 현재 진행 중인 신통 cast 이름 (cast 시작 시 설정, 종료 시 클리어)
+  // 이 정보로 데미지 소스를 신통 단위로 그룹화 가능
+  const activeCast = state._activeCast || null;
+  state.dmgEvents.push({ t: state.t, amt: amount, src, activeCast });
   // === 호신강기/HP 풀 적용 ===
   const bd = state._lastBreakdown;
   const bypassShield = isBypassShield(state, bd);
@@ -1290,7 +1299,7 @@ function 천검발동(s, slots, ampPct = 0) {
   s._currentSource = prevSrc;
 }
 function 검세획득_균천(s, slots, n = 1) {
-  if (!s.famSlots.균천) return;
+  if (!famActive(s, '균천')) return;
   addStackTTL(s, '검세', n, 10, 20);
   // 검세 3회 획득마다 천검 발동 (누적 counter, 염양 스타일)
   // TTL로 스택이 사라져도 누적 획득 카운트는 유지되어 다음 3회차에 다시 발동
@@ -1379,7 +1388,7 @@ SK['균천·관일'] = {
 
 // ---------- 영검: 참허 (검심통명) ----------
 function 검심획득(s, n = 1) {
-  if (!s.famSlots.참허) return;
+  if (!famActive(s, '참허')) return;
   // 검심 10 도달 시 -10 차감 + 검심통명 진입 (초과분 보존)
   // 예: 9 + 2 = 11 → -10 = 1
   addStack(s, '검심', n, Infinity);
@@ -1588,17 +1597,17 @@ function 작열부여(s, n, perTick = 25, source) {
   const src = source || s._currentSource || '?';
   for (let i = 0; i < n; i++) {
     add작열(s, perTick, 20, src); // basePct 저장, 1틱 피해는 add작열 내부에서 스냅샷
-    const cnt = s.famSlots.열산 ? s.작열부여카운터 + 1 : 0;
-    const cntStr = s.famSlots.열산 ? ` (부여카운터 ${cnt}/6)` : '';
+    const cnt = famActive(s, '열산') ? s.작열부여카운터 + 1 : 0;
+    const cntStr = famActive(s, '열산') ? ` (부여카운터 ${cnt}/6)` : '';
     TRACE(s, 'STK', `🔥작열 +1 [${src}] → 현재 ${s.stacks.작열}중첩${cntStr}`);
     // 현염법체 기본(화 2+): 작열 부여 시 화상 1중첩 자동 부여
     화상부여(s, 1);
-    // [형혹 유파] 작열 1중첩 부여할 때마다 60% 확률 폭파
-    if (s.famSlots.형혹 && Math.random() < 0.60) {
+    // [형혹 유파] 작열 1중첩 부여할 때마다 60% 확률 폭파 (형혹 ≥2)
+    if (famActive(s, '형혹') && Math.random() < 0.60) {
       폭파(s);
     }
-    // [열산 유파] 신규 작열 6회 부여할 때마다 염양 발동 (스택 소모 아님)
-    if (s.famSlots.열산) {
+    // [열산 유파] 신규 작열 6회 부여할 때마다 염양 발동 (스택 소모 아님) (열산 ≥2)
+    if (famActive(s, '열산')) {
       s.작열부여카운터++;
       while (s.작열부여카운터 >= 6) {
         s.작열부여카운터 -= 6;
@@ -1688,10 +1697,10 @@ function 폭파(s) {
   // sim에서는 DoT를 작열부여 시 선계산(record)하므로 기본 잔여피해는 이미 반영됨
   // 형혹 유파 보너스(슬롯당 +10%)의 추가분만 record
   if (s.stacks.작열 <= 0) return;
-  const hhSlots = s.famSlots.형혹 || 0;
+  const hhSlots = famActiveSlots(s, '형혹');
   // consume작열: FIFO 소모, 실제 잔여 DoT 반환 (개별 타이머 기반 정확 계산)
   const remainingDot = consume작열(s, 1);
-  // 형혹 슬롯 보너스: 잔여 작열 피해 × (hhSlots × 10%)
+  // 형혹 슬롯 보너스: 잔여 작열 피해 × (hhSlots × 10%) (형혹 ≥2)
   if (hhSlots > 0 && remainingDot > 0) {
     record(s, remainingDot * (hhSlots * 10 / 100), '폭파(유파)');
   }
@@ -1811,9 +1820,9 @@ SK['이화·염무'] = {
     for (let i = 0; i < 6; i++) {
       add작열(s, 36 * 요원배율, 20 * 요원배율, '염무·분염+은염·요원');
       s.stacks.작열 = s.작열Arr.length;
-      // 형혹 유파 60% 확률 폭파 (작열부여 루프에서 하던 것을 재현)
-      if (s.famSlots.형혹 && Math.random() < 0.60) 폭파(s);
-      if (s.famSlots.열산) {
+      // 형혹 유파 60% 확률 폭파 (작열부여 루프에서 하던 것을 재현) (형혹 ≥2)
+      if (famActive(s, '형혹') && Math.random() < 0.60) 폭파(s);
+      if (famActive(s, '열산')) {
         s.작열부여카운터 = (s.작열부여카운터 || 0) + 1;
         while (s.작열부여카운터 >= 6) {
           s.작열부여카운터 -= 6;
@@ -1931,7 +1940,7 @@ function 천뢰발동(s, slots, basePct, reason) {
   }
 }
 function 뇌인획득(s) {
-  if (!s.famSlots.청명) return;
+  if (!famActive(s, '청명')) return;
   // 원문: "임의의 신통으로 적을 명중 시 뇌인 1중첩 획득" — 매 신통 cast 마다 +1
   addStackTTL(s, '뇌인', 1, 4, 20);
   // 누적 카운터 — 4회 획득마다 천벌 상태 돌입 (10s간 초당 천뢰 30% 물리 × 10회)
@@ -2006,7 +2015,7 @@ SK['청명·풍뢰'] = {
 // ---------- 뇌전: 옥추 (옥추 스택 - 크리 기반) ----------
 // 옥추 스택은 TTL 기반: 각 중첩 20s 만료, inc %는 sumBuffInc에서 stacks.옥추 × 1%로 자동 계산
 function 옥추획득(s) {
-  if (!s.famSlots.옥추) return;
+  if (!famActive(s, '옥추')) return;
   addStackTTL(s, '옥추', 1, 10, 20);
 }
 function 옥추유파Mult(s, slots) {
@@ -2288,6 +2297,28 @@ SK['신소·청삭'] = {
 const 독고_TYPES = ['강체', '환체', '실혼', '매혹'];
 const 계약_TYPES = ['강령', '환생', '실혼', '매혹'];
 
+// === 확률가중 격발 회수 (기댓값 모드용) ===
+// N개 독고가 4종에 무작위 분배되었을 때, 한 종이 ≥2 도달할 확률 = 1 - P(0) - P(1)
+// 격발 회수 기댓값 = 4 × P(한 종 ≥ 2)
+function expectedFiresFromPool(N) {
+  if (N < 2) return 0;
+  const p0 = Math.pow(0.75, N);
+  const p1 = N * 0.25 * Math.pow(0.75, N - 1);
+  return Math.max(0, 4 * (1 - p0 - p1));
+}
+
+// fractional 중첩 지원 — applyBuff와 같지만 stack 증가량을 frac 으로 받음
+function applyBuffFrac(state, key, spec, dur, maxStack, frac) {
+  const ex = state.buffs.find(b => b.key === key && b.endT > state.t);
+  if (ex) {
+    ex.endT = state.t + dur + 0.001;
+    const prev = ex.stackCount || 1;
+    ex.stackCount = Math.min(prev + frac, maxStack);
+    return;
+  }
+  state.buffs.push({ key, endT: state.t + dur + 0.001, stackCount: Math.min(frac, maxStack), maxStacks: maxStack, ...spec });
+}
+
 // 명화 살혼 발사 — 유령불 카운터(2회마다 30% 물리) 자동 처리 래퍼 (max tier)
 function 명화살혼발사(s, pct) {
   살혼발사(s, pct);
@@ -2330,33 +2361,35 @@ function 현화트리거(s) {
   s._currentSource = prevSrc;
 }
 // 제율 — 주술·제율 1옵션: 계약 획득할 때마다 15%×1.1(혼사) 술법 (전투 내내 총 5회)
-function 제율트리거(s) {
+// frac: 계약 획득량 (1=정수, 0.x=확률가중 격발 fractional)
+function 제율트리거(s, frac = 1) {
   if (!s.selectedSkills || !s.selectedSkills.has('주술·제율')) return;
   if ((s.제율남은 || 0) <= 0) return;
-  const 제율used = 5 - s.제율남은 + 1;
-  s.제율남은--;
+  const eff = Math.min(frac, s.제율남은);
+  s.제율남은 -= eff;
+  const 제율used = 5 - s.제율남은;
   // [제율+혼사 max] 30+30=60% 술법 (혼사 계수 +30% 덧셈)
-  TRACE(s, 'OPT', `🟠제율 발동: 계약 획득 → 60% 술법 (${제율used}/5회)`);
+  TRACE(s, 'OPT', `🟠제율 발동: 계약 +${frac.toFixed(2)} → ${(60 * eff).toFixed(0)}% 술법 (${제율used.toFixed(2)}/5회)`);
   const prevSrc = s._currentSource;
   s._currentSource = '제율(계약트리거)';
-  record(s, dealDamage(s, 30 + 30, { noSkillMult: true }));
+  record(s, dealDamage(s, (30 + 30) * eff, { noSkillMult: true }));
   // [고식] 5초 atk 14% (max 3중첩, max tier)
-  applyBuff(s, '주술제율_고식', { atk: 14 }, 5, 3);
+  applyBuffFrac(s, '주술제율_고식', { atk: 14 }, 5, 3, eff);
   // [저주] max tier: 독고 1 추가 + 대상 방어력 10% 감소 10초 (max 3중첩)
-  applyBuff(s, '주술제율_저주', { defDebuff: 10 }, 10, 3);
+  applyBuffFrac(s, '주술제율_저주', { defDebuff: 10 }, 10, 3, eff);
   if (s.famSlots.주술) {
     for (const t of 독고_TYPES) {
-      s.독고[t] = (s.독고[t] || 0) + 1 / 4;
+      s.독고[t] = (s.독고[t] || 0) + eff / 4;
       s.독고EndT[t] = s.t + 20;
     }
   }
   s._currentSource = prevSrc;
 }
 function 살혼발사(s, overridePct) {
-  // 사해 유파: 임의 신통 명중 시 살혼(공격력 40% 확정 피해), 슬롯당 +10%
+  // 사해 유파: 임의 신통 명중 시 살혼(공격력 40% 확정 피해), 슬롯당 +10% (사해 ≥2)
   // overridePct: 2갈래 살혼 등에서 피해 계수 오버라이드 (15% 등)
+  if (!famActive(s, '사해')) return;
   const 사해Slots = s.famSlots.사해 || 0;
-  if (사해Slots === 0) return;
   const mult = 1 + 사해Slots * 10 / 100;
   const basePct = overridePct || 40;
   TRACE(s, 'OPT', `💀살혼 발사 (${basePct}% 확정피해 × 사해${사해Slots}슬롯 ×${mult.toFixed(2)})`);
@@ -2385,65 +2418,126 @@ function 살혼발사(s, overridePct) {
 }
 
 function 독고부여(s, n = 1) {
-  // 주술 유파: n개 부여 + 슬롯당 25% 추가 (기댓값)
-  if (!s.famSlots.주술) return;
+  // 주술 유파: n개 부여 + 슬롯당 25% 추가 (주술 ≥2)
+  if (!famActive(s, '주술')) return;
   pruneDokgo(s);
-  const slotBonus = (s.famSlots.주술 || 0) * 0.25;
-  const totalAdd = n + slotBonus;
-  // 4종 균일 분포 가정 → 각 type에 totalAdd/4 부여, 20s TTL 갱신
-  for (const t of 독고_TYPES) {
-    const before = s.독고[t] || 0;
-    s.독고[t] = before + totalAdd / 4; // 중첩 상한 없음
-    s.독고EndT[t] = s.t + 20;
-    // 중첩 증가분마다 마상 트리거 (연속 증가분은 floor 단위로 묶어서)
-    const addedWhole = Math.floor(s.독고[t]) - Math.floor(before);
-    for (let i = 0; i < addedWhole; i++) {
-      if (typeof 마상트리거 === 'function') 마상트리거(s);
+  const slots = s.famSlots.주술 || 0;
+  let traceTag = '';
+  if (CFG.randomCrit) {
+    // === 랜덤 모드 ===
+    // base n: 매번 무작위 1종 선택 (4종 중 균등)
+    // 슬롯 보너스: 슬롯당 25% 베르누이, 성공 시 무작위 1종
+    let extra = 0;
+    for (let i = 0; i < slots; i++) if (Math.random() < 0.25) extra++;
+    const totalIntCount = n + extra;
+    const drops = {};
+    for (let i = 0; i < totalIntCount; i++) {
+      const t = 독고_TYPES[Math.floor(Math.random() * 독고_TYPES.length)];
+      const before = s.독고[t] || 0;
+      s.독고[t] = before + 1;
+      s.독고EndT[t] = s.t + 20;
+      drops[t] = (drops[t] || 0) + 1;
+      // 마상 트리거 (정수 단위 증가)
+      const addedWhole = Math.floor(s.독고[t]) - Math.floor(before);
+      for (let k = 0; k < addedWhole; k++) {
+        if (typeof 마상트리거 === 'function') 마상트리거(s);
+      }
     }
+    const dropStr = Object.entries(drops).map(([k, v]) => `${k}+${v}`).join(', ') || '없음';
+    traceTag = `☠️독고 +${totalIntCount} (base ${n} + 슬롯 ${slots}×25% 시행 → ${extra}추가) [${dropStr}]`;
+  } else {
+    // === 기댓값 모드 ===
+    // 4종 균일 분포 → totalAdd/4 씩 분배
+    const slotBonus = slots * 0.25;
+    const totalAdd = n + slotBonus;
+    for (const t of 독고_TYPES) {
+      const before = s.독고[t] || 0;
+      s.독고[t] = before + totalAdd / 4;
+      s.독고EndT[t] = s.t + 20;
+      const addedWhole = Math.floor(s.독고[t]) - Math.floor(before);
+      for (let i = 0; i < addedWhole; i++) {
+        if (typeof 마상트리거 === 'function') 마상트리거(s);
+      }
+    }
+    traceTag = `☠️독고 +${totalAdd.toFixed(2)} 기댓값 (base ${n} + 슬롯 ${slots}×25% = ${slotBonus.toFixed(2)}) → 4종 균등분배 0.${(totalAdd / 4 * 100).toFixed(0).padStart(2,'0')}/종`;
   }
+  const dokgoStr = 독고_TYPES.map((t) => `${t}=${(s.독고[t] || 0).toFixed(2)}`).join(', ');
+  TRACE(s, 'STK', `${traceTag} → ${dokgoStr}`);
   // 만고귀종 (주술 2set + 백족 2set): 동일 유형 2중첩 이상 시 격발
   if (s.catSlots.백족 >= 2 && s.famSlots.주술 >= 2) {
     격발체크(s);
   }
 }
-// 격발 체크 — while 루프로 연쇄 격발 가능 (원한 효과로 독고 재부여)
+// 격발 체크 — 두 가지 모드
+// - 랜덤 모드 (CFG.randomCrit): 기존 per-type 정수 격발, while 루프로 연쇄 격발
+// - 기댓값 모드: 풀 사이즈로부터 binomial 확률 가중 격발 회수 계산 (fractional)
 function 격발체크(s) {
-  let safety = 20;
-  let continued = true;
-  while (continued && safety-- > 0) {
-    continued = false;
-    for (let i = 0; i < 독고_TYPES.length; i++) {
-      const t = 독고_TYPES[i];
-      if (s.독고[t] >= 2) {
-        s.독고[t] -= 2;
-        // 격발: 주변 3명에게 공격력 75% 피해
-        record(s, dealDamage(s, 75, { noSkillMult: true }), '만고귀종');
-        // 계약 획득
-        const ct = 계약_TYPES[i];
-        계약획득(s, ct);
-        // 주술 연공 효과 격발 훅
-        onGyeokbal(s);
-        continued = true;
+  if (CFG.randomCrit) {
+    // === 랜덤 모드 — 기존 per-type 정수 격발 ===
+    let safety = 20;
+    let continued = true;
+    while (continued && safety-- > 0) {
+      continued = false;
+      for (let i = 0; i < 독고_TYPES.length; i++) {
+        const t = 독고_TYPES[i];
+        if (s.독고[t] >= 2) {
+          s.독고[t] -= 2;
+          TRACE(s, 'STK', `💥격발 [${t}] 독고 -2 (잔여 ${(s.독고[t] || 0).toFixed(2)}) → 만고귀종 75% + 계약·${계약_TYPES[i]} +1`);
+          record(s, dealDamage(s, 75, { noSkillMult: true }), '만고귀종');
+          계약획득(s, 계약_TYPES[i], 1);
+          onGyeokbal(s, 1);
+          continued = true;
+        }
       }
     }
+    return;
   }
+  // === 기댓값 모드 — 확률가중 격발 회수 (단일 패스) ===
+  // 풀 N으로부터 E[격발 회수] = 4 × P(Bin(N, 1/4) ≥ 2) 만큼 fractional 격발
+  // 단일 패스: 원한/제율이 추가하는 독고는 다음 독고부여 시점에 다시 평가됨 (피드백 루프 차단)
+  let pool = 0;
+  for (const t of 독고_TYPES) pool += Math.max(0, s.독고[t] || 0);
+  const fires = expectedFiresFromPool(pool);
+  if (fires < 0.05) return;
+  // 풀에서 2 × fires 차감 (4종 균등)
+  const consume = Math.min(2 * fires, pool);
+  const consumePerType = consume / 4;
+  for (const t of 독고_TYPES) {
+    s.독고[t] = Math.max(0, (s.독고[t] || 0) - consumePerType);
+  }
+  TRACE(s, 'STK', `💥격발(기댓값) ${fires.toFixed(2)}회 (풀 ${pool.toFixed(2)} → 한 종 ≥2 확률 ${((fires / 4) * 100).toFixed(1)}%) → 독고 -${consume.toFixed(2)}`);
+  // 만고귀종: 75% × fires
+  record(s, dealDamage(s, 75 * fires, { noSkillMult: true }), '만고귀종');
+  // 계약 4종 균등 분배 (fires/4 each)
+  for (let i = 0; i < 계약_TYPES.length; i++) {
+    계약획득(s, 계약_TYPES[i], fires / 4);
+  }
+  // onGyeokbal × fires (원한 추가 독고는 다음 cast 시 격발체크에서 평가)
+  onGyeokbal(s, fires);
 }
 // 격발 1회당 주술 연공 효과 발동 (제율은 이제 계약획득 훅에서 발동, 여기서 제거)
-function onGyeokbal(s) {
+// frac: 격발 회수 (1=정수, 0.x=fractional)
+function onGyeokbal(s, frac = 1) {
   const sel = s.selectedSkills || new Set();
   // [경선+주견 max] 독고 격발 시 40+20=60% 술법 (주견 계수 +20% 덧셈), 최대 4+3=7회
   if (sel.has('주술·경선')) {
-    s.경선발동 = (s.경선발동 || 0) + 1;
-    if (s.경선발동 <= 7) {
-      record(s, dealDamage(s, 40 + 20, { noSkillMult: true }), '경선(격발)');
+    const start = s.경선발동 || 0;
+    const cap = Math.max(0, 7 - start);
+    const eff = Math.min(frac, cap);
+    if (eff > 0) {
+      s.경선발동 = start + eff;
+      record(s, dealDamage(s, (40 + 20) * eff, { noSkillMult: true }), '경선(격발)');
     }
   }
   // [원한] 격발 시 독고 1 추가 (max tier: 6회/cycle)
   if (sel.has('주술·경선')) {
-    s.원한발동 = (s.원한발동 || 0) + 1;
-    if (s.원한발동 <= 6) {
+    const start = s.원한발동 || 0;
+    const cap = Math.max(0, 6 - start);
+    const eff = Math.min(frac, cap);
+    if (eff > 0) {
+      s.원한발동 = start + eff;
       for (const t of 독고_TYPES) {
-        s.독고[t] = (s.독고[t] || 0) + 1 / 4;
+        s.독고[t] = (s.독고[t] || 0) + eff / 4;
         s.독고EndT[t] = s.t + 20;
       }
     }
@@ -2455,17 +2549,21 @@ function onGyeokbal(s) {
 // 환생(방어 +6% — 자기 방어): 공격엔 무효 → 무시
 // 실혼 계약: cr +6%/스택
 // 매혹 계약: 신통 피해 심화 +6%/스택 (amp)
-function 계약획득(s, ct) {
+// 계약 획득 — frac=1 정수, frac<1 은 확률가중 격발용 fractional
+function 계약획득(s, ct, frac = 1) {
+  if (frac <= 0) return;
   if (ct === '실혼') {
-    applyBuff(s, '계약·실혼', { cr: 6 }, 20, 5);
+    applyBuffFrac(s, '계약·실혼', { cr: 6 }, 20, 5, frac);
   } else if (ct === '매혹') {
-    applyBuff(s, '계약·매혹', { cat: 'amp', dmgMult: 6 }, 20, 5);
+    applyBuffFrac(s, '계약·매혹', { cat: 'amp', dmgMult: 6 }, 20, 5, frac);
   } else {
     // 강령/환생: 자기 방어 버프, 공격엔 영향 X. 카운터만 유지 (계약합 계산용)
-    applyBuff(s, '계약·' + ct, {}, 20, 5);
+    applyBuffFrac(s, '계약·' + ct, {}, 20, 5, frac);
   }
+  const fmt = frac >= 1 ? frac.toFixed(0) : frac.toFixed(2);
+  TRACE(s, 'BUF', `📜[계약·${ct}] +${fmt} → 계약합 ${계약합(s).toFixed(2)}/20 (20초)`);
   // 제율 — 계약 획득할 때마다 15% 술법 (전투 최대 5회)
-  if (typeof 제율트리거 === 'function') 제율트리거(s);
+  if (typeof 제율트리거 === 'function') 제율트리거(s, frac);
 }
 // 현재 계약 총 중첩수 (4종 합산)
 function 계약합(s) {
@@ -2871,6 +2969,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         TRACE(state, 'CST', `▶ ${sk.name}\n           [시전 전 자원] ${beforeRsrc}\n           [시전 전 대상] ${beforeDebuffs}`);
         state.castCounts = state.castCounts || {};
         state.castCounts[sk.name] = (state.castCounts[sk.name] || 0) + 1;
+        // 활성 cast 신통명 — 이 cast 동안의 모든 record() 에 attached (DamageBreakdown 그룹화용)
+        state._activeCast = sk.name;
         // === 이 cast 의 crit 추적 + 확률 roll 초기화 ===
         state._castAnyCrit = false;
         state._castCritCount = 0;
@@ -2942,15 +3042,15 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             if (b.dealt) pushBuff('dealt', label, b.dealt * stack);
           }
           // 유파/공명/불씨 패시브
-          if (state.famSlots.청명 && state.stacks.뇌인) pushBuff('cr', `뇌인×${state.stacks.뇌인}`, state.stacks.뇌인 * 5);
+          if (famActive(state, '청명') && state.stacks.뇌인) pushBuff('cr', `뇌인×${state.stacks.뇌인}`, state.stacks.뇌인 * 5);
           if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('cr', `뇌전공명(${state.catSlots.뇌전}슬롯)`, 11);
-          if (state.famSlots.옥추 && state.stacks.옥추) pushBuff('inc', `옥추×${state.stacks.옥추}`, state.stacks.옥추);
-          if (state.famSlots.옥추 && state.stacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
-          if (state.famSlots.신소 && state.stacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
-          if (state.famSlots.참허 && state.stacks.검심통명) pushBuff('inc', `참허슬롯×${state.famSlots.참허}`, state.famSlots.참허 * 3);
+          if (famActive(state, '옥추') && state.stacks.옥추) pushBuff('inc', `옥추×${state.stacks.옥추}`, state.stacks.옥추);
+          if (famActive(state, '옥추') && state.stacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
+          if (famActive(state, '신소') && state.stacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
+          if (famActive(state, '참허') && state.stacks.검심통명) pushBuff('inc', `참허슬롯×${state.famSlots.참허}`, state.famSlots.참허 * 3);
           const 영검공명 = 공명inc(state);
           if (영검공명) pushBuff('inc', `영검공명(${state.catSlots.영검}슬롯)`, 영검공명);
-          if (state.famSlots.균천 && state.stacks.검세) pushBuff('amp', `검세×${state.stacks.검세}`, state.stacks.검세 * 1.5);
+          if (famActive(state, '균천') && state.stacks.검세) pushBuff('amp', `검세×${state.stacks.검세}`, state.stacks.검세 * 1.5);
           // 불씨
           const 통명 = 불씨급수값(state, '통명묘화', [4, 6, 8]);
           if (통명) pushBuff('amp', '불씨·통명묘화', 통명);
@@ -3056,18 +3156,18 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             record(state, dealDamage(state, 8 * crEff, { noSkillMult: true }));
           }
         }
-        // 백족 공통 트리거 (살혼은 사해 보유 시 모든 신통 명중에서 발동)
+        // 백족 공통 트리거 (살혼은 사해 ≥2 시 모든 신통 명중에서 발동)
         state._currentSource = '살혼';
-        if (state.famSlots.사해) 살혼발사(state);
-        // 주술 유파 효과: 임의의 신통 시전 시 무작위 1독고 + 슬롯당 25% 추가
+        if (famActive(state, '사해')) 살혼발사(state);
+        // 주술 유파 효과: 임의의 신통 시전 시 무작위 1독고 + 슬롯당 25% 추가 (주술 ≥2)
         state._currentSource = '독고부여';
-        if (state.famSlots.주술) 독고부여(state, 1);
-        // 유파 공통 트리거
+        if (famActive(state, '주술')) 독고부여(state, 1);
+        // 유파 공통 트리거 (모두 ≥2 활성 조건)
         state._currentSource = '검세(천검)';
-        if (state.famSlots.균천) 검세획득_균천(state, state.famSlots.균천, 1);
+        if (famActive(state, '균천')) 검세획득_균천(state, state.famSlots.균천, 1);
         state._currentSource = '검심';
-        if (state.famSlots.참허) 검심획득(state, 1);
-        if (state.famSlots.옥추) {
+        if (famActive(state, '참허')) 검심획득(state, 1);
+        if (famActive(state, '옥추')) {
           // 치명타 입히면 옥추 +1 — 멀티히트 스킬은 히트당 독립 판정
           // 기댓값 방식: hits × crEff 만큼 누적하여 1 이상이면 정수만큼 획득 (잔여분수 유지)
           const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
@@ -3134,6 +3234,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         }
         const afterDebuffs = `작열=${state.stacks.작열||0}(부여카운터=${state.작열부여카운터||0}/6), 화상=${state.화상||0}, 독고=${afterDokgo.toFixed(1)}, 계약=${after계약}, 약화디버프=${after약화}`;
         TRACE(state, 'END', `◀ ${sk.name} 시전 완료 후\n           [시전 후 자원] ${afterRsrc}\n           [시전 후 대상] ${afterDebuffs}`);
+        state._activeCast = null;
       }
     } else {
       const trName = treasures[ev.idx];
@@ -3142,7 +3243,9 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       const trSrc = `법보:${trName}`;
       state.castCounts[trSrc] = (state.castCounts[trSrc] || 0) + 1;
       state._currentSource = trSrc;
+      state._activeCast = trSrc;
       TREASURES[trName].cast(state);
+      state._activeCast = null;
     }
     // nextCast는 dealDamage에서 consume 되므로 별도 post-cast 리셋 불필요.
     // cast 도중 현미·풍세·파정·성류 등 옵션이 state.nextCast.X += ... 로 설정하면
