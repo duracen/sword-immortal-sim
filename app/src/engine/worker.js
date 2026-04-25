@@ -505,8 +505,9 @@ async function handleMessage(e) {
         bestSoFar: -1,
       });
 
-      // 작은 탐색 시 order 진행률을 subProgress 로 실시간 업데이트
-      const onOrderProgress = smallSearch ? (done, total, best) => {
+      // 모든 탐색 모드에서 order 진행률을 subProgress 로 실시간 업데이트
+      // (큰 탐색에서도 진행 바가 움직이도록)
+      const onOrderProgress = (done, total, best) => {
         self.postMessage({
           type: 'subProgress',
           workerId,
@@ -520,7 +521,7 @@ async function handleMessage(e) {
           orderTotal: total,
           bestSoFar: best,
         });
-      } : null;
+      };
 
       // 법보 조합 끝날 때마다 해당 법보의 Top K 를 순위 테이블에 바로 emit
       // (smallSearch 에만 국한하지 않고 항상 활성 — 법보 고정 모드처럼 실시간 표시)
