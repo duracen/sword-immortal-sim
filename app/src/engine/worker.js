@@ -205,49 +205,122 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
   };
 }
 
-// === 빠른 순서 탐색: main damage desc 초기 + 2-swap local search ===
+// === 빠른 순서 탐색: ILS (Iterated Local Search) + Combined Moves (2-swap + Or-opt) ===
+// 알고리즘:
+//   1. 3가지 seed (main-desc / main-asc / random) 에서 출발
+//   2. Combined local search (2-swap + or-opt) 까지 수렴
+//   3. ILS kick (4 위치 cyclic shift) → local search 반복 (3회)
+//   4. 모든 seed 의 최고 점수 채택
 // onOrderProgress(simDone, simTotal, best) — 주기적 UI 업데이트용 콜백 (선택)
 async function fastOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress) {
   const simOpts = simOptsFor(markerIdx);
-  // 초기 순서: 신통은 main desc, 법보는 뒤에
-  const skillIdx = skills.map((sk, i) => ({ idx: i, main: SK[sk.name]?.main ?? 0 }))
-    .sort((a, b) => b.main - a.main)
-    .map((x) => ({ kind: 'skill', idx: x.idx }));
   const trTail = [0, 1, 2].map((i) => ({ kind: 'treasure', idx: i }));
-  let order = skillIdx.concat(trTail);
   const swapRange = fixedTreasures ? 6 : 9;
-  const swapsPerRound = (swapRange * (swapRange - 1)) / 2;
-  const MAX_ROUNDS = 8;
-  const estTotal = 1 + swapsPerRound * MAX_ROUNDS;  // 대략 분모
+  // 예상 시뮬 횟수 (UI 진행률 분모) — 3 seeds × (1 initial LS + 3 kicks × LS) × ~100 sims/LS
+  const estTotal = 3 * 4 * 130;
   let simCount = 0;
-  let bestScore = simulateBuild(build, treasures, order, skills, simOpts).cumByMarker[markerIdx];
-  simCount++;
-  if (onOrderProgress) onOrderProgress(simCount, estTotal, bestScore);
-  for (let round = 0; round < MAX_ROUNDS; round++) {
-    if (isCancelled && isCancelled()) return { bestOrd: order, bestScore, cancelled: true };
-    let bestSwapScore = bestScore;
-    let bestSwappedOrder = null;
-    for (let i = 0; i < swapRange; i++) {
-      for (let j = i + 1; j < swapRange; j++) {
-        const newOrder = order.slice();
-        const tmp = newOrder[i]; newOrder[i] = newOrder[j]; newOrder[j] = tmp;
-        const sc = simulateBuild(build, treasures, newOrder, skills, simOpts).cumByMarker[markerIdx];
-        simCount++;
-        if (sc > bestSwapScore) {
-          bestSwapScore = sc; bestSwappedOrder = newOrder;
+
+  function simulate(order) {
+    simCount++;
+    return simulateBuild(build, treasures, order, skills, simOpts).cumByMarker[markerIdx];
+  }
+
+  // === Seed 생성 ===
+  const skillIdx = skills.map((sk, i) => ({ idx: i, main: SK[sk.name]?.main ?? 0 }));
+  function buildOrder(skillOrder) {
+    return skillOrder.map((x) => ({ kind: 'skill', idx: x.idx })).concat(trTail);
+  }
+  const seedMainDesc = buildOrder(skillIdx.slice().sort((a, b) => b.main - a.main));
+  const seedMainAsc = buildOrder(skillIdx.slice().sort((a, b) => a.main - b.main));
+  // 랜덤 seed (Fisher-Yates)
+  const randSkills = skillIdx.slice();
+  for (let i = randSkills.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [randSkills[i], randSkills[j]] = [randSkills[j], randSkills[i]];
+  }
+  const seedRandom = buildOrder(randSkills);
+  const seeds = [seedMainDesc, seedMainAsc, seedRandom];
+
+  // === Combined local search (2-swap + or-opt) ===
+  async function localSearch(startOrder) {
+    let bestOrder = startOrder;
+    let bestScore = simulate(bestOrder);
+    let improved = true;
+    let safety = 20;
+    while (improved && safety-- > 0) {
+      if (isCancelled && isCancelled()) return { order: bestOrder, score: bestScore, cancelled: true };
+      improved = false;
+      // 2-swap: 두 위치 교환
+      for (let i = 0; i < swapRange; i++) {
+        for (let j = i + 1; j < swapRange; j++) {
+          const newOrder = bestOrder.slice();
+          [newOrder[i], newOrder[j]] = [newOrder[j], newOrder[i]];
+          const sc = simulate(newOrder);
+          if (sc > bestScore) {
+            bestScore = sc; bestOrder = newOrder; improved = true;
+          }
         }
       }
-    }
-    if (bestSwappedOrder) {
-      order = bestSwappedOrder;
-      bestScore = bestSwapScore;
+      // Or-opt: 한 신통을 다른 위치로 삽입 (인접 swap 은 2-swap 과 중복이라 skip)
+      for (let from = 0; from < swapRange; from++) {
+        for (let to = 0; to < swapRange; to++) {
+          if (Math.abs(from - to) <= 1) continue;
+          const newOrder = bestOrder.slice();
+          const [el] = newOrder.splice(from, 1);
+          newOrder.splice(to, 0, el);
+          const sc = simulate(newOrder);
+          if (sc > bestScore) {
+            bestScore = sc; bestOrder = newOrder; improved = true;
+          }
+        }
+      }
       if (onOrderProgress) onOrderProgress(simCount, estTotal, bestScore);
-    } else {
-      if (onOrderProgress) onOrderProgress(estTotal, estTotal, bestScore);  // 수렴 → 100%
-      break;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    return { order: bestOrder, score: bestScore };
+  }
+
+  // === ILS kick: 랜덤 4 위치 cyclic shift (local optimum 탈출) ===
+  function kick(order) {
+    const newOrder = order.slice();
+    const positions = [];
+    while (positions.length < 4) {
+      const p = Math.floor(Math.random() * swapRange);
+      if (!positions.includes(p)) positions.push(p);
+    }
+    const elements = positions.map((p) => newOrder[p]);
+    elements.push(elements.shift());  // [a,b,c,d] → [b,c,d,a]
+    positions.forEach((p, i) => { newOrder[p] = elements[i]; });
+    return newOrder;
+  }
+
+  // === Main: 3 seed × ILS ===
+  const ILS_KICKS = 3;
+  let globalBestOrder = null;
+  let globalBestScore = -1;
+  for (const seed of seeds) {
+    if (isCancelled && isCancelled()) break;
+    let cur = await localSearch(seed);
+    if (cur.cancelled) return { bestOrd: globalBestOrder, bestScore: globalBestScore, cancelled: true };
+    if (cur.score > globalBestScore) {
+      globalBestScore = cur.score;
+      globalBestOrder = cur.order;
+    }
+    // ILS kick 반복
+    for (let k = 0; k < ILS_KICKS; k++) {
+      if (isCancelled && isCancelled()) break;
+      const kicked = kick(cur.order);
+      const next = await localSearch(kicked);
+      if (next.cancelled) return { bestOrd: globalBestOrder, bestScore: globalBestScore, cancelled: true };
+      if (next.score > cur.score) cur = next;
+      if (next.score > globalBestScore) {
+        globalBestScore = next.score;
+        globalBestOrder = next.order;
+      }
     }
   }
-  return { bestOrd: order, bestScore };
+  if (onOrderProgress) onOrderProgress(estTotal, estTotal, globalBestScore);
+  return { bestOrd: globalBestOrder, bestScore: globalBestScore };
 }
 
 // 빠른 탐색: 법보 조합마다 fastOrderSearch 후 최고 선택 (topK/onOrderProgress 는 무시)
