@@ -164,6 +164,7 @@ export function useRanking() {
   const [progress, setProgress] = useState({ current: 0, total: 0, label: '' });
   const [subProgress, setSubProgress] = useState({});
   const [running, setRunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [workerCount, setWorkerCount] = useState(0);
   const [error, setError] = useState(null);
@@ -421,15 +422,17 @@ export function useRanking() {
   }, []);
 
   const cancel = useCallback(() => {
+    setCancelling(true);
     workersRef.current.forEach((w) => w.postMessage({ type: 'cancel' }));
     setTimeout(() => {
       if (workersRef.current.length > 0) {
         workersRef.current.forEach((w) => w.terminate());
         workersRef.current = [];
-        setRunning(false);
       }
+      setRunning(false);
+      setCancelling(false);
     }, 3000);
   }, []);
 
-  return { results, progress, subProgress, running, startTime, start, cancel, workerCount, error, phase };
+  return { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase };
 }
