@@ -5,7 +5,7 @@ import { TREASURE_DESCS } from '../../utils/skillOptions';
 const DISPLAY_ORDER = ['환음요탑', '유리옥호', '참원선검', '오염혁선'];
 const TREASURE_DISPLAY = DISPLAY_ORDER.filter((t) => TREASURE_NAMES.includes(t));
 
-export default function TreasurePicker({ selected, onChange, showOrder = true, maxSelect = 3 }) {
+export default function TreasurePicker({ selected, onChange, showOrder = true, maxSelect = 3, minSelect = 0 }) {
   function toggle(tr) {
     if (selected.includes(tr)) {
       onChange(selected.filter((t) => t !== tr));
@@ -16,8 +16,27 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
 
   return (
     <div>
-      <div className="text-sm text-slate-400 mb-2">
-        법보 선택 ({selected.length}/{maxSelect})
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <div className="text-sm text-slate-300">
+          선택된 법보: <span className="font-bold text-amber-400">{selected.length}</span>/{maxSelect}
+          {minSelect > 0 && selected.length < minSelect && (
+            <span className="text-red-400 ml-2">(최소 {minSelect}개 필요)</span>
+          )}
+        </div>
+        <div className="flex gap-1">
+          <button
+            onClick={() => onChange(TREASURE_DISPLAY.slice(0, maxSelect))}
+            className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded"
+          >
+            전체 선택
+          </button>
+          <button
+            onClick={() => onChange([])}
+            className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded"
+          >
+            전체 해제
+          </button>
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         {TREASURE_DISPLAY.map((tr) => {
@@ -47,7 +66,7 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
               {desc && (
                 <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-72 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
                   <div className="text-xs font-bold text-yellow-300 mb-1">📿 {tr}</div>
-                  <div className="text-[11px] text-slate-200 leading-relaxed">{desc}</div>
+                  <div className="text-[13px] text-slate-200 leading-relaxed">{desc}</div>
                 </div>
               )}
             </div>

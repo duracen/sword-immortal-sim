@@ -41,7 +41,7 @@ export default function BulssiPicker({ value, onChange }) {
             {BULSSI_DESCS[key] && (
               <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-80 p-3 bg-slate-950 border border-pink-600 rounded-lg shadow-xl pointer-events-none">
                 <div className="text-xs font-bold text-pink-300 mb-1">🔥 불씨 · {key}</div>
-                <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                   {BULSSI_DESCS[key]}
                 </div>
               </div>

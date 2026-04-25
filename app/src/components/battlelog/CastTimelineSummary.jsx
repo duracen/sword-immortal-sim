@@ -68,7 +68,7 @@ function parseEvents(events) {
   const castRaws = [];
   const triggers = [];  // 천벌/천검/염양 등 특별 트리거
   // 각 트리거의 지속 시간 (초) — 0 이면 순간 발동
-  const TRIG_DUR = { 천벌: 10, 염양: 10, 천검: 0 };
+  const TRIG_DUR = { 천벌: 10, 염양: 10, 천검: 0, 열산: 10 };
   for (const ev of events) {
     if (ev.tag === 'CST') {
       const m = ev.msg.match(/^▶\s*([^\s\n]+)/);
@@ -91,7 +91,11 @@ function parseEvents(events) {
     } else if (ev.tag === 'OPT' && ev.msg.includes('⚡천벌')) {
       triggers.push({ t: ev.t, kind: '천벌', label: '천벌 10s', dur: TRIG_DUR.천벌 });
     } else if (ev.tag === 'OPT' && ev.msg.includes('🔥염양')) {
-      triggers.push({ t: ev.t, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
+      // 염양/열산은 본 신통 DMG 후에 발동 → 시각상 cast 라인보다 살짝 뒤에 표시
+      // (이번 신통에는 buff 미적용 의미)
+      triggers.push({ t: ev.t + 0.4, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
+    } else if (ev.tag === 'OPT' && ev.msg.includes('열산 상태 진입')) {
+      triggers.push({ t: ev.t + 0.4, kind: '열산', label: '열산 10s', dur: TRIG_DUR.열산 });
     }
   }
   // STK 이벤트 → (1) cast 창에 매핑 (뱃지용), (2) 자원별 활성 구간 (막대용)
@@ -156,7 +160,9 @@ function parseEvents(events) {
       if (!buffMap.has(displayKey)) buffMap.set(displayKey, []);
       const spans = buffMap.get(displayKey);
       const last = spans[spans.length - 1];
-      if (last && start <= last.end + 0.1) {
+      // 같은 timestamp 의 동일 buff 만 병합 (같은 cast 내 중복 이벤트 정리)
+      // 다른 timestamp 의 재갱신/재발동은 별도 block 으로 분리 (영염처럼 각 발동 시각화)
+      if (last && Math.abs(last.start - start) < 0.05) {
         last.end = Math.max(last.end, end);
       } else {
         spans.push({ start, end, rawKey, isThisCastOnly });
@@ -178,13 +184,16 @@ function parseEvents(events) {
   maxT = Math.ceil(maxT / 5) * 5;
   if (maxT < 10) maxT = 10;
 
-  // buffs 배열로 변환 — 불씨/일반 분리
+  // 유파 효과 (트리거 lane 에 별도 표시) — 버프 lane 에서 제외
+  const FAMILY_EFFECT_KEYS = new Set(['열산상태', '열산']);
+  // buffs 배열로 변환 — 불씨/유파효과/일반 분리
   const buffs = [];
   const bulssi = [];
   for (const [key, spans] of buffMap) {
     for (const s of spans) {
       const item = { key, start: s.start, end: s.end, rawKey: s.rawKey, isThisCastOnly: s.isThisCastOnly };
       if (s.rawKey && s.rawKey.startsWith('불씨 ')) bulssi.push(item);
+      else if (FAMILY_EFFECT_KEYS.has(key)) continue; // 유파 효과 lane 에서 처리
       else buffs.push(item);
     }
   }
@@ -217,7 +226,9 @@ const TRIGGER_STYLE = {
   천벌: { bg: 'bg-purple-500', icon: '⚡', ring: 'ring-purple-300' },
   천검: { bg: 'bg-blue-500', icon: '🗡', ring: 'ring-blue-300' },
   염양: { bg: 'bg-red-500', icon: '🔥', ring: 'ring-red-300' },
+  열산: { bg: 'bg-orange-500', icon: '🔥', ring: 'ring-orange-300' },
 };
+const DEFAULT_TRIGGER_STYLE = { bg: 'bg-slate-500', icon: '✨', ring: 'ring-slate-300' };
 
 // 버프 lane 배정 — 같은 lane 에 겹치지 않게 배치 (first-fit)
 function assignLanes(buffs) {
@@ -240,6 +251,17 @@ function assignLanes(buffs) {
   return lanes.length;
 }
 
+// 트리거 lane 배정 — 같은 종류는 같은 lane (천검=lane 0, 천벌=lane 1, 염양=2, 열산상태=3 ...)
+function assignTriggerLanes(triggers) {
+  const kindLane = {};
+  let nextLane = 0;
+  for (const tg of triggers) {
+    if (!(tg.kind in kindLane)) kindLane[tg.kind] = nextLane++;
+    tg.lane = kindLane[tg.kind];
+  }
+  return nextLane;
+}
+
 function detectCat(name) {
   if (TREASURE_NAMES.includes(name)) return '법보';
   return FAMILIES[SK[name]?.fam]?.cat || null;
@@ -258,6 +280,7 @@ export default function CastTimelineSummary({ events }) {
   const laneCount = useMemo(() => assignLanes(buffs), [buffs]);
   const stackLaneCount = useMemo(() => assignLanes(stacks), [stacks]);
   const bulssiLaneCount = useMemo(() => assignLanes(bulssi), [bulssi]);
+  const triggerLaneCount = useMemo(() => assignTriggerLanes(triggers), [triggers]);
 
   if (!events || events.length === 0) return null;
 
@@ -271,7 +294,7 @@ export default function CastTimelineSummary({ events }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span>🎞️</span>
           <span className="font-bold text-slate-100 text-sm sm:text-base">시전 타임라인</span>
-          <span className="text-[10px] sm:text-xs text-slate-500">
+          <span className="text-[11px] sm:text-xs text-slate-500">
             {casts.length}회 시전 · {buffs.length}개 버프
           </span>
         </div>
@@ -285,7 +308,7 @@ export default function CastTimelineSummary({ events }) {
           {ticks.map((t) => (
             <div
               key={t}
-              className="absolute text-[10px] text-slate-500 font-mono"
+              className="absolute text-[11px] text-slate-500 font-mono"
               style={{ left: `${(t / maxT) * 100}%`, transform: 'translateX(-50%)' }}
             >
               {t}s
@@ -312,23 +335,21 @@ export default function CastTimelineSummary({ events }) {
             const stkEntries = Object.entries(c.stks || {}).filter(([, v]) => v !== 0);
             const leftPct = (c.t / maxT) * 100;
             const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
+            // 모든 cast 라벨을 left-anchor 로 통일 (0s 처럼) — 잘림 방지 + 시각 통일
             // 툴팁 내용: 법보면 법보 설명, 신통이면 모든 옵션 설명
             const treasureDesc = c.isTreasure ? (TREASURE_DESCS[c.name] || '') : '';
             const skillOpts = !c.isTreasure ? (SKILL_OPTIONS[c.name] || null) : null;
             return (
               <div
                 key={i}
-                className="absolute flex flex-col items-center group cursor-help hover:z-[200]"
-                style={{ left: `${leftPct}%`, transform: 'translateX(-50%)' }}
+                className="absolute flex flex-col items-start group cursor-help hover:z-[200]"
+                style={{ left: `${leftPct}%` }}
               >
                 <div className={`w-2 h-2 rounded-full ${color} ring-2 ring-slate-900`} />
-                <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
                   {c.t.toFixed(0)}s
                 </div>
-                <div
-                  className="text-[10px] text-slate-200 mt-0.5 whitespace-nowrap"
-                  style={{ transform: 'rotate(-35deg)', transformOrigin: 'top left' }}
-                >
+                <div className="text-[11px] text-slate-200 mt-0.5 whitespace-nowrap">
                   {c.isTreasure ? '📿' : ''}{c.name}
                 </div>
                 {stkEntries.length > 0 && (
@@ -336,7 +357,7 @@ export default function CastTimelineSummary({ events }) {
                     {stkEntries.map(([k, v]) => (
                       <span
                         key={k}
-                        className={`text-[9px] px-1 rounded font-mono ${
+                        className={`text-[10px] px-1 rounded font-mono ${
                           v > 0
                             ? 'bg-sky-900/70 text-sky-200 border border-sky-700/60'
                             : 'bg-rose-900/70 text-rose-200 border border-rose-700/60'
@@ -355,16 +376,16 @@ export default function CastTimelineSummary({ events }) {
                     <div className="text-xs font-bold text-yellow-300 mb-1">
                       {c.isTreasure ? '📿' : '▶'} {c.name}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono mb-2">
+                    <div className="text-[11px] text-slate-400 font-mono mb-2">
                       ⏱ {c.t.toFixed(1)}s 시전
                     </div>
                     {treasureDesc && (
-                      <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                      <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                         {treasureDesc}
                       </div>
                     )}
                     {skillOpts && Object.keys(skillOpts).length > 0 && (
-                      <div className="text-[11px] text-slate-200 leading-relaxed space-y-1">
+                      <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
                         {Object.entries(skillOpts).map(([opt, d]) => (
                           <div key={opt}>
                             <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
@@ -381,18 +402,22 @@ export default function CastTimelineSummary({ events }) {
         </div>
 
 
-        {/* 특별 트리거 (천벌/천검/염양) — 지속 시간 있으면 bar, 없으면 marker */}
+        {/* 유파 효과 (천검=균천, 천벌=청명, 염양/열산상태=열산 등) — 종류별 lane 분리 */}
         {triggers.length > 0 && (
-          <div className="relative h-8 mb-2 border-t border-dashed border-slate-700 pt-2">
-            <div className="absolute -top-[9px] left-0 text-[9px] text-slate-500 bg-slate-950 px-1">
-              트리거
+          <div
+            className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
+            style={{ height: `${Math.max(1, triggerLaneCount) * 22 + 8}px` }}
+          >
+            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
+              유파 효과
             </div>
             {triggers.map((tg, i) => {
-              const style = TRIGGER_STYLE[tg.kind];
+              const style = TRIGGER_STYLE[tg.kind] || DEFAULT_TRIGGER_STYLE;
               const dur = tg.dur || 0;
               const desc = TRIGGER_DESCS[tg.kind] || '';
               const leftPct = (tg.t / maxT) * 100;
               const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
+              const laneTop = (tg.lane || 0) * 22 + 2;
               if (dur > 0) {
                 const width = (dur / maxT) * 100;
                 return (
@@ -402,11 +427,11 @@ export default function CastTimelineSummary({ events }) {
                     style={{
                       left: `${leftPct}%`,
                       width: `${width}%`,
-                      top: '2px',
+                      top: `${laneTop}px`,
                       minWidth: '30px',
                     }}
                   >
-                    <span className="text-[10px] text-white font-semibold truncate">
+                    <span className="text-[11px] text-white font-semibold truncate">
                       {style.icon} {tg.kind} ·{dur}s
                     </span>
                     <div
@@ -415,11 +440,11 @@ export default function CastTimelineSummary({ events }) {
                       <div className="text-xs font-bold text-orange-300 mb-1">
                         {style.icon} {tg.kind}
                       </div>
-                      <div className="text-[10px] text-slate-400 font-mono mb-2">
+                      <div className="text-[11px] text-slate-400 font-mono mb-2">
                         ⏱ {tg.t.toFixed(1)}s 발동 · 지속 {dur}초
                       </div>
                       {desc && (
-                        <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                        <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                           {desc}
                         </div>
                       )}
@@ -431,9 +456,9 @@ export default function CastTimelineSummary({ events }) {
                 <div
                   key={i}
                   className="absolute flex flex-col items-center cursor-help group hover:z-[200]"
-                  style={{ left: `${leftPct}%`, top: '2px', transform: 'translateX(-50%)' }}
+                  style={{ left: `${leftPct}%`, top: `${laneTop}px`, transform: 'translateX(-50%)' }}
                 >
-                  <div className={`w-5 h-5 rounded-full ${style.bg} ring-2 ring-slate-900 flex items-center justify-center text-[10px]`}>
+                  <div className={`w-5 h-5 rounded-full ${style.bg} ring-2 ring-slate-900 flex items-center justify-center text-[11px]`}>
                     {style.icon}
                   </div>
                   <div
@@ -442,11 +467,11 @@ export default function CastTimelineSummary({ events }) {
                     <div className="text-xs font-bold text-orange-300 mb-1">
                       {style.icon} {tg.kind}
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono mb-2">
+                    <div className="text-[11px] text-slate-400 font-mono mb-2">
                       ⏱ {tg.t.toFixed(1)}s 발동
                     </div>
                     {desc && (
-                      <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                      <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                         {desc}
                       </div>
                     )}
@@ -463,7 +488,7 @@ export default function CastTimelineSummary({ events }) {
             className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
             style={{ height: `${Math.max(1, stackLaneCount) * 20 + 8}px` }}
           >
-            <div className="absolute -top-[9px] left-0 text-[9px] text-slate-500 bg-slate-950 px-1">
+            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
               자원 스택
             </div>
             {stacks.map((s, i) => {
@@ -486,7 +511,7 @@ export default function CastTimelineSummary({ events }) {
                     minWidth: '16px',
                   }}
                 >
-                  <span className="text-[10px] font-mono pl-1 truncate block leading-[16px]">
+                  <span className="text-[11px] font-mono pl-1 truncate block leading-[16px]">
                     {s.key} {s.peak}중첩 ·{(s.end - s.start).toFixed(0)}s
                   </span>
                   <div
@@ -495,16 +520,16 @@ export default function CastTimelineSummary({ events }) {
                     <div className="text-xs font-bold text-sky-300 mb-1">
                       🔷 {s.key} (최대 {s.peak}중첩)
                     </div>
-                    <div className="text-[10px] text-slate-400 font-mono mb-2">
+                    <div className="text-[11px] text-slate-400 font-mono mb-2">
                       ⏱ {s.start.toFixed(1)}s ~ {s.end.toFixed(1)}s · {(s.end - s.start).toFixed(1)}초
                     </div>
                     {desc && (
-                      <div className="text-[11px] text-slate-200 leading-relaxed mb-2 whitespace-pre-wrap">
+                      <div className="text-[13px] text-slate-200 leading-relaxed mb-2 whitespace-pre-wrap">
                         {desc}
                       </div>
                     )}
                     {trajectory && (
-                      <div className="text-[10px] text-slate-500 font-mono leading-tight mt-1 border-t border-slate-800 pt-1">
+                      <div className="text-[11px] text-slate-500 font-mono leading-tight mt-1 border-t border-slate-800 pt-1">
                         📈 {trajectory}
                       </div>
                     )}
@@ -521,7 +546,7 @@ export default function CastTimelineSummary({ events }) {
             className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
             style={{ height: `${Math.max(1, bulssiLaneCount) * 20 + 8}px` }}
           >
-            <div className="absolute -top-[9px] left-0 text-[9px] text-slate-500 bg-slate-950 px-1">
+            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
               불씨
             </div>
             {bulssi.map((b, i) => {
@@ -546,20 +571,20 @@ export default function CastTimelineSummary({ events }) {
                     minWidth: '20px',
                   }}
                 >
-                  <span className="text-[10px] text-white font-mono pl-1 truncate block leading-[16px]">
+                  <span className="text-[11px] text-white font-mono pl-1 truncate block leading-[16px]">
                     🔥 {b.key}{b.isThisCastOnly ? ' *' : ` ·${realDur.toFixed(0)}s`}
                   </span>
                   <div
                     className={`hidden group-hover:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-pink-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-pink-300 mb-1">🔥 {header}</div>
-                    <div className="text-[10px] text-slate-400 font-mono mb-2">
+                    <div className="text-[11px] text-slate-400 font-mono mb-2">
                       {b.isThisCastOnly
                         ? `⏱ ${b.start.toFixed(1)}s (본 신통 한정)`
                         : `⏱ ${b.start.toFixed(1)}s ~ ${b.end.toFixed(1)}s · ${realDur.toFixed(1)}초`}
                     </div>
                     {lookup?.desc ? (
-                      <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                      <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                         {lookup.desc}
                       </div>
                     ) : (
@@ -577,7 +602,7 @@ export default function CastTimelineSummary({ events }) {
           className="relative mb-1 border-t border-dashed border-slate-700 pt-2"
           style={{ height: `${Math.max(1, laneCount) * 20 + 8}px` }}
         >
-          <div className="absolute -top-[9px] left-0 text-[9px] text-slate-500 bg-slate-950 px-1">
+          <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
             버프
           </div>
           {buffs.map((b, i) => {
@@ -605,7 +630,7 @@ export default function CastTimelineSummary({ events }) {
                   minWidth: '20px',
                 }}
               >
-                <span className="text-[10px] text-white font-mono pl-1 truncate block leading-[16px]">
+                <span className="text-[11px] text-white font-mono pl-1 truncate block leading-[16px]">
                   {b.key}{b.isThisCastOnly ? ' *' : ` ·${realDur.toFixed(0)}s`}
                 </span>
                 {/* 커스텀 툴팁 — hover 시 즉시 표시 */}
@@ -613,13 +638,13 @@ export default function CastTimelineSummary({ events }) {
                   className={`hidden group-hover:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-emerald-600 rounded-lg shadow-xl pointer-events-none`}
                 >
                   <div className="text-xs font-bold text-emerald-300 mb-1">{header}</div>
-                  <div className="text-[10px] text-slate-400 font-mono mb-2">
+                  <div className="text-[11px] text-slate-400 font-mono mb-2">
                     {b.isThisCastOnly
                       ? `⏱ ${b.start.toFixed(1)}s (본 신통 한정)`
                       : `⏱ ${b.start.toFixed(1)}s ~ ${b.end.toFixed(1)}s · ${realDur.toFixed(1)}초`}
                   </div>
                   {lookup?.desc ? (
-                    <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                    <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                       {lookup.desc}
                     </div>
                   ) : (
@@ -648,7 +673,7 @@ export default function CastTimelineSummary({ events }) {
           ];
           return (
             <div className="relative mt-2 border-t border-dashed border-slate-700 pt-2" style={{ minHeight: '220px' }}>
-              <div className="absolute -top-[9px] left-0 text-[9px] text-slate-500 bg-slate-950 px-1">
+              <div className="absolute -top-[9px] left-0 text-[10px] text-slate-500 bg-slate-950 px-1">
                 활성 버프 수치 (시전 직후)
               </div>
               {casts.map((c, i) => {
@@ -681,7 +706,7 @@ export default function CastTimelineSummary({ events }) {
                     {items.map((it) => (
                       <span
                         key={it.key}
-                        className={`text-[9px] px-1 rounded font-mono border leading-[11px] text-center break-keep ${it.color}`}
+                        className={`text-[10px] px-1 rounded font-mono border leading-[11px] text-center break-keep ${it.color}`}
                         title={`${it.label} +${it.value.toFixed(1)}%\n\n${breakdown(it.key) || '(분해 없음)'}`}
                       >
                         {it.label} +{it.value.toFixed(0)}
@@ -696,7 +721,7 @@ export default function CastTimelineSummary({ events }) {
         </div>
       </div>
 
-      <div className="text-[10px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">
+      <div className="text-[11px] text-slate-500 mt-2 flex items-center gap-3 flex-wrap">
         <span>🔵 영검</span>
         <span>🔴 화염</span>
         <span>🟣 뇌전</span>

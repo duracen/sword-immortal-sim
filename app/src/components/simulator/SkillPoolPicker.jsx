@@ -65,8 +65,8 @@ export default function SkillPoolPicker({ pool, onChange }) {
                 {CAT_LAW_BODY[cat] && (
                   <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
                     <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
-                    <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
-                    <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
+                    <div className="text-[11px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
+                    <div className="text-[13px] text-slate-200 leading-relaxed space-y-1.5">
                       <div>{CAT_LAW_BODY[cat].effect2}</div>
                       <div>{CAT_LAW_BODY[cat].effect4}</div>
                     </div>
@@ -75,7 +75,7 @@ export default function SkillPoolPicker({ pool, onChange }) {
               </div>
               <button
                 onClick={() => setAllInCat(cat, !catAllSelected)}
-                className={`text-[10px] px-2 py-0.5 rounded border transition ${
+                className={`text-[11px] px-2 py-0.5 rounded border transition ${
                   catAllSelected
                     ? 'bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60'
                     : 'bg-slate-700/60 border-slate-600 text-slate-200 hover:bg-slate-700'
@@ -95,7 +95,7 @@ export default function SkillPoolPicker({ pool, onChange }) {
                     className="flex items-center gap-1 border border-slate-800 rounded p-1 bg-slate-950/40"
                   >
                     <div className="relative group/fam w-14 shrink-0 cursor-help flex items-center gap-1">
-                      <span className="text-[10px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
+                      <span className="text-[11px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
                       {FAMILY_TIER[fam] && (
                         <span className={`text-[8px] px-0.5 rounded font-mono ${
                           FAMILY_TIER[fam] === '합체기' ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60' :
@@ -109,9 +109,10 @@ export default function SkillPoolPicker({ pool, onChange }) {
                         <div className="hidden group-hover/fam:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-blue-600 rounded-lg shadow-xl pointer-events-none">
                           <div className="text-xs font-bold text-blue-300 mb-1">
                             🏛 {fam} 유파 효과
-                            {FAMILY_TIER[fam] && <span className="text-[10px] text-slate-400 font-normal ml-2">({FAMILY_TIER[fam]})</span>}
+                            <span className="text-[11px] text-amber-300 font-bold ml-2 px-1.5 py-0.5 bg-amber-900/50 rounded">2+</span>
+                            {FAMILY_TIER[fam] && <span className="text-[11px] text-slate-400 font-normal ml-2">({FAMILY_TIER[fam]})</span>}
                           </div>
-                          <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                          <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                             {FAMILY_EFFECTS[fam]}
                           </div>
                         </div>
@@ -129,7 +130,7 @@ export default function SkillPoolPicker({ pool, onChange }) {
                           <div key={name} className="relative group">
                             <button
                               onClick={() => toggle(name)}
-                              className={`w-full text-center px-0.5 py-1.5 rounded border text-[10px] transition cursor-help leading-tight ${
+                              className={`w-full text-center px-0.5 py-1.5 rounded border text-[11px] transition cursor-help leading-tight ${
                                 on
                                   ? 'bg-amber-500/20 border-amber-500 text-amber-200'
                                   : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
@@ -142,7 +143,7 @@ export default function SkillPoolPicker({ pool, onChange }) {
                                 <div className="text-xs font-bold text-yellow-300 mb-2">
                                   ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
                                 </div>
-                                <div className="text-[11px] text-slate-200 leading-relaxed space-y-1">
+                                <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
                                   {Object.entries(opts).map(([opt, d]) => (
                                     <div key={opt}>
                                       <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
@@ -158,7 +159,7 @@ export default function SkillPoolPicker({ pool, onChange }) {
                     </div>
                     <button
                       onClick={() => setAllInFam(fam, !allSelected)}
-                      className={`text-[10px] px-2 py-1 rounded border transition shrink-0 font-semibold ${
+                      className={`text-[11px] px-2 py-1 rounded border transition shrink-0 font-semibold ${
                         allSelected
                           ? 'bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60'
                           : 'bg-slate-700/60 border-slate-600 text-slate-200 hover:bg-slate-700'

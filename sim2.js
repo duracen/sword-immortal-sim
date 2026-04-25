@@ -1059,6 +1059,17 @@ function isBypassShield(state, bd) {
 }
 
 function record(state, amount, source) {
+  // 첫 record 시점 buff/stack snapshot 캡처 — UI SNAP 용 ("DMG 적용 시점" 상태)
+  // post-DMG 트리거 (작열 부여로 인한 열산 buff 등) 는 제외하기 위해
+  if (!state._snapBuffsCaptured) {
+    state._snapBuffsCaptured = true;
+    state._snapBuffsAtDmg = state.buffs.map(b => ({
+      key: b.key, endT: b.endT, stackCount: b.stackCount, maxStacks: b.maxStacks,
+      atk: b.atk, cr: b.cr, cd: b.cd, crRes: b.crRes, defDebuff: b.defDebuff,
+      cat: b.cat, dmgMult: b.dmgMult, dealt: b.dealt, shintongOnly: b.shintongOnly,
+    }));
+    state._snapStacksAtDmg = { ...state.stacks };
+  }
   // 법체 상성 보너스 일괄 반영
   amount = amount * lawCounterMult(state);
   // 시간별 누적 피해 트래킹
@@ -1597,6 +1608,7 @@ function 작열부여(s, n, perTick = 25, source) {
   const src = source || s._currentSource || '?';
   for (let i = 0; i < n; i++) {
     add작열(s, perTick, 20, src); // basePct 저장, 1틱 피해는 add작열 내부에서 스냅샷
+    // 매 stack 마다 STK trace 발생 (시간 순서 보존: stack → 폭파 → 염양 발동 순)
     const cnt = famActive(s, '열산') ? s.작열부여카운터 + 1 : 0;
     const cntStr = famActive(s, '열산') ? ` (부여카운터 ${cnt}/6)` : '';
     TRACE(s, 'STK', `🔥작열 +1 [${src}] → 현재 ${s.stacks.작열}중첩${cntStr}`);
@@ -1606,14 +1618,15 @@ function 작열부여(s, n, perTick = 25, source) {
     if (famActive(s, '형혹') && Math.random() < 0.60) {
       폭파(s);
     }
-    // [열산 유파] 신규 작열 6회 부여할 때마다 염양 발동 (스택 소모 아님) (열산 ≥2)
+    // [열산 유파] 신규 작열 6회 부여할 때마다 염양 발동 + 열산 상태 진입 (동시) (열산 ≥2)
     if (famActive(s, '열산')) {
       s.작열부여카운터++;
       while (s.작열부여카운터 >= 6) {
         s.작열부여카운터 -= 6;
+        // 열산 상태 진입 먼저 — 염양 DMG 가 열산 +10% amp 를 받도록
+        TRACE(s, 'OPT', `⚡️열산 유파: 작열 6중첩 부여 달성 → 열산 상태 진입 + 염양 발동`);
+        applyBuff(s, '열산상태', { cat: 'amp', dmgMult: 10 }, 10);
         염양발동(s, s.famSlots.열산);
-        TRACE(s, 'OPT', `⚡️열산 유파: 작열 6중첩 부여 달성 → 열산 상태 진입`);
-        applyBuff(s, '열산상태', { inc: 10 }, 10);
       }
     }
   }
@@ -1626,36 +1639,39 @@ SK['열산·염폭'] = {
   cast(s, slots) {
     const startLaysan = 열산상태(s);
     if (startLaysan) TRACE(s, 'OPT', `🔥열산 상태로 시전 → 염폭/염식/분겁/진연 조건부 발동`);
-    // [염폭] 작열 2중첩 (max tier: 44% 총 술법)
-    작열부여(s, 2, 44, '염폭·염폭');
-    if (startLaysan) 작열부여(s, 2, 44, '염폭·염폭(열산)');
-    // [염식] crRes 20% 10초 + 열산 시 작열 2중첩 (max tier)
-    applyBuff(s, '열산염폭_염식', { crRes: 20 }, 10);
-    if (startLaysan) 작열부여(s, 2, 44, '염폭·염식(열산)');
-    // [분겁] 열산 상태 시 즉시 염양 1회 발동 + 이번 염양 피해 +50% (max tier)
+    // [분겁] "본 신통 시전 시" — 즉발 (DMG 전)
     if (startLaysan) {
       TRACE(s, 'OPT', `🟠염폭·분겁 발동: 열산 상태 시전 → 즉시 염양 +50% 피해`);
       s._분겁보정 = 1.5;
       염양발동(s, slots);
       s._분겁보정 = 1;
     }
-    // [진연] 열산 시 주변 3명 150% 술법 추가 (max tier) — 옵션 추가 피해
+    // 본 신통 DMG (+ [진연] 즉발 추가 피해)
     const bonus = startLaysan ? 150 : 0;
     record(s, dealDamage(s, 225 * MH[3]));
     if (bonus) record(s, dealDamage(s, bonus, { noSkillMult: true }), '진연');
+    // === DMG 후 작열 부여 (그냥 "부여" 옵션) ===
+    // [염폭] 작열 2중첩 (max tier: 44% 총 술법)
+    작열부여(s, 2, 44, '염폭·염폭');
+    if (startLaysan) 작열부여(s, 2, 44, '염폭·염폭(열산)');
+    // [염식] crRes 20% 10초 + 열산 시 작열 2중첩 (max tier)
+    applyBuff(s, '열산염폭_염식', { crRes: 20 }, 10);
+    if (startLaysan) 작열부여(s, 2, 44, '염폭·염식(열산)');
   }
 };
 SK['열산·양운'] = {
   fam: '열산', cat: '화염', main: 212,
   cast(s, slots) {
-    // [적염] 작열 1중첩 (max tier: 44%)
-    작열부여(s, 1, 44, '양운·적염');
-    // [양운] 염양 발동 시 atk 15% 5초 max5 → 염양발동 훅에서 처리 (max tier)
+    // [적염] 임의 신통 시전 시 작열 1중첩 — main loop pre-cast 훅에서 처리
+    s.적염활성 = true;
+    // [양운] 염양 발동 시 atk 15% 5초 max5 → 염양발동 훅에서 처리
+    // [진염] 염양 발동 시 60% 물리 max 3회
+    s.진염남은 = 3; s.진염max = 3;
+    // 본 신통 DMG
+    record(s, dealDamage(s, 212));
+    // === DMG 후 작열 부여 ===
     // [분령] 작열 3중첩 (max tier: 44%)
     작열부여(s, 3, 44, '양운·분령');
-    // [진염] 염양 발동 시 60% 물리 (max tier) 최대 3회
-    s.진염남은 = 3; s.진염max = 3;
-    record(s, dealDamage(s, 212));
   }
 };
 SK['열산·성료'] = {
@@ -1663,28 +1679,30 @@ SK['열산·성료'] = {
   cast(s, slots) {
     const startLaysan = 열산상태(s);
     if (startLaysan) TRACE(s, 'OPT', `🔥열산 상태로 시전 → 성료/치운 조건부 발동`);
-    // [성료] atk 30% 10초 + 열산 시 작열 2중첩 (max tier)
+    // [성료] atk 30% 10초 (즉발 buff)
     applyBuff(s, '열산성료_성료', { atk: 30 }, 10);
-    if (startLaysan) 작열부여(s, 2, 44, '성료·성료(열산)');
-    // [분령] 작열 3중첩 (max tier: 44%)
-    작열부여(s, 3, 44, '성료·분령');
-    // [은염] defDebuff 20% 10초 + 작열 2중첩 44% (max tier)
+    // [은염] defDebuff 20% 10초 (즉발 buff)
     applyBuff(s, '열산성료_은염', { defDebuff: 20 }, 10);
-    작열부여(s, 2, 44, '성료·은염');
-    // [치운] 열산 시 150% 술법 추가 (max tier) — 옵션 추가 피해
+    // 본 신통 DMG (+ [치운] 열산 시 150% 술법 추가)
     const extra = startLaysan ? 150 : 0;
     record(s, dealDamage(s, 213 * MH[4]));
     if (extra) record(s, dealDamage(s, extra, { noSkillMult: true }), '치운');
+    // === DMG 후 작열 부여 ===
+    // [분령] 작열 3중첩
+    작열부여(s, 3, 44, '성료·분령');
+    // [성료] 열산상태에서 +2중첩
+    if (startLaysan) 작열부여(s, 2, 44, '성료·성료(열산)');
+    // [은염] 작열 2중첩
+    작열부여(s, 2, 44, '성료·은염');
   }
 };
 SK['열산·순일'] = {
   fam: '열산', cat: '화염', main: 225,
   cast(s, slots) {
-    // [치황] 20초간 시전 시 작열 1중첩 (max tier: 44%)
+    // [치황] 20초간 신통 시전 시 작열 1중첩 — main loop pre-cast 훅에서 처리 (sk.name 으로 본 cast 도 발동)
     applyBuff(s, '열산순일_치황', {}, 20);
-    if (!s._치황이미처리) 작열부여(s, 1, 44, '순일·치황');
-    // [순일 + 분궁] 염양 발동 시 40% 물리 (max tier) + 분궁 2회 추가 → 최대 5회
-    // [진공] 염양 발동 시 작열 1중첩 62% (max tier) 최대 4회
+    // [순일 + 분궁] 염양 발동 시 40% 물리 (5회) — 염양발동 훅
+    // [진공] 염양 발동 시 작열 1중첩 62% (4회) — 염양발동 훅
     s.순일남은 = 5; s.순일max = 5;
     s.진공남은 = 4; s.진공max = 4;
     record(s, dealDamage(s, 225));
@@ -1728,50 +1746,50 @@ function 작열부여_형혹(s, slots, n, source) {
 SK['형혹·업화'] = {
   fam: '형혹', cat: '화염', main: 170,
   cast(s, slots) {
-    // [업화] 1중첩 × 최대 4회 + [연염 max: +4회] = 8중첩 (max tier)
-    작열부여_형혹(s, slots, 8, '업화·업화+연염');
-    // [영염] 별도 3중첩
-    작열부여_형혹(s, slots, 3, '업화·영염');
-    // [염혼] 작열 부여 시 atk 10% 10초 max3 (max tier)
-    applyBuff(s, '형혹업화_염혼', { atk: 10 }, 10, 3);
+    // [업화] 본 신통 cast 후부터 활성화 — main loop pre-cast 훅에서 처리
+    s.업화활성 = true;
+    // 본 신통 DMG
     record(s, dealDamage(s, 170 * MH[4]));
+    // === DMG 후 작열 부여 ===
+    // [영염] 작열 3중첩
+    작열부여_형혹(s, slots, 3, '업화·영염');
   }
 };
 SK['형혹·겁염'] = {
   fam: '형혹', cat: '화염', main: 170,
   cast(s, slots) {
-    // [현염] 작열 3중첩 (max tier: 40%)
-    작열부여_형혹(s, slots, 3, '겁염·현염');
-    // [겁염] 30초(15+착혼15) 동안 폭파 시 atk 8% 5초 max5 (max tier) → 폭파() 훅
-    // [붕연] 겁염 부여 시 defDebuff 8% 5초 max5 (max tier) → 폭파() 훅
+    // [겁염] 30초 폭파 시 atk 8% (폭파() 훅) / [붕연] 겁염 부여 시 defDebuff
     s.겁염End = s.t + 30;
+    // 본 신통 DMG
     record(s, dealDamage(s, 170));
+    // === DMG 후 작열 부여 ===
+    // [현염] 작열 3중첩
+    작열부여_형혹(s, slots, 3, '겁염·현염');
   }
 };
 SK['형혹·흑성'] = {
   fam: '형혹', cat: '화염', main: 170,
   cast(s, slots) {
-    // [혹성] 35초(20+속연15) 동안 시전 시 작열 1중첩 (max tier)
+    // [혹성] 35초간 신통 시전 시 작열 1중첩 — main loop 훅
     applyBuff(s, '형혹흑성_혹성', {}, 35);
-    if (!s._흑성이미처리) {
-      작열부여_형혹(s, slots, 1, '흑성·혹성');
-      // [성염] 20% 물리 (max tier)
-      record(s, dealDamage(s, 20, { noSkillMult: true }), '성염');
-    }
-    // [폭염] 작열 3중첩 (max tier: 40% 총피해 via 작열부여_형혹)
-    작열부여_형혹(s, slots, 3, '흑성·폭염');
+    // 본 신통 DMG
     record(s, dealDamage(s, 170));
+    // === DMG 후 작열 부여 ===
+    // [폭염] 작열 3중첩
+    작열부여_형혹(s, slots, 3, '흑성·폭염');
   }
 };
 SK['형혹·함양'] = {
   fam: '형혹', cat: '화염', main: 170,
   cast(s, slots) {
-    작열부여_형혹(s, slots, 3, '함양·천염'); // [천염] max tier 40%
-    // [함양] 30초(15+폭열15) 동안 폭파 시 24% 술법 (5+폭열5=10회) — max tier
-    // [염화] 함양 발동 시 3명 20% — max tier
+    // [함양] 30초 폭파 시 24% 술법 / [염화] 함양 발동 시 3명 20%
     s.함양End = s.t + 30;
     s.함양남은 = 10; s.함양max = 10;
+    // 본 신통 DMG
     record(s, dealDamage(s, 170 * MH[4]));
+    // === DMG 후 작열 부여 ===
+    // [천염] 작열 3중첩
+    작열부여_형혹(s, slots, 3, '함양·천염');
   }
 };
 
@@ -1784,56 +1802,58 @@ function 이화sectMult(s, slots) {
 SK['이화·풍권'] = {
   fam: '이화', cat: '화염', main: 135,
   cast(s, slots) {
-    // [점화] 35초(20+속염15) 동안 시전 시 작열 1중첩 36% (max tier)
+    // [점화] 35초간 신통 시전 시 작열 1중첩 — main loop 훅
     applyBuff(s, '이화풍권_점화', {}, 35);
-    if (!s._점화이미처리) 작열부여(s, 1, 36, '풍권·점화');
-    // [통찰] cr 30% 15초 (max tier)
+    // [통찰] cr 30% 15초 (즉발 buff)
     applyBuff(s, '이화풍권_통찰', { cr: 30 }, 15);
-    // [멸신] 방어력 30% + 작열당 4% (최대 50%) (max tier)
+    // [멸신] 방어력 30% + 작열당 4% (최대 50%) (즉발 debuff)
     prune작열(s);
     const 멸신방감 = Math.min(30 + (s.stacks.작열 || 0) * 4, 50);
     applyBuff(s, '이화풍권_멸신', { defDebuff: 멸신방감 }, 10);
+    // 본 신통 DMG
     record(s, dealDamage(s, 135 * MH[3]));
+    // 본 신통 cast 자체에 의한 [점화] 트리거는 main loop pre-cast 훅에서 처리됨 (점화 buff 활성 시)
   }
 };
 SK['이화·염우'] = {
   fam: '이화', cat: '화염', main: 128,
   cast(s, slots) {
-    // [열염+조염] 30초 창, 활성 중 작열 DoT +50% — add작열()에서 dotMult 체크
+    // [열염+조염] 30초 창, 활성 중 작열 DoT +50%
     applyBuff(s, '이화염우_열염', {}, 30);
-    // [성염] 작열 2중첩 28% (max tier)
-    작열부여(s, 2, 28, '염우·성염');
-    // [염백] atk 20% + 작열당 2% (최대 30%) 10s (max tier)
+    // [염백] atk 20% + 작열당 2% (최대 30%) 10s
     prune작열(s);
     const 염백atk = Math.min(20 + (s.stacks.작열 || 0) * 2, 30);
     applyBuff(s, '이화염우_염백', { atk: 염백atk }, 10);
+    // 본 신통 DMG
     record(s, dealDamage(s, 128));
+    // === DMG 후 작열 부여 ===
+    // [성염] 작열 2중첩 28%
+    작열부여(s, 2, 28, '염우·성염');
   }
 };
 SK['이화·염무'] = {
   fam: '이화', cat: '화염', main: 135,
   cast(s, slots) {
-    // [분염 max: 36%] × 3중첩 + [은염 max: +3중첩] = 6중첩 (max tier)
-    // [요원] 본 신통이 부여한 작열의 지속시간+총피해 +110% → dur 20×2.1=42, perTick 36×2.1=75.6
-    // (총 피해 = perTick × dur 로 선계산이므로 dur만 늘려도 총합은 비슷하지만, 원문 명시대로 둘 다 반영)
-    const 요원배율 = 2.1;  // 1.0 (기본) + 1.10 (요원) = 2.10
+    applyBuff(s, '이화염무_파군', { defDebuff: 30 }, 10); // [파군] max tier: def-30
+    // 본 신통 DMG
+    record(s, dealDamage(s, 135));
+    // === DMG 후 작열 부여 ===
+    // [분염]+[은염] = 6중첩, [요원] +110% (지속시간/피해)
+    const 요원배율 = 2.1;
     for (let i = 0; i < 6; i++) {
       add작열(s, 36 * 요원배율, 20 * 요원배율, '염무·분염+은염·요원');
       s.stacks.작열 = s.작열Arr.length;
-      // 형혹 유파 60% 확률 폭파 (작열부여 루프에서 하던 것을 재현) (형혹 ≥2)
       if (famActive(s, '형혹') && Math.random() < 0.60) 폭파(s);
       if (famActive(s, '열산')) {
         s.작열부여카운터 = (s.작열부여카운터 || 0) + 1;
         while (s.작열부여카운터 >= 6) {
           s.작열부여카운터 -= 6;
+          applyBuff(s, '열산상태', { cat: 'amp', dmgMult: 10 }, 10);
           염양발동(s, s.famSlots.열산);
-          applyBuff(s, '열산상태', { inc: 10 }, 10);
         }
       }
       화상부여(s, 1);
     }
-    applyBuff(s, '이화염무_파군', { defDebuff: 30 }, 10); // [파군] max tier: def-30
-    record(s, dealDamage(s, 135));
   }
 };
 SK['이화·삼매'] = {
@@ -1855,14 +1875,13 @@ SK['이화·삼매'] = {
 SK['천로·단주'] = {
   fam: '천로', cat: '화염', main: 128,
   cast(s, slots) {
-    // [광염 max] 다음 4회 명중 시 작열 1중첩 36% + [충염 max: +4회] = 총 8회
-    s.광염남은 = 8; s.광염max = 8;
-    if (!s._광염이미처리) {
-      s.광염남은--;
-      작열부여(s, 1, 36, '단주·광염');
-    }
-    applyBuff(s, '천로단주_파세', { crRes: 30 }, 15); // [파세] crRes -30% 15초 (max tier)
-    applyBuff(s, '천로단주_신화', { atk: 20 }, 10);   // [신화] atk 20% 10초 (max tier)
+    // [광염]+[충염] 8회 cap 활성화 (main loop pre-cast 훅에서 작열 부여)
+    // 단주 cast 자체 광염 트리거는 main loop 에서 sk.name 으로 처리됨 — 여기선 카운터 reset 만 하지 않음
+    if (s.광염남은 == null) { s.광염남은 = 8; s.광염max = 8; }
+    // [파세] crRes-30% 15s, [신화] atk+20% 10s (즉발 buff)
+    applyBuff(s, '천로단주_파세', { crRes: 30 }, 15);
+    applyBuff(s, '천로단주_신화', { atk: 20 }, 10);
+    // 본 신통 DMG
     record(s, dealDamage(s, 128 * MH[4]));
   }
 };
@@ -1892,12 +1911,14 @@ SK['천로·직염'] = {
 SK['천로·유형'] = {
   fam: '천로', cat: '화염', main: 128,
   cast(s, slots) {
-    // [점화 max: 36% per 작열] 3중첩 + [연소 max: +3중첩] = 6중첩
-    작열부여(s, 6, 36, '유형·작열');
-    applyBuff(s, '천로유형_파군', { defDebuff: 30 }, 10); // [파군] max tier 30%
-    // [잔염] 본 신통 작열 종료 시 40% 물리 추가 (max tier) — 옵션 추가 피해
+    // [파군] def-30% 10s (즉발 debuff)
+    applyBuff(s, '천로유형_파군', { defDebuff: 30 }, 10);
+    // 본 신통 DMG (+ [잔염] 옵션 추가 피해)
     record(s, dealDamage(s, 128 * MH[4]));
     record(s, dealDamage(s, 40, { noSkillMult: true }), '잔염');
+    // === DMG 후 작열 부여 ===
+    // [점화] 3중첩 + [연소] +3중첩 = 6중첩 (36%)
+    작열부여(s, 6, 36, '유형·작열');
   }
 };
 SK['천로·운화'] = {
@@ -2974,6 +2995,10 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // === 이 cast 의 crit 추적 + 확률 roll 초기화 ===
         state._castAnyCrit = false;
         state._castCritCount = 0;
+        // SNAP buff/stack 캡처 플래그 리셋 — record() 첫 호출 시 스냅샷 저장
+        state._snapBuffsCaptured = false;
+        state._snapBuffsAtDmg = null;
+        state._snapStacksAtDmg = null;
         // 태현잔화: cast 시작 시 1회 roll (랜덤 모드에서만), 캐시해서 dealDamage 여러 번 호출돼도 동일 값
         if (CFG.randomCrit) {
           const 태현기댓값 = 불씨급수값(state, '태현잔화', [4, 6, 8]);
@@ -2986,48 +3011,80 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         } else {
           state._tahyunRoll = null;
         }
-        // === 시전시 per-cast 작열부여 트리거 (cast 전에 처리) ===
-        // [열산·순일 치황] per-cast: 20s간 신통 시전마다 작열 1중첩 44% (max tier)
-        state._치황이미처리 = false;
-        if (state.buffs.some(b => b.key === '열산순일_치황' && b.endT > state.t)) {
-          작열부여(state, 1, 44, '순일·치황(지속)');
-          state._치황이미처리 = true;
+        // === 시전시 per-cast 작열부여 트리거 (cast 전에 즉발) ===
+        // [열산·순일 치황] per-cast: 20s 동안 신통 시전 시 작열 1중첩 44%
+        // 본 신통(순일) cast 자체에도 적용되도록 sk.name 체크 추가
+        if (sk.name === '열산·순일' || state.buffs.some(b => b.key === '열산순일_치황' && b.endT > state.t)) {
+          if (state.selectedSkills && state.selectedSkills.has('열산·순일')) {
+            작열부여(state, 1, 44, '순일·치황');
+          }
         }
-        // [형혹·흑성 혹성] per-cast: 35s간 신통 시전마다 작열 1중첩 40% + [성염] 20% 물리 (max tier)
-        state._흑성이미처리 = false;
-        if (state.buffs.some(b => b.key === '형혹흑성_혹성' && b.endT > state.t)) {
-          작열부여(state, 1, 40, '흑성·혹성(지속)');
-          state._currentSource = '성염';
-          record(state, dealDamage(state, 20, { noSkillMult: true }));
-          state._흑성이미처리 = true;
+        // [형혹·흑성 혹성] per-cast: 35s 동안 신통 시전 시 작열 1중첩 40% + [성염] 20% 물리
+        if (sk.name === '형혹·흑성' || state.buffs.some(b => b.key === '형혹흑성_혹성' && b.endT > state.t)) {
+          if (state.selectedSkills && state.selectedSkills.has('형혹·흑성')) {
+            작열부여(state, 1, 40, '흑성·혹성');
+            state._currentSource = '성염';
+            record(state, dealDamage(state, 20, { noSkillMult: true }));
+          }
         }
-        // [이화·풍권 점화] per-cast: 35s간 신통 시전마다 작열 1중첩 36% (max tier)
-        state._점화이미처리 = false;
-        if (state.buffs.some(b => b.key === '이화풍권_점화' && b.endT > state.t)) {
-          작열부여(state, 1, 36, '풍권·점화(지속)');
-          state._점화이미처리 = true;
+        // [이화·풍권 점화] per-cast: 35s 동안 신통 시전 시 작열 1중첩 36%
+        if (sk.name === '이화·풍권' || state.buffs.some(b => b.key === '이화풍권_점화' && b.endT > state.t)) {
+          if (state.selectedSkills && state.selectedSkills.has('이화·풍권')) {
+            작열부여(state, 1, 36, '풍권·점화');
+          }
         }
-        // [천로·단주 광염+충염] 다음 6회 신통 명중 시 작열 1중첩
-        state._광염이미처리 = false;
-        if ((state.광염남은 || 0) > 0) {
+        // [천로·단주 광염+충염] 다음 8회 신통 명중 시 작열 1중첩
+        // 단주 cast 자체에서도 발동 — 단주 cast 시 광염남은 초기화 후 1회 소모
+        if (sk.name === '천로·단주' && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
+          state.광염남은 = 8; state.광염max = 8;
+        }
+        if ((state.광염남은 || 0) > 0 && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
           const 광염used = (state.광염max || 8) - state.광염남은 + 1;
           TRACE(state, 'OPT', `🟠단주·광염 발동: 신통 명중 → 작열 1중첩 36% (${광염used}/${state.광염max || 8}회)`);
           state.광염남은--;
-          작열부여(state, 1, 36, '단주·광염(지속)');
-          state._광염이미처리 = true;
+          작열부여(state, 1, 36, '단주·광염');
+        }
+        // [열산·양운 적염] per-cast: 임의 신통 시전 시 작열 1중첩 44% (최대 4회 발동, 전투 누적)
+        // 단, 양운이 한 번이라도 cast 된 후부터 활성화 (sk.name === '열산·양운' 이면 그 cast 부터 활성)
+        if ((state.적염활성 || sk.name === '열산·양운') && state.selectedSkills && state.selectedSkills.has('열산·양운')) {
+          if (state.적염남은 == null) state.적염남은 = 4;
+          if (state.적염남은 > 0) {
+            state.적염남은--;
+            const used = 4 - state.적염남은;
+            TRACE(state, 'OPT', `🟠양운·적염 발동: 신통 시전 → 작열 1중첩 44% (${used}/4회)`);
+            작열부여(state, 1, 44, `양운·적염 (${used}/4)`);
+          }
+        }
+        // [형혹·업화 업화] per-cast: 임의 신통 시전 시 작열 1중첩 40% (최대 4회 + [연염] +4회 = 8회 cap)
+        if ((state.업화활성 || sk.name === '형혹·업화') && state.selectedSkills && state.selectedSkills.has('형혹·업화')) {
+          if (state.업화남은 == null) state.업화남은 = 8;
+          if (state.업화남은 > 0) {
+            state.업화남은--;
+            const used = 8 - state.업화남은;
+            TRACE(state, 'OPT', `🟠업화·업화 발동: 신통 시전 → 작열 1중첩 40% (${used}/8회)`);
+            const prevSrc = state._currentSource;
+            state._currentSource = '업화(트리거)';
+            작열부여_형혹(state, state.famSlots.형혹 || 0, 1, `업화·업화 (${used}/8)`);
+            // [염혼] 업화로 작열 부여 시 atk 10% 10초 max3
+            applyBuff(state, '형혹업화_염혼', { atk: 10 }, 10, 3);
+            state._currentSource = prevSrc;
+          }
         }
         // === cast 실행 ===
         state._currentSource = sk.name;
         SK[sk.name].cast(state, slots);
         // 청명 유파: 임의 신통 명중 시 뇌인 1중첩 획득
         뇌인획득(state);
-        // 활성 버프 수치 스냅샷 — UI 칸별 표시용 (cast 실행 후, nextCast/스택/applyBuff 반영)
+        // 활성 버프 수치 스냅샷 — DMG 적용 시점 상태 (post-DMG 트리거 buff/stack 제외)
         {
           // 기여 소스별 분해 (툴팁 용)
           const bd = { atk: [], inc: [], amp: [], dealt: [], cr: [], cd: [], crRes: [], defDebuff: [], finalCR: [], finalCD: [], finalDmg: [] };
           const pushBuff = (field, key, val) => { if (val) bd[field].push({ src: key, val }); };
+          // SNAP 용 buff/stack: record() 첫 호출 시점 캡처본 사용 (없으면 현재 state)
+          const snapBuffs = state._snapBuffsAtDmg || state.buffs;
+          const snapStacks = state._snapStacksAtDmg || state.stacks;
           // applyBuff 기반 버프/디버프
-          for (const b of state.buffs) {
+          for (const b of snapBuffs) {
             if (b.endT <= state.t) continue;
             const stack = b.stackCount || 1;
             const label = (b.key || '?') + (stack > 1 ? `×${stack}` : '');
@@ -3041,16 +3098,16 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             if (b.cat === 'inc' && b.dmgMult) pushBuff('inc', label, b.dmgMult * stack);
             if (b.dealt) pushBuff('dealt', label, b.dealt * stack);
           }
-          // 유파/공명/불씨 패시브
-          if (famActive(state, '청명') && state.stacks.뇌인) pushBuff('cr', `뇌인×${state.stacks.뇌인}`, state.stacks.뇌인 * 5);
+          // 유파/공명/불씨 패시브 — 스택은 snapStacks 기준
+          if (famActive(state, '청명') && snapStacks.뇌인) pushBuff('cr', `뇌인×${snapStacks.뇌인}`, snapStacks.뇌인 * 5);
           if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('cr', `뇌전공명(${state.catSlots.뇌전}슬롯)`, 11);
-          if (famActive(state, '옥추') && state.stacks.옥추) pushBuff('inc', `옥추×${state.stacks.옥추}`, state.stacks.옥추);
-          if (famActive(state, '옥추') && state.stacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
-          if (famActive(state, '신소') && state.stacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
-          if (famActive(state, '참허') && state.stacks.검심통명) pushBuff('inc', `참허슬롯×${state.famSlots.참허}`, state.famSlots.참허 * 3);
+          if (famActive(state, '옥추') && snapStacks.옥추) pushBuff('inc', `옥추×${snapStacks.옥추}`, snapStacks.옥추);
+          if (famActive(state, '옥추') && snapStacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
+          if (famActive(state, '신소') && snapStacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
+          if (famActive(state, '참허') && snapStacks.검심통명) pushBuff('inc', `참허슬롯×${state.famSlots.참허}`, state.famSlots.참허 * 3);
           const 영검공명 = 공명inc(state);
           if (영검공명) pushBuff('inc', `영검공명(${state.catSlots.영검}슬롯)`, 영검공명);
-          if (famActive(state, '균천') && state.stacks.검세) pushBuff('amp', `검세×${state.stacks.검세}`, state.stacks.검세 * 1.5);
+          if (famActive(state, '균천') && snapStacks.검세) pushBuff('amp', `검세×${snapStacks.검세}`, snapStacks.검세 * 1.5);
           // 불씨
           const 통명 = 불씨급수값(state, '통명묘화', [4, 6, 8]);
           if (통명) pushBuff('amp', '불씨·통명묘화', 통명);

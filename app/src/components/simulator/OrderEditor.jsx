@@ -36,9 +36,9 @@ export default function OrderEditor({ items, onChange }) {
             } ${dragIdx === i ? 'opacity-50' : ''}`}
           >
             <div className="flex items-center gap-1 mb-1">
-              <span className="text-slate-500 text-[10px]">#{i + 1}</span>
+              <span className="text-slate-500 text-[11px]">#{i + 1}</span>
               <span
-                className={`text-[10px] px-1 rounded ${
+                className={`text-[11px] px-1 rounded ${
                   it.kind === 'skill' ? 'bg-slate-700 text-slate-300' : 'bg-amber-700 text-amber-100'
                 }`}
               >

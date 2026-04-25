@@ -82,12 +82,12 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
             <div className="flex items-center justify-between mb-1.5">
               <div className="relative group/cat inline-block cursor-help">
                 <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
-                {catCount > 0 && <span className="text-[10px] text-amber-400 ml-1">({catCount})</span>}
+                {catCount > 0 && <span className="text-[11px] text-amber-400 ml-1">({catCount})</span>}
                 {CAT_LAW_BODY[cat] && (
                   <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
                     <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
-                    <div className="text-[10px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
-                    <div className="text-[11px] text-slate-200 leading-relaxed space-y-1.5">
+                    <div className="text-[11px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
+                    <div className="text-[13px] text-slate-200 leading-relaxed space-y-1.5">
                       <div>{CAT_LAW_BODY[cat].effect2}</div>
                       <div>{CAT_LAW_BODY[cat].effect4}</div>
                     </div>
@@ -97,7 +97,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
               {catCount > 0 && (
                 <button
                   onClick={() => clearCategory(cat)}
-                  className="text-[10px] px-2 py-0.5 rounded border bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60"
+                  className="text-[11px] px-2 py-0.5 rounded border bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60"
                   title={`${cat} 계열 선택 전체 해제`}
                 >
                   계열 해제
@@ -117,7 +117,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                   >
                     {/* 유파명 */}
                     <div className="relative group/fam w-14 shrink-0 cursor-help flex items-center gap-1">
-                      <span className="text-[10px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
+                      <span className="text-[11px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
                       {FAMILY_TIER[fam] && (
                         <span className={`text-[8px] px-0.5 rounded font-mono ${
                           FAMILY_TIER[fam] === '합체기' ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60' :
@@ -131,9 +131,10 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                         <div className="hidden group-hover/fam:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-blue-600 rounded-lg shadow-xl pointer-events-none">
                           <div className="text-xs font-bold text-blue-300 mb-1">
                             🏛 {fam} 유파 효과
-                            {FAMILY_TIER[fam] && <span className="text-[10px] text-slate-400 font-normal ml-2">({FAMILY_TIER[fam]})</span>}
+                            <span className="text-[11px] text-amber-300 font-bold ml-2 px-1.5 py-0.5 bg-amber-900/50 rounded">2+</span>
+                            {FAMILY_TIER[fam] && <span className="text-[11px] text-slate-400 font-normal ml-2">({FAMILY_TIER[fam]})</span>}
                           </div>
-                          <div className="text-[11px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                          <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                             {FAMILY_EFFECTS[fam]}
                           </div>
                         </div>
@@ -157,7 +158,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                             <button
                               onClick={() => toggleSkill(fam, name)}
                               disabled={disabled}
-                              className={`w-full text-center px-0.5 py-1.5 rounded border text-[10px] transition cursor-help leading-tight ${
+                              className={`w-full text-center px-0.5 py-1.5 rounded border text-[11px] transition cursor-help leading-tight ${
                                 on
                                   ? 'bg-amber-500/20 border-amber-500 text-amber-200'
                                   : disabled
@@ -179,7 +180,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                                 <div className="text-xs font-bold text-yellow-300 mb-2">
                                   ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
                                 </div>
-                                <div className="text-[11px] text-slate-200 leading-relaxed space-y-1">
+                                <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
                                   {Object.entries(opts).map(([opt, d]) => (
                                     <div key={opt}>
                                       <span className="font-bold text-yellow-200">[{opt}]</span>{' '}

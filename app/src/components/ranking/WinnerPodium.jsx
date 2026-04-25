@@ -84,7 +84,7 @@ export default function WinnerPodium({ results, sortBy }) {
               <div className="font-bold text-slate-100 mb-0.5">
                 {r.label}
                 {r.orderRank && r.orderRank > 1 && (
-                  <span className="ml-2 text-[10px] text-slate-400 font-normal">(순서 #{r.orderRank})</span>
+                  <span className="ml-2 text-[11px] text-slate-400 font-normal">(순서 #{r.orderRank})</span>
                 )}
               </div>
               {r.skillLabel && (
@@ -92,7 +92,7 @@ export default function WinnerPodium({ results, sortBy }) {
               )}
               <div className="text-xs text-slate-400 mb-1">법보: {r.treasures}</div>
               {r.order && (
-                <div className="text-[10px] text-slate-500 font-mono mb-2 leading-tight">시전: {r.order}</div>
+                <div className="text-[11px] text-slate-500 font-mono mb-2 leading-tight">시전: {r.order}</div>
               )}
               <div className="text-amber-300 text-lg font-bold">
                 {formatKR(r[key])}{' '}

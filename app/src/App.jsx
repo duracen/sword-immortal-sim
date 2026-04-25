@@ -44,7 +44,7 @@ export default function App() {
               {' '}기준의 이론값이며, 기본은 <span className="text-slate-400">기댓값 모드</span>
               {' '}(모든 확률 기반 효과 — 치명타·태현잔화·유뢰법체 조건·crit 트리거류 등 — 을 확률 × 값으로 스케일 계산) 입니다.
             </div>
-            <div className="pt-2 text-[10px] text-slate-500 leading-relaxed border-t border-slate-800 mt-2">
+            <div className="pt-2 text-[11px] text-slate-500 leading-relaxed border-t border-slate-800 mt-2">
               게임명 <span className="text-slate-300">"검선귀환"</span>, 신통·유파·법보 명칭, 아이콘, 스킬 설명 및
               모든 게임 내 자료의 저작권은 원저작자 및 해당 게임의 퍼블리셔에게 있습니다.
               본 사이트의 자체 시뮬레이션 엔진 코드 및 UI 만 사용자 제작분에 해당합니다.

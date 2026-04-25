@@ -139,43 +139,48 @@ function simOptsFor(markerIdx) {
 }
 
 // 순서 전수탐색 — topK 상위 순서를 유지 (기본 1개, 작은 탐색에선 10개)
-async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverride, isCancelled, fixedTreasures, onOrderProgress, topK = 1) {
+async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverride, isCancelled, fixedTreasures, onOrderProgress, topK = 1, onTopUpdate = null) {
   const simOpts = simOptsFor(markerIdx);
   // topResults: { score, ord }[] — score 내림차순
   const topResults = [];
+  let topChanged = false;
   function consider(score, ord) {
     if (topResults.length < topK) {
       topResults.push({ score, ord: ord.slice() });
       topResults.sort((a, b) => b.score - a.score);
+      topChanged = true;
     } else if (score > topResults[topResults.length - 1].score) {
       topResults[topResults.length - 1] = { score, ord: ord.slice() };
       topResults.sort((a, b) => b.score - a.score);
+      topChanged = true;
     }
   }
   let counter = 0;
   const YIELD_EVERY = onOrderProgress ? 100 : 2000;
-  const PERM_TOTAL = fixedTreasures ? 720 : 362880;
+  // 법보 고정: 위치만 고정 (7/8/9). 법보 순서는 permute → 6! × 3! = 4,320
+  // 법보 미고정: 모든 위치 interleave → 9! = 362,880
+  const PERM_TOTAL = fixedTreasures ? 4320 : 362880;
 
   if (fixedTreasures) {
     const skillSlots = [0, 1, 2, 3, 4, 5].map((i) => ({ kind: 'skill', idx: i }));
-    const fixedTail = [
-      { kind: 'treasure', idx: 0 },
-      { kind: 'treasure', idx: 1 },
-      { kind: 'treasure', idx: 2 },
-    ];
-    for (const perm of permutations(skillSlots)) {
-      if (isCancelled()) return { topResults, cancelled: true };
-      const full = perm.concat(fixedTail);
-      const sc = simulateBuild(build, treasures, full, skillsOverride, simOpts).cumByMarker[markerIdx];
-      consider(sc, full);
-      counter++;
-      if (counter % YIELD_EVERY === 0) {
-        if (onOrderProgress) onOrderProgress(counter, PERM_TOTAL, topResults[0]?.score ?? -1);
-        await new Promise((r) => setTimeout(r, 0));
+    const treasureSlots = [0, 1, 2].map((i) => ({ kind: 'treasure', idx: i }));
+    for (const skPerm of permutations(skillSlots)) {
+      for (const trPerm of permutations(treasureSlots)) {
         if (isCancelled()) return { topResults, cancelled: true };
+        const full = skPerm.concat(trPerm);
+        const sc = simulateBuild(build, treasures, full, skillsOverride, simOpts).cumByMarker[markerIdx];
+        consider(sc, full);
+        counter++;
+        if (counter % YIELD_EVERY === 0) {
+          if (onOrderProgress) onOrderProgress(counter, PERM_TOTAL, topResults[0]?.score ?? -1);
+          if (onTopUpdate && topChanged) { onTopUpdate(topResults); topChanged = false; }
+          await new Promise((r) => setTimeout(r, 0));
+          if (isCancelled()) return { topResults, cancelled: true };
+        }
       }
     }
   } else {
+    // 법보 미고정: 9! = 362,880 — 신통+법보 모든 위치 전수탐색
     const slots = defaultOrder();
     for (const perm of permutations(slots)) {
       if (isCancelled()) return { topResults, cancelled: true };
@@ -184,11 +189,14 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
       counter++;
       if (counter % YIELD_EVERY === 0) {
         if (onOrderProgress) onOrderProgress(counter, PERM_TOTAL, topResults[0]?.score ?? -1);
+        if (onTopUpdate && topChanged) { onTopUpdate(topResults); topChanged = false; }
         await new Promise((r) => setTimeout(r, 0));
         if (isCancelled()) return { topResults, cancelled: true };
       }
     }
   }
+  // 마지막 잔여 emit
+  if (onTopUpdate && topChanged) onTopUpdate(topResults);
   if (onOrderProgress) onOrderProgress(PERM_TOTAL, PERM_TOTAL, topResults[0]?.score ?? -1);
   return {
     topResults,
@@ -246,7 +254,7 @@ async function fastOrderSearch(build, skills, treasures, markerIdx, fixedTreasur
 async function optimizeBuildFast(build, skillsOverride, markerIdx, fixedTreasures, isCancelled, _topK, onOrderProgress) {
   const treasureCombos = fixedTreasures
     ? (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : [FIXED_TREASURES])
-    : enumerateTreasures();
+    : (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : enumerateTreasures());
   let bestScore = -1, bestOrd = null, bestTr = null;
   for (const tr of treasureCombos) {
     if (isCancelled && isCancelled()) return { bestOrd, bestScore, bestTr, cancelled: true };
@@ -267,8 +275,8 @@ async function optimizeBuildFast(build, skillsOverride, markerIdx, fixedTreasure
 async function optimizeBuild(build, skillsOverride, markerIdx, fixedTreasures, isCancelled, topK = 1, onOrderProgress, onPartialTop) {
   const treasureCombos = fixedTreasures
     ? (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : [FIXED_TREASURES])
-    : enumerateTreasures();
-  const PERM_PER_TREASURE = fixedTreasures ? 720 : 362880;
+    : (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : enumerateTreasures());
+  const PERM_PER_TREASURE = fixedTreasures ? 4320 : 362880;
   const GRAND_TOTAL = treasureCombos.length * PERM_PER_TREASURE;
   let treasureIdx = 0;
   // 전체 top K across treasure combos: { score, ord, bestTr }[]
@@ -279,7 +287,14 @@ async function optimizeBuild(build, skillsOverride, markerIdx, fixedTreasures, i
     const wrappedProgress = onOrderProgress ? (done, total, best) => {
       onOrderProgress(tIdxLocal * PERM_PER_TREASURE + done, GRAND_TOTAL, best);
     } : null;
-    const res = await optimizeOrderExhaustive(build, tr, markerIdx, skillsOverride, isCancelled, fixedTreasures, wrappedProgress, topK);
+    // 실시간 Top K emit — perm 진행 중 새 best 발견 시 (Top K 변동분만 부분 emit)
+    const onLiveTopUpdate = onPartialTop ? (currentTop) => {
+      // 현재 treasure combo 의 top + 이미 누적된 globalTop 통합 후 Top K
+      const currentList = currentTop.map((r) => ({ score: r.score, ord: r.ord, bestTr: tr }));
+      const merged = globalTop.concat(currentList).sort((a, b) => b.score - a.score).slice(0, topK);
+      onPartialTop(merged);
+    } : null;
+    const res = await optimizeOrderExhaustive(build, tr, markerIdx, skillsOverride, isCancelled, fixedTreasures, wrappedProgress, topK, onLiveTopUpdate);
     treasureIdx++;
     if (res.cancelled) {
       return { bestOrd: globalTop[0]?.ord, bestScore: globalTop[0]?.score ?? -1, bestTr: globalTop[0]?.bestTr, topResults: globalTop, cancelled: true };

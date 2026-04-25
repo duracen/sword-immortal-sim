@@ -44,14 +44,14 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                     </span>
                     {r.label}
                     {r.orderRank && r.orderRank > 1 && (
-                      <span className="ml-2 text-[10px] text-slate-500">(순서 #{r.orderRank})</span>
+                      <span className="ml-2 text-[11px] text-slate-500">(순서 #{r.orderRank})</span>
                     )}
                   </div>
                   {r.skillLabel && (
                     <div className="text-[11px] text-slate-500 font-mono mt-0.5">{r.skillLabel}</div>
                   )}
                   {r.order && (
-                    <div className="text-[10px] text-slate-600 font-mono mt-0.5 leading-tight">시전: {r.order}</div>
+                    <div className="text-[11px] text-slate-600 font-mono mt-0.5 leading-tight">시전: {r.order}</div>
                   )}
                 </td>
                 <td className="py-2 px-2 text-slate-400 text-xs">{r.treasures}</td>
@@ -84,20 +84,20 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
           >
             <div className="flex items-center gap-2 mb-1">
               <span className="font-bold text-amber-400 text-sm">#{i + 1}</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded text-white ${CAT_BADGE[r.cat] || 'bg-slate-600'}`}>
+              <span className={`text-[11px] px-1.5 py-0.5 rounded text-white ${CAT_BADGE[r.cat] || 'bg-slate-600'}`}>
                 {r.cat}
               </span>
               <span className="font-medium text-slate-100 text-sm break-keep">{r.label}</span>
               {r.orderRank && r.orderRank > 1 && (
-                <span className="text-[9px] text-slate-500">(#{r.orderRank})</span>
+                <span className="text-[10px] text-slate-500">(#{r.orderRank})</span>
               )}
             </div>
             {r.skillLabel && (
-              <div className="text-[10px] text-slate-400 font-mono mb-1 leading-tight">{r.skillLabel}</div>
+              <div className="text-[11px] text-slate-400 font-mono mb-1 leading-tight">{r.skillLabel}</div>
             )}
-            <div className="text-[10px] text-slate-500 mb-1">법보: {r.treasures}</div>
+            <div className="text-[11px] text-slate-500 mb-1">법보: {r.treasures}</div>
             {r.order && (
-              <div className="text-[9px] text-slate-600 font-mono leading-tight mb-2">시전: {r.order}</div>
+              <div className="text-[10px] text-slate-600 font-mono leading-tight mb-2">시전: {r.order}</div>
             )}
             {/* 시간별 누적 — 가로 4분할 */}
             <div className="grid grid-cols-4 gap-1 mb-2">

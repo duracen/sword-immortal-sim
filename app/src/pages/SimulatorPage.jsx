@@ -128,7 +128,8 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       requiredLawBody,
       fixedTreasures,
       // 선택된 법보 풀 — 고정 시 여기서만 C(N,3) 조합 탐색
-      treasurePool: fixedTreasures && treasures.length >= 3 ? treasures : null,
+      // 사용자가 선택한 법보 풀 — 고정 시 C(N,3) 조합 / 미고정 시도 동일하게 선택된 풀 내에서만 탐색
+      treasurePool: treasures.length >= 3 ? treasures : null,
       targetLawBody,
       searchMode,
       불씨,
@@ -136,11 +137,19 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   }
 
   const elapsedSec = startTime && running ? (Date.now() - startTime) / 1000 : 0;
+  // 빌드 완료 + 진행 중 빌드의 순서 탐색 진행률(fractional)을 합산해 effective progress 계산
+  // → 빌드 1개도 완료 안 됐을 때도 남은 시간 추정 가능 (특히 9! 전수탐색 시)
+  let effectiveDone = progress.current;
+  for (const sp of Object.values(subProgress || {})) {
+    if (sp.orderTotal > 0) effectiveDone += sp.orderDone / sp.orderTotal;
+  }
+  // 0.001 threshold (단순 빌드 시 1.45M perms × 0.001 = 1,450 perms 만에 표시 시작)
   const estRemainSec =
-    startTime && running && progress.current > 0
-      ? (((Date.now() - startTime) / progress.current) * (progress.total - progress.current)) / 1000
+    startTime && running && effectiveDone > 0.001 && progress.total > 0
+      ? (elapsedSec / effectiveDone) * (progress.total - effectiveDone)
       : 0;
-  const pct = progress.total > 0 ? (progress.current / progress.total) * 100 : 0;
+  // 진행률: 완료 빌드 + 진행 중 빌드의 fractional 진행 (단일 빌드 시 진행 바가 멈추지 않도록)
+  const pct = progress.total > 0 ? Math.min(100, (effectiveDone / progress.total) * 100) : 0;
 
   return (
     <div className="space-y-5">
@@ -167,7 +176,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
         <div className="flex items-center gap-3 mb-2 flex-wrap">
           <label
             className="flex items-center gap-2 text-xs text-slate-300 select-none cursor-pointer"
-            title="체크 시: 선택한 법보만 사용하고, 법보는 시전 순서의 7/8/9번(후순위)에 고정 배치됩니다. 신통 6개의 순서만 탐색하므로 속도가 720배 빠릅니다."
+            title="체크 시: 법보가 시전 순서의 7/8/9번(후순위)에 위치 고정됩니다. 신통 6! × 법보 3! = 4,320회 시뮬 — 법보 미고정(9!=362,880) 대비 약 84배 빠름."
           >
             <input
               type="checkbox"
@@ -181,14 +190,14 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                 }
               }}
             />
-            <span className="font-semibold">법보 고정</span>
-            <span className="text-[10px] text-slate-500">
-              (체크 시 선택한 법보만 사용 · 시전 순서 7/8/9번 후순위 고정 → 탐색 속도 약 720배 빠름)
+            <span className="font-semibold">법보 위치 고정</span>
+            <span className="text-[11px] text-slate-500">
+              (체크 시 법보는 7/8/9번 위치만 사용 · 법보 순서는 전수탐색 → 신통 6! × 법보 3! = 4,320 / 미고정 9!=362,880 대비 84배 빠름)
             </span>
           </label>
           <div className="text-xs text-slate-400">※ 법보끼리의 시전 순서는 알고리즘이 자동 결정합니다</div>
         </div>
-        <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={false} maxSelect={4} />
+        <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={false} maxSelect={4} minSelect={3} />
       </section>
 
       <section>
@@ -252,7 +261,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           <div className="flex gap-1">
             {[
               { key: 'fast', label: '⚡ 빠른 탐색 (추천)', hint: '대략적인 순서를 휴리스틱으로 빠르게 찾고, 상위 100개만 정밀 재검증합니다. 오차 약 1%, 신통 풀이 커도 몇 분 내 완료.' },
-              { key: 'exhaustive', label: '🔬 정밀 탐색', hint: '모든 시전 순서를 전수탐색합니다. 정확하지만 매우 느립니다 (빌드당 최대 1.45M회 시뮬).' },
+              { key: 'exhaustive', label: '🔬 정밀 탐색', hint: '모든 시전 순서 전수탐색 (법보 위치 고정 시 6!×3!=4,320 / 미고정 시 9!=362,880, 법보조합당). 진행 중 Top 10 실시간 갱신.' },
             ].map((o) => (
               <button
                 key={o.key}
@@ -285,15 +294,24 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       </section>
 
       {/* 탐색 시작 / 중지 (진행바 위) */}
-      <section className="flex items-center justify-center pt-2 pb-2 border-t border-slate-800">
+      <section className="flex flex-col items-center justify-center pt-2 pb-2 border-t border-slate-800 gap-2">
         {!running ? (
-          <button
-            onClick={handleStart}
-            disabled={pool.size < 6}
-            className="px-10 py-4 bg-amber-500 text-slate-950 font-bold text-lg rounded-lg hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-          >
-            🔍 탐색 시작
-          </button>
+          <>
+            <button
+              onClick={handleStart}
+              disabled={pool.size < 6 || treasures.length < 3}
+              className="px-10 py-4 bg-amber-500 text-slate-950 font-bold text-lg rounded-lg hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
+            >
+              🔍 탐색 시작
+            </button>
+            {(pool.size < 6 || treasures.length < 3) && (
+              <div className="text-sm text-amber-300">
+                {pool.size < 6 && `신통 최소 ${6 - pool.size}개 더 선택 필요`}
+                {pool.size < 6 && treasures.length < 3 && ' · '}
+                {treasures.length < 3 && `법보 최소 ${3 - treasures.length}개 더 선택 필요`}
+              </div>
+            )}
+          </>
         ) : (
           <button
             onClick={cancel}
@@ -341,7 +359,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                       <span>
                         <span className="text-purple-300">W{parseInt(wid) + 1}</span>{' '}
                         {phaseLabel && (
-                          <span className={`text-[9px] px-1 rounded mr-1 ${workerPhase === 'pass2' ? 'bg-amber-700 text-amber-200' : 'bg-emerald-700 text-emerald-100'}`}>
+                          <span className={`text-[10px] px-1 rounded mr-1 ${workerPhase === 'pass2' ? 'bg-amber-700 text-amber-200' : 'bg-emerald-700 text-emerald-100'}`}>
                             {phaseLabel}
                           </span>
                         )}
@@ -352,7 +370,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                       </span>
                     </div>
                     {sp.skillLabel && (
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5 truncate">
+                      <div className="text-[11px] text-slate-500 font-mono mt-0.5 truncate">
                         {sp.skillLabel}
                       </div>
                     )}
@@ -362,7 +380,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                     {/* 순서 전수탐색 진행률 (정밀 모드, 작은 탐색에서만 노출) */}
                     {sp.orderTotal > 0 && (
                       <div className="mt-0.5">
-                        <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+                        <div className="flex justify-between text-[11px] text-slate-500 font-mono">
                           <span>순서 전수탐색</span>
                           <span>
                             {sp.orderDone.toLocaleString()} / {sp.orderTotal.toLocaleString()} ({orderPct.toFixed(1)}%)
@@ -668,7 +686,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
               </button>
             ))}
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+          <div className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
             {randomCrit
               ? '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 주사위로 roll. 매 실행마다 다른 값.'
               : '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 기댓값으로 스케일 계산. 결정적 (형혹 60% 폭파만 예외로 항상 랜덤).'}
