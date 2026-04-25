@@ -368,44 +368,43 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                 const orderPct = sp.orderTotal > 0 ? (sp.orderDone / sp.orderTotal) * 100 : 0;
                 const workerPhase = phase[parseInt(wid)];
                 const phaseLabel = workerPhase === 'pass2' ? '2차정밀' : workerPhase === 'pass1' ? '1차빠른' : null;
+                // 행 높이 고정 — 빌드 전환 시 layout shift 방지 (모든 element 항상 렌더, 빈 값은 placeholder)
                 return (
-                  <div key={wid} className="text-xs">
+                  <div key={wid} className="text-xs min-h-[68px]">
                     <div className="flex justify-between text-slate-300">
-                      <span>
+                      <span className="truncate min-w-0 mr-2">
                         <span className="text-purple-300">W{parseInt(wid) + 1}</span>{' '}
                         {phaseLabel && (
                           <span className={`text-[10px] px-1 rounded mr-1 ${workerPhase === 'pass2' ? 'bg-amber-700 text-amber-200' : 'bg-emerald-700 text-emerald-100'}`}>
                             {phaseLabel}
                           </span>
                         )}
-                        <span className="font-mono">{sp.buildLabel}</span>
+                        <span className="font-mono">{sp.buildLabel || '—'}</span>
                       </span>
-                      <span className="text-slate-400">
+                      <span className="text-slate-400 shrink-0">
                         {sp.structIdx ?? 0} / {sp.structTotal ?? '-'} 신통조합 ({structPct.toFixed(1)}%)
                       </span>
                     </div>
-                    {sp.skillLabel && (
-                      <div className="text-[11px] text-slate-300 font-mono mt-0.5 truncate">
-                        {sp.skillLabel}
-                      </div>
-                    )}
+                    <div className="text-[11px] text-slate-300 font-mono mt-0.5 truncate min-h-[14px]">
+                      {sp.skillLabel || ' '}
+                    </div>
                     <div className="w-full bg-slate-900 rounded h-1 overflow-hidden mt-0.5">
                       <div className="h-full bg-purple-500 transition-all" style={{ width: `${structPct}%` }} />
                     </div>
-                    {/* 순서 전수탐색 진행률 (정밀 모드, 작은 탐색에서만 노출) */}
-                    {sp.orderTotal > 0 && (
-                      <div className="mt-0.5">
-                        <div className="flex justify-between text-[11px] text-slate-300 font-mono">
-                          <span>순서 전수탐색</span>
-                          <span>
-                            {sp.orderDone.toLocaleString()} / {sp.orderTotal.toLocaleString()} ({orderPct.toFixed(1)}%)
-                          </span>
-                        </div>
-                        <div className="w-full bg-slate-900 rounded h-1 overflow-hidden">
-                          <div className="h-full bg-amber-500 transition-all" style={{ width: `${orderPct}%` }} />
-                        </div>
+                    {/* 순서 전수탐색 진행률 — 항상 자리 차지 (값 없으면 0%, 텍스트 placeholder) */}
+                    <div className="mt-0.5">
+                      <div className="flex justify-between text-[11px] text-slate-400 font-mono">
+                        <span>순서 전수탐색</span>
+                        <span>
+                          {sp.orderTotal > 0
+                            ? `${sp.orderDone.toLocaleString()} / ${sp.orderTotal.toLocaleString()} (${orderPct.toFixed(1)}%)`
+                            : ' '}
+                        </span>
                       </div>
-                    )}
+                      <div className="w-full bg-slate-900 rounded h-1 overflow-hidden">
+                        <div className="h-full bg-amber-500 transition-all" style={{ width: `${orderPct}%` }} />
+                      </div>
+                    </div>
                   </div>
                 );
               })}
