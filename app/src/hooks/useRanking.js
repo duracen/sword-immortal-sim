@@ -172,12 +172,20 @@ export function useRanking() {
   const workersRef = useRef([]);
   const perWorkerProgressRef = useRef([]);
   const perWorkerResultsRef = useRef([]);
+  const cancelTimeoutRef = useRef(null);
 
   useEffect(() => () => {
     workersRef.current.forEach((w) => w.terminate());
+    if (cancelTimeoutRef.current) clearTimeout(cancelTimeoutRef.current);
   }, []);
 
   const start = useCallback((config) => {
+    // 이전 취소의 강제종료 타이머가 살아있으면 새 워커도 죽일 수 있으니 먼저 해제
+    if (cancelTimeoutRef.current) {
+      clearTimeout(cancelTimeoutRef.current);
+      cancelTimeoutRef.current = null;
+    }
+    setCancelling(false);
     workersRef.current.forEach((w) => w.terminate());
     workersRef.current = [];
 
@@ -423,13 +431,18 @@ export function useRanking() {
 
   const cancel = useCallback(() => {
     setCancelling(true);
-    workersRef.current.forEach((w) => w.postMessage({ type: 'cancel' }));
-    setTimeout(() => {
-      if (workersRef.current.length > 0) {
-        workersRef.current.forEach((w) => w.terminate());
+    const cancelledWorkers = workersRef.current;
+    cancelledWorkers.forEach((w) => w.postMessage({ type: 'cancel' }));
+    if (cancelTimeoutRef.current) clearTimeout(cancelTimeoutRef.current);
+    cancelTimeoutRef.current = setTimeout(() => {
+      cancelTimeoutRef.current = null;
+      // 새 탐색이 시작되어 workersRef 가 교체됐을 수 있음 — cancelledWorkers 만 종료
+      cancelledWorkers.forEach((w) => w.terminate());
+      // 현재 활성 워커가 cancelledWorkers 와 동일할 때만 상태 리셋
+      if (workersRef.current === cancelledWorkers) {
         workersRef.current = [];
+        setRunning(false);
       }
-      setRunning(false);
       setCancelling(false);
     }, 3000);
   }, []);

@@ -206,14 +206,17 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
 }
 
 // === ILS (Iterated Local Search) + Combined Moves ===
-// mode='fast' : 3 seed × 3 kick, 2-swap + or-opt (~1,500 sims, Pass 1 용)
-// mode='strong': 10 seed × 8 kick, 2-swap + or-opt + 3-opt (~10,000 sims, Pass 2 용, 정밀 대비 36배 빠름)
+// mode='fast'    : 3 seed × 3 kick (Pass 1 — 법보 미고정, 큰 검색공간)
+// mode='triage'  : 2 seed × 0 kick (Pass 1 — 법보 고정, Pass 2 가 정밀 4320 전수라 가볍게 후보만 추림)
+// mode='strong'  : 10 seed × 8 kick + 3-opt (Pass 2 — 법보 미고정 시)
 async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress, mode = 'fast') {
   const simOpts = simOptsFor(markerIdx);
   const trTail = [0, 1, 2].map((i) => ({ kind: 'treasure', idx: i }));
   const swapRange = fixedTreasures ? 6 : 9;
   const config = mode === 'strong'
     ? { numSeeds: 10, numKicks: 8, use3Opt: true, estTotal: 10000 }
+    : mode === 'triage'
+    ? { numSeeds: 2, numKicks: 0, use3Opt: false, estTotal: 300 }
     : { numSeeds: 3, numKicks: 3, use3Opt: false, estTotal: 1500 };
   let simCount = 0;
 
@@ -350,25 +353,32 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
   return { bestOrd: globalBestOrder, bestScore: globalBestScore };
 }
 
-// fast 호출용 wrapper (Pass 1)
+// fast 호출용 wrapper (Pass 1, 법보 미고정)
 async function fastOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress) {
   return ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress, 'fast');
 }
 
-// strong 호출용 wrapper (Pass 2)
+// triage 호출용 wrapper (Pass 1, 법보 고정 — Pass 2 가 4320 전수라 가볍게)
+async function triageOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress) {
+  return ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress, 'triage');
+}
+
+// strong 호출용 wrapper (Pass 2, 법보 미고정)
 async function strongOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress) {
   return ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress, 'strong');
 }
 
-// 빠른 탐색: 법보 조합마다 fastOrderSearch 후 최고 선택 (topK/onOrderProgress 는 무시)
+// 빠른 탐색 Pass 1: 법보 조합마다 ILS — 법보 고정 시 triage(가벼움), 미고정 시 fast
+// (Pass 2 가 4320 전수를 돌리므로 고정 시에는 가볍게 후보만 추리면 충분)
 async function optimizeBuildFast(build, skillsOverride, markerIdx, fixedTreasures, isCancelled, _topK, onOrderProgress) {
   const treasureCombos = fixedTreasures
     ? (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : [FIXED_TREASURES])
     : (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : enumerateTreasures());
+  const orderFn = fixedTreasures ? triageOrderSearch : fastOrderSearch;
   let bestScore = -1, bestOrd = null, bestTr = null;
   for (const tr of treasureCombos) {
     if (isCancelled && isCancelled()) return { bestOrd, bestScore, bestTr, cancelled: true };
-    const res = await fastOrderSearch(build, skillsOverride, tr, markerIdx, fixedTreasures, isCancelled, onOrderProgress);
+    const res = await orderFn(build, skillsOverride, tr, markerIdx, fixedTreasures, isCancelled, onOrderProgress);
     if (res.cancelled) return { ...res, bestTr };
     if (res.bestScore > bestScore) {
       bestScore = res.bestScore;
@@ -578,7 +588,7 @@ async function handleMessage(e) {
     workerId = 0,
     structures = [],
     searchMode: userSearchMode = 'fast',
-    pass2TopK = 100,
+    pass2TopK = 50,
     orderTopK: userOrderTopK,
     불씨 = null,
   } = msg.config || {};
@@ -746,10 +756,13 @@ async function handleMessage(e) {
     }
   }
 
-  // === Pass 2 (fast 모드 전용): 상위 K 를 강화 ILS 로 재평가 (전수 대비 36배 빠름, 99.5% 정확도) ===
+  // === Pass 2 (fast 모드 전용): 상위 K 정밀 재검증 ===
+  // 법보 위치 고정 시: exhaustive 4320 전수가 strong ILS(10k) 보다 빠르고 정확 → optimizeBuild
+  // 법보 미고정 시: 9!=362880 이라 ILS 가 압도적 → optimizeBuildStrong
   if (searchMode === 'fast' && pass1Results && pass1Results.length > 0) {
     pass1Results.sort((a, b) => (b[sortKey] ?? 0) - (a[sortKey] ?? 0));
     const topK = pass1Results.slice(0, pass2TopK);
+    const pass2Optimize = fixedTreasures ? optimizeBuild : optimizeBuildStrong;
     self.postMessage({ type: 'phaseChange', workerId, phase: 'pass2', topK: topK.length });
 
     for (let i = 0; i < topK.length; i++) {
@@ -773,7 +786,7 @@ async function handleMessage(e) {
         bestSoFar: candidate[sortKey] ?? -1,
         phase: 'pass2',
       });
-      const refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, optimizeBuildStrong, 1, null);
+      const refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass2Optimize, 1, null);
       if (refined.cancelled) { self.postMessage({ type: 'cancelled' }); return; }
       const refinedResult = (refined.results && refined.results[0]) || null;
       if (!refinedResult) continue;

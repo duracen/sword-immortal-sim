@@ -260,7 +260,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           <label className="block text-xs text-slate-400 mb-1">탐색 방식</label>
           <div className="flex gap-1">
             {[
-              { key: 'fast', label: '⚡ 빠른 탐색 (추천)', hint: '대략적인 순서를 휴리스틱으로 빠르게 찾고, 상위 100개만 정밀 재검증합니다. 오차 약 1%, 신통 풀이 커도 몇 분 내 완료.' },
+              { key: 'fast', label: '⚡ 빠른 탐색 (추천)', hint: '대략적인 순서를 휴리스틱으로 빠르게 찾고, 상위 50개만 정밀 재검증합니다. 오차 약 1%, 신통 풀이 커도 몇 분 내 완료.' },
               { key: 'exhaustive', label: '🔬 정밀 탐색', hint: '모든 시전 순서 전수탐색 (법보 위치 고정 시 6!×3!=4,320 / 미고정 시 9!=362,880, 법보조합당). 진행 중 Top 10 실시간 갱신.' },
             ].map((o) => (
               <button
@@ -279,7 +279,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           </div>
           <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
             {searchMode === 'fast'
-              ? '빠른 탐색: 휴리스틱으로 전체 빌드를 1차 평가 → 상위 100개 빌드만 모든 순서 정밀 재검증. 결과 오차 약 1% 이내, 시간 효율 최고.'
+              ? '빠른 탐색: 휴리스틱으로 전체 빌드를 1차 평가 → 상위 50개 빌드만 정밀 재검증. 결과 오차 약 1% 이내, 시간 효율 최고.'
               : '정밀 탐색: 모든 빌드 × 모든 시전 순서를 전수탐색. 유파 1슬롯에서 시너지가 필수인 신통 15개 (예: 균천·진악, 주술·제율 등) 는 자동 제외 (단, 풀이 10개 이하면 그대로 포함).'}
           </div>
           {searchMode === 'exhaustive' && (
