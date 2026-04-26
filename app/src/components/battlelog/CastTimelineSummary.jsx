@@ -149,6 +149,9 @@ function parseEvents(events) {
   const FAMILY_EFFECT_BUFF_KEYS = new Set(['열산상태', '검심통명']);
   for (const ev of events) {
     if (ev.tag === 'BUF') {
+      // 정보성 BUF 라인 (예: "🔼버프 [...] 발동: 옥추 4중첩 ≥ 4 → ...") 은 applyBuff 가 따로 호출되어
+      // 별도 BUF 이벤트가 한 번 더 들어옴. 중복 카운트 방지를 위해 발동 안내 라인은 무시.
+      if (ev.msg.includes(' 발동:')) continue;
       const keyMatch = ev.msg.match(/\[([^\]]+)\]/);
       const durMatch = ev.msg.match(/(\d+(?:\.\d+)?)\s*초/);
       if (!keyMatch) continue;
@@ -171,8 +174,31 @@ function parseEvents(events) {
       // 시각상 짧은 바(2초)로 표시, 실제 지속시간 개념 없음
       const isThisCastOnly = !durMatch;
       const dur = durMatch ? parseFloat(durMatch[1]) : 2;  // 본 신통 한정이면 2초 시각
-      const start = ev.t;
-      const end = ev.t + dur;
+      // [post] 플래그: 본 cast 의 dealDamage 후 부여 — 본 cast 영향 X, 다음 cast 부터 적용
+      // 염양 트리거처럼 +0.4s 살짝 offset 시켜 시각적으로 "post-cast" 임을 표현
+      const isPostDmg = ev.msg.includes('[post]');
+      const start = isPostDmg ? ev.t + 0.4 : ev.t;
+      const end = start + dur;
+      // stack 정보:
+      //   stack: 이벤트 직후 stack 수 (UI 툴팁용)
+      //   delta: 이 이벤트가 stack 을 얼마나 증가시켰는지 (1→2 = +1, ↻갱신 = 0, 🔼버프 신규 = 1)
+      //   stackCap: 이 buff 의 maxStack (트레이스의 "(중첩최대N)" 에서 추출, 없으면 1)
+      // fire 횟수는 span 내 이벤트 수로 계산 (stack 5/5 유지도 폭파 1회로 카운트)
+      let stack = 1;
+      let delta = 1;  // 신규 (🔼버프) 기본 +1
+      let stackCap = 1;
+      const capDef = ev.msg.match(/중첩최대\s*(\d+)/);
+      if (capDef) stackCap = parseInt(capDef[1], 10);
+      const stkM = ev.msg.match(/(\d+)→(\d+)/);
+      if (stkM) {
+        const before = parseInt(stkM[1], 10);
+        stack = parseInt(stkM[2], 10);
+        delta = stack - before;
+        stackCap = Math.max(stackCap, stack);  // 적어도 stack 수만큼은 cap
+      } else {
+        const cap = ev.msg.match(/중첩\s*(\d+)\/(\d+)/);
+        if (cap) { stack = parseInt(cap[1], 10); delta = 0; stackCap = Math.max(stackCap, parseInt(cap[2], 10)); }
+      }
       if (!buffMap.has(displayKey)) buffMap.set(displayKey, []);
       const spans = buffMap.get(displayKey);
       const last = spans[spans.length - 1];
@@ -180,8 +206,13 @@ function parseEvents(events) {
       // 다른 timestamp 의 재갱신/재발동은 별도 block 으로 분리 (영염처럼 각 발동 시각화)
       if (last && Math.abs(last.start - start) < 0.05) {
         last.end = Math.max(last.end, end);
+        last.maxStack = Math.max(last.maxStack || 1, stack);
+        last.stackCap = Math.max(last.stackCap || 1, stackCap);
+        last.fires = (last.fires || 1) + 1;
+        last.deltaSum = (last.deltaSum || 0) + delta;
+        if (isPostDmg) last.isPostDmg = true;
       } else {
-        spans.push({ start, end, rawKey, isThisCastOnly });
+        spans.push({ start, end, rawKey, isThisCastOnly, maxStack: stack, stackCap, fires: 1, deltaSum: delta, isPostDmg });
       }
     }
   }
@@ -207,7 +238,7 @@ function parseEvents(events) {
   const bulssi = [];
   for (const [key, spans] of buffMap) {
     for (const s of spans) {
-      const item = { key, start: s.start, end: s.end, rawKey: s.rawKey, isThisCastOnly: s.isThisCastOnly };
+      const item = { key, start: s.start, end: s.end, rawKey: s.rawKey, isThisCastOnly: s.isThisCastOnly, maxStack: s.maxStack || 1, stackCap: s.stackCap || 1, fires: s.fires || 1, deltaSum: s.deltaSum || 0, isPostDmg: !!s.isPostDmg };
       if (s.rawKey && s.rawKey.startsWith('불씨 ')) bulssi.push(item);
       else if (FAMILY_EFFECT_KEYS.has(key)) continue; // 유파 효과 lane 에서 처리
       else buffs.push(item);
@@ -346,8 +377,14 @@ export default function CastTimelineSummary({ events }) {
           ))}
         </div>
 
-        {/* 시전 마커 (상단) */}
-        <div className="relative h-20 mb-2">
+        {/* 시전 마커 (상단) — stack 뱃지가 많을 수 있어 동적 높이 (각 cast 의 최대 stack 수 기준) */}
+        <div
+          className="relative mb-2"
+          style={{
+            // 시전 마커: dot+시간+이름 ≈ 36px + stack 뱃지당 18px (line-height + gap-0.5) + 하단 여유 12px
+            height: `${48 + Math.max(0, ...casts.map((c) => Object.entries(c.stks || {}).filter(([, v]) => v !== 0).length)) * 18}px`,
+          }}
+        >
           {casts.map((c, i) => {
             const cat = detectCat(c.name) || '법보';
             const color = CAT_COLOR[cat];
@@ -628,9 +665,15 @@ export default function CastTimelineSummary({ events }) {
             const realDur = b.end - b.start;
             const width = (realDur / maxT) * 100;
             const lookup = lookupOption(b.rawKey);
-            const header = lookup?.skill
+            const baseHeader = lookup?.skill
               ? `${lookup.skill} [${lookup.option}]`
               : b.key;
+            // 본 span 의 폭파 발동 횟수 (BUF event 수). cap 도달 후 ↻갱신 도 폭파 1회로 카운트
+            const fires = b.fires || 1;
+            // 누적 stack 은 실제 stack 이 2 이상일 때만 의미 있음
+            const firesPart = fires > 1 ? ` ×${fires}회 발동` : '';
+            const stackPart = (b.maxStack || 1) > 1 ? ` (누적 ${b.maxStack})` : '';
+            const header = `${baseHeader}${firesPart}${stackPart}`;
             const leftPct = (b.start / maxT) * 100;
             // tooltip 위치: 바 왼쪽이 화면 중앙 넘어가면 오른쪽에서 띄움
             const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
@@ -650,7 +693,7 @@ export default function CastTimelineSummary({ events }) {
                 }}
               >
                 <span className="text-[11px] text-white font-mono pl-1 truncate block leading-[16px]">
-                  {b.key}{b.isThisCastOnly ? ' *' : ` ·${realDur.toFixed(0)}s`}
+                  {b.key}{fires > 1 ? ` ×${fires}` : ''}{b.isThisCastOnly ? ' *' : ` ·${realDur.toFixed(0)}s`}
                 </span>
                 {/* 커스텀 툴팁 — hover 시 즉시 표시 */}
                 <div
@@ -697,9 +740,6 @@ export default function CastTimelineSummary({ events }) {
               </div>
               {casts.map((c, i) => {
                 if (!c.snap) return null;
-                const startT = c.t;
-                const endT = casts[i + 1] ? casts[i + 1].t : maxT;
-                const midT = (startT + endT) / 2;
                 const items = [];
                 for (const l of labels) {
                   const v = c.snap[l.key];
@@ -712,7 +752,11 @@ export default function CastTimelineSummary({ events }) {
                   if (arr.length === 0) return '';
                   return arr.map((r) => `${r.src}: +${r.val.toFixed(1)}`).join('\n');
                 };
-                const leftPct = (midT / maxT) * 100;
+                // 시전 칸과 일치하도록 cast 시간 기준 + 다음 cast 까지 꽉 채움 (막대 형태)
+                const startT = c.t;
+                const endT = casts[i + 1] ? casts[i + 1].t : maxT;
+                const leftPct = (startT / maxT) * 100;
+                const widthPct = ((endT - startT) / maxT) * 100;
                 const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
                 return (
                   <div
@@ -720,8 +764,7 @@ export default function CastTimelineSummary({ events }) {
                     className="absolute flex flex-col gap-0.5 items-stretch"
                     style={{
                       left: `${leftPct}%`,
-                      transform: 'translateX(-50%)',
-                      width: '76px',
+                      width: `${widthPct}%`,
                     }}
                   >
                     {items.map((it) => {
@@ -730,7 +773,7 @@ export default function CastTimelineSummary({ events }) {
                       return (
                         <span
                           key={it.key}
-                          className={`text-[10px] px-1 rounded font-mono border leading-[11px] text-center break-keep flex items-center justify-center gap-0.5 cursor-help ${it.color}`}
+                          className={`text-[11px] px-1 py-0.5 rounded font-mono border leading-[14px] text-center break-keep flex items-center justify-center gap-1 cursor-help ${it.color}`}
                           onMouseEnter={(e) => {
                             const r = e.currentTarget.getBoundingClientRect();
                             setSnapTip({
@@ -744,8 +787,8 @@ export default function CastTimelineSummary({ events }) {
                           }}
                           onMouseLeave={() => setSnapTip((t) => (t?.id === tipId ? null : t))}
                         >
-                          <span>{it.label} +{it.value.toFixed(0)}</span>
-                          <span className="text-[9px] opacity-70">?</span>
+                          <span className="break-words text-center">{it.label} +{it.value.toFixed(0)}</span>
+                          <span className="text-[10px] opacity-70 flex-shrink-0">?</span>
                         </span>
                       );
                     })}

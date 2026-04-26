@@ -137,6 +137,8 @@ function newState() {
     // 화상 (화염 공명 기본 효과로 부여, 20s, 방어 -2%/스택, 중첩 제한 없음)
     // 작열 개별 타이머 배열 [{dot, startT, endT}, ...] — 각 스택이 독립 만료
     작열Arr: [],
+    // 폭파(60%) 트리거용 결정적 RNG seed — 매 시뮬마다 0 으로 초기화 → 같은 빌드/순서/스킬 = 같은 결과
+    폭파RngSeed: 0,
     작열부여카운터: 0, // 신규 작열 부여 누적 (6회마다 염양 트리거)
     화상: 0, 화상EndT: 0,
     염양방감: 0, 염양방감EndT: 0, // 염양 방어력 감소 디버프 (10%/스택, 최대 3중첩, 10초)
@@ -423,6 +425,9 @@ function applyBuff(state, key, spec, dur, maxStack = 1) {
   // 같은 key 존재하면 stack 증가 / 갱신
   const ex = state.buffs.find(b => b.key === key && b.endT > state.t);
   const isWeak = !!(spec.defDebuff || spec.crRes);
+  // 본 cast 의 dealDamage 가 이미 실행된 후에 부여되는 buff 는 [post] 표시
+  // (이 buff 는 본 cast 에 영향 없고 다음 cast 부터 적용 — 타임라인 시각화에 사용)
+  const postTag = state._snapBuffsCaptured ? ' [post]' : '';
   if (ex) {
     ex.endT = state.t + dur + 0.001; // +epsilon — 갱신 시에도 dur초 후 cast 포함
     const prevStack = ex.stackCount || 1;
@@ -431,9 +436,9 @@ function applyBuff(state, key, spec, dur, maxStack = 1) {
     const m2 = key.match(/^(..)(..)_(.+)$/);
     const keyLabel2 = m2 ? `[${m2[1]}·${m2[2]} → ${m2[3]}]` : `[${key}]`;
     if (ex.stackCount > prevStack) {
-      TRACE(state, 'BUF', `↑중첩 ${keyLabel2} ${prevStack}→${ex.stackCount} (${dur}초 재갱신)`);
+      TRACE(state, 'BUF', `↑중첩 ${keyLabel2} ${prevStack}→${ex.stackCount} (${dur}초 재갱신)${postTag}`);
     } else {
-      TRACE(state, 'BUF', `↻갱신 ${keyLabel2} (${dur}초 재갱신, 중첩 ${ex.stackCount}/${maxStack} 유지)`);
+      TRACE(state, 'BUF', `↻갱신 ${keyLabel2} (${dur}초 재갱신, 중첩 ${ex.stackCount}/${maxStack} 유지)${postTag}`);
     }
     // 약화 중첩 증가 시 마상 트리거 (갱신이 아닌 중첩 증가만)
     if (isWeak && ex.stackCount > prevStack && typeof 마상트리거 === 'function') 마상트리거(state);
@@ -447,7 +452,7 @@ function applyBuff(state, key, spec, dur, maxStack = 1) {
   const keyLabel = m ? `[${m[1]}·${m[2]} → ${m[3]}]` : `[${key}]`;
   const specStr = Object.entries(spec).map(([k,v])=>k+'+'+v).join(',') || '(효과표시없음)';
   const kindTag = isWeak ? '🔻디버프' : '🔼버프';
-  TRACE(state, 'BUF', `${kindTag} ${keyLabel} ${specStr} ${dur}초${maxStack>1?` (중첩최대${maxStack})`:''}`);
+  TRACE(state, 'BUF', `${kindTag} ${keyLabel} ${specStr} ${dur}초${maxStack>1?` (중첩최대${maxStack})`:''}${postTag}`);
   // 신규 약화 부여 시 마상 트리거
   if (isWeak && typeof 마상트리거 === 'function') 마상트리거(state);
 }
@@ -576,6 +581,15 @@ function critMult(cr, cd) {
 function probScale(p) {
   if (CFG.randomCrit) return (Math.random() < p) ? 1 : 0;
   return p;
+}
+// 결정적 PRNG (mulberry32) — 폭파 60% 트리거 전용. 같은 빌드/순서/스킬 → 항상 같은 결과
+// 랜덤 모드 (CFG.randomCrit=true) 와 무관: 시드 기반이라 두 모드에서 동일하게 동작
+function seededRand(s) {
+  // state 의 폭파RngSeed 를 32-bit 정수로 갱신 후 [0,1) 반환
+  let t = (s.폭파RngSeed = (s.폭파RngSeed + 0x6D2B79F5) | 0);
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 }
 // 여러 번 반복하는 확률 카운트 (예: hits×crEff 기댓값 = 실제 crit 횟수)
 function randomTries(tries, p) {
@@ -1063,7 +1077,8 @@ function isBypassShield(state, bd) {
 function record(state, amount, source) {
   // 첫 record 시점 buff/stack snapshot 캡처 — UI SNAP 용 ("DMG 적용 시점" 상태)
   // post-DMG 트리거 (작열 부여로 인한 열산 buff 등) 는 제외하기 위해
-  if (!state._snapBuffsCaptured) {
+  // _inMainCast 가 true 일 때만 캡처 (pre-cast hook 의 폭파 record 는 무시)
+  if (state._inMainCast && !state._snapBuffsCaptured) {
     state._snapBuffsCaptured = true;
     state._snapBuffsAtDmg = state.buffs.map(b => ({
       key: b.key, endT: b.endT, stackCount: b.stackCount, maxStacks: b.maxStacks,
@@ -1616,7 +1631,7 @@ function 작열부여(s, n, perTick = 25, source) {
     // 현염법체 기본(화 2+): 작열 부여 시 화상 1중첩 자동 부여
     화상부여(s, 1);
     // [형혹 유파] 작열 1중첩 부여할 때마다 60% 확률 폭파 (형혹 ≥2)
-    if (famActive(s, '형혹') && Math.random() < 0.60) {
+    if (famActive(s, '형혹') && seededRand(s) < 0.60) {
       폭파(s);
     }
     // [열산 유파] 신규 작열 6회 부여할 때마다 염양 발동 + 열산 상태 진입 (동시) (열산 ≥2)
@@ -1844,7 +1859,7 @@ SK['이화·염무'] = {
     for (let i = 0; i < 6; i++) {
       add작열(s, 36 * 요원배율, 20 * 요원배율, '염무·분염+은염·요원');
       s.stacks.작열 = s.작열Arr.length;
-      if (famActive(s, '형혹') && Math.random() < 0.60) 폭파(s);
+      if (famActive(s, '형혹') && seededRand(s) < 0.60) 폭파(s);
       if (famActive(s, '열산')) {
         s.작열부여카운터 = (s.작열부여카운터 || 0) + 1;
         while (s.작열부여카운터 >= 6) {
@@ -2991,6 +3006,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state._snapBuffsCaptured = false;
         state._snapBuffsAtDmg = null;
         state._snapStacksAtDmg = null;
+        state._inMainCast = false;  // pre-cast hook 단계에선 false (메인 cast 진입 시 true)
         // 태현잔화: cast 시작 시 1회 roll (랜덤 모드에서만), 캐시해서 dealDamage 여러 번 호출돼도 동일 값
         if (CFG.randomCrit) {
           const 태현기댓값 = 불씨급수값(state, '태현잔화', [4, 6, 8]);
@@ -3064,15 +3080,21 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         }
         // === cast 실행 ===
         state._currentSource = sk.name;
+        // _inMainCast: 본 신통 cast 실행 중에만 true.
+        // record() 가 _snapBuffsCaptured 를 set 하는 조건과 applyBuff [post] 태깅 조건의
+        // 기준이 되는 플래그 — pre-cast hook 의 폭파 record / applyBuff 와 구분하기 위함.
+        state._inMainCast = true;
         SK[sk.name].cast(state, slots);
+        state._inMainCast = false;
         // 청명 유파: 임의 신통 명중 시 뇌인 1중첩 획득
         뇌인획득(state);
         // 활성 버프 수치 스냅샷 — DMG 적용 시점 상태 (post-DMG 트리거 buff/stack 제외)
+        // 본 cast 데미지에 실제로 영향을 준 buff 만 표시 — post-dmg buff 는 다음 cast 위치 막대에서 확인 가능
         {
           // 기여 소스별 분해 (툴팁 용)
           const bd = { atk: [], inc: [], amp: [], dealt: [], cr: [], cd: [], crRes: [], defDebuff: [], finalCR: [], finalCD: [], finalDmg: [] };
           const pushBuff = (field, key, val) => { if (val) bd[field].push({ src: key, val }); };
-          // SNAP 용 buff/stack: record() 첫 호출 시점 캡처본 사용 (없으면 현재 state)
+          // SNAP 용 buff/stack: record() 첫 호출 시점 캡처본 사용 (post-DMG 폭파/트리거 buff 제외)
           const snapBuffs = state._snapBuffsAtDmg || state.buffs;
           const snapStacks = state._snapStacksAtDmg || state.stacks;
           // applyBuff 기반 버프/디버프
