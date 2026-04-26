@@ -2197,15 +2197,12 @@ SK['오뢰·용음'] = {
   }
 };
 
-// ---------- 뇌전: 신소 (자원 생성 제한적) ----------
+// ---------- 뇌전: 신소 (검심처럼 영구 자원, 무제한 누적) ----------
+// spec: 신소 옵션은 "신소 1중첩 획득" 만 명시. 유지시간 X, max 명시 X.
+// 신소 자원 보유 시 유파 효과 (slot×4% 신통 피해) 활성. stack 수치는 활성 여부만 의미 (유파 효과는 보유=on/off).
+// stack 자체 소비는 어떤 옵션에도 명시 안 됨 — 따라서 자동 소모 X.
 function 신소상태(s) {
   return s.stacks.신소 > 0;
-}
-function 신소소모(s) {
-  if (s.stacks.신소 > 0) {
-    s.stacks.신소--;
-    s.nextCast.finalCR += 25; // 다음번 신통 최종 치명타율 +25
-  }
 }
 function 신소유파Mult(s, slots) {
   // dealDamage에서 글로벌 적용 중이므로 중복 방지
@@ -2215,12 +2212,9 @@ SK['신소·운록'] = {
   fam: '신소', cat: '뇌전', main: 135,
   cast(s, slots) {
     // [뇌동] 신소 +1 획득 + cd+15% 10s 지속 버프 (shintongOnly)
-    addStack(s, '신소', 1, 5);
+    addStack(s, '신소', 1, Infinity);
     applyBuff(s, '신소운록_뇌동', { cd: 15, shintongOnly: true }, 10);
-    신소소모(s);
     // [벽력] crit 시 atk 40% 10초 (max tier)
-    // - 기댓값: crEff × 40 스케일 buff
-    // - 랜덤: crit 확률로 주사위 굴려 full 40 또는 없음
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
     const 벽력val = probScale(crEff) * 40;
     if (벽력val > 0) applyBuff(s, '신소운록_벽력', { atk: 벽력val }, 10);
@@ -2233,8 +2227,7 @@ SK['신소·운록'] = {
 SK['신소·천고'] = {
   fam: '신소', cat: '뇌전', main: 135,
   cast(s, slots) {
-    addStack(s, '신소', 1, 5);
-    신소소모(s);
+    addStack(s, '신소', 1, Infinity);
     applyBuff(s, '신소천고_뇌명', { cr: 7 }, 10); // [뇌명] cr 7% (max tier)
     // [통할] 본 신통 cd +35 (max tier)
     // [경뢰] crRes 30% (max tier)
@@ -2248,8 +2241,7 @@ SK['신소·천고'] = {
 SK['신소·환뢰'] = {
   fam: '신소', cat: '뇌전', main: 128,
   cast(s, slots) {
-    addStack(s, '신소', 1, 5);
-    신소소모(s);
+    addStack(s, '신소', 1, Infinity);
     applyBuff(s, '신소환뢰_구소', { atk: 15 }, 5); // [구소] atk 15% (max tier)
     // [뇌전] 본 신통 cd +35 (max tier)
     // [호탕] crit 시 방어력 50% 감소 (max tier)
@@ -2274,9 +2266,8 @@ SK['신소·환뢰'] = {
 SK['신소·청삭'] = {
   fam: '신소', cat: '뇌전', main: 128,
   cast(s, slots) {
-    // [천위] 신소 상태 시 140% 물리 추가 — 신소소모 전에 체크 (소모 직전 상태)
+    // [천위] 신소 상태 시 140% 물리 추가 — 신소 자원 소비 X (조건만 체크)
     const 천위활성 = 신소상태(s);
-    신소소모(s);
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
     let 칙뢰, 풍뢰;
     if (CFG.randomCrit) {
