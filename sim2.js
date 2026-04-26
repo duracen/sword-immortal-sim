@@ -106,6 +106,8 @@ function newState() {
     폭우End: 0, 폭우살혼: 0, 폭우발동: 0,
     // 참허·단진 [단진] 리필 카운터 (연광 가정 4회)
     단진남은: 0,
+    // 균천·파월 [파월] 리필 카운터 — 신통 시전마다 검세+1 + atk+15% 5s, max 4회 발동
+    파월남은: 0,
     // 옥추·수광 [뇌격] 지속 crit 트리거 / [천붕] 수광 종료 시 트리거
     뇌격End: 0,
     뇌격남은: 0,
@@ -1361,9 +1363,8 @@ SK['균천·현봉'] = {
 SK['균천·파월'] = {
   fam: '균천', cat: '영검', main: 225,
   cast(s, slots) {
-    // [파월] 신통 시전 시 검세 +1 + atk 15% 5초 (최대 4회 발동)
-    검세획득_균천(s, slots, 1);
-    applyBuff(s, '균천파월_파월', { atk: 15 }, 5, 4);
+    // [파월] 리필 창: 본인 시전 후 4회의 임의 신통 시전마다 검세+1 + atk 15% 5s
+    s.파월남은 = 4;
     // [귀진] def-20% 10s (max tier)
     applyBuff(s, '균천파월_귀진', { defDebuff: 20 }, 10);
     // 본 신통 (술법 일반)
@@ -3153,6 +3154,12 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           state.단진남은--;
           검심획득(state, 1);
           applyBuff(state, '참허단진_단진_' + state.단진남은, { atk: 12 }, 5);
+        }
+        // [파월] 리필 트리거: 검세 +1 + atk 15% 5s (max tier, 4회)
+        if (state.famSlots.균천 && state.파월남은 > 0) {
+          state.파월남은--;
+          검세획득_균천(state, state.famSlots.균천, 1);
+          applyBuff(state, '균천파월_파월_' + state.파월남은, { atk: 15 }, 5);
         }
         // [사해·명화] per-cast: 30s간(15+암용15, max tier) 시전마다 살혼 20% 확정 (max tier)
         // [유령불] 명화 살혼 2회마다 30% 물리 (max tier) — 명화살혼발사에서 자동 처리

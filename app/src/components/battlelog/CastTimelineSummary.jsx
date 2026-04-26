@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { FAMILIES, SK, TREASURE_NAMES } from '../../engine';
 import { lookupOption, SKILL_OPTIONS, STACK_DESCS, TRIGGER_DESCS, TREASURE_DESCS } from '../../utils/skillOptions';
 
@@ -91,12 +92,11 @@ function parseEvents(events) {
     } else if (ev.tag === 'OPT' && ev.msg.includes('⚡천벌')) {
       triggers.push({ t: ev.t, kind: '천벌', label: '천벌 10s', dur: TRIG_DUR.천벌 });
     } else if (ev.tag === 'OPT' && ev.msg.includes('🔥염양')) {
-      // 염양/열산은 본 신통 DMG 후에 발동 → 시각상 cast 라인보다 살짝 뒤에 표시
+      // 염양은 본 신통 DMG 후에 발동 → 시각상 cast 라인보다 살짝 뒤에 표시
       // (이번 신통에는 buff 미적용 의미)
       triggers.push({ t: ev.t + 0.4, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
-    } else if (ev.tag === 'OPT' && ev.msg.includes('열산 상태 진입')) {
-      triggers.push({ t: ev.t + 0.4, kind: '열산', label: '열산 10s', dur: TRIG_DUR.열산 });
     }
+    // 열산상태 / 검심통명 등 유파 효과 buff 는 BUF 이벤트에서 처리
   }
   // STK 이벤트 → (1) cast 창에 매핑 (뱃지용), (2) 자원별 활성 구간 (막대용)
   const stackSpans = {};    // resource → [{start, end}] — 스택 > 0 인 구간
@@ -144,6 +144,9 @@ function parseEvents(events) {
   }
   for (const c of castRaws) casts.push(c);
 
+  // 유파 효과 buff key → trigger lane 으로 승격할 키 (열산상태/검심통명 등)
+  // 모든 유파 효과는 트리거 lane 으로 통합 표시.
+  const FAMILY_EFFECT_BUFF_KEYS = new Set(['열산상태', '검심통명']);
   for (const ev of events) {
     if (ev.tag === 'BUF') {
       const keyMatch = ev.msg.match(/\[([^\]]+)\]/);
@@ -151,6 +154,19 @@ function parseEvents(events) {
       if (!keyMatch) continue;
       const rawKey = keyMatch[1];
       const displayKey = canonicalDisplayKey(rawKey);
+      // 유파 효과 buff 는 트리거 lane 으로 승격
+      if (FAMILY_EFFECT_BUFF_KEYS.has(displayKey)) {
+        const dur = durMatch ? parseFloat(durMatch[1]) : 10;
+        // 동일 시각 중복 부여 방지
+        const last = triggers[triggers.length - 1];
+        if (!last || last.kind !== displayKey || Math.abs(last.t - ev.t) > 0.05) {
+          triggers.push({ t: ev.t, kind: displayKey, label: `${displayKey} ${dur}s`, dur });
+        } else {
+          // 갱신: end 만 늘림
+          last.dur = Math.max(last.dur, ev.t - last.t + dur);
+        }
+        continue;
+      }
       // 메시지에 "N초" 없음 = 본 신통 한정 버프 (applyBuff 아닌 nextCast 류)
       // 시각상 짧은 바(2초)로 표시, 실제 지속시간 개념 없음
       const isThisCastOnly = !durMatch;
@@ -226,7 +242,8 @@ const TRIGGER_STYLE = {
   천벌: { bg: 'bg-purple-500', icon: '⚡', ring: 'ring-purple-300' },
   천검: { bg: 'bg-blue-500', icon: '🗡', ring: 'ring-blue-300' },
   염양: { bg: 'bg-red-500', icon: '🔥', ring: 'ring-red-300' },
-  열산: { bg: 'bg-orange-500', icon: '🔥', ring: 'ring-orange-300' },
+  열산상태: { bg: 'bg-orange-500', icon: '🔥', ring: 'ring-orange-300' },
+  검심통명: { bg: 'bg-cyan-500', icon: '🗡', ring: 'ring-cyan-300' },
 };
 const DEFAULT_TRIGGER_STYLE = { bg: 'bg-slate-500', icon: '✨', ring: 'ring-slate-300' };
 
@@ -281,6 +298,8 @@ export default function CastTimelineSummary({ events }) {
   const stackLaneCount = useMemo(() => assignLanes(stacks), [stacks]);
   const bulssiLaneCount = useMemo(() => assignLanes(bulssi), [bulssi]);
   const triggerLaneCount = useMemo(() => assignTriggerLanes(triggers), [triggers]);
+  // 활성 버프 수치 hover tooltip — overflow-x-auto 안에서 빠져나오기 위해 portal 로 렌더
+  const [snapTip, setSnapTip] = useState(null);
 
   if (!events || events.length === 0) return null;
 
@@ -693,25 +712,43 @@ export default function CastTimelineSummary({ events }) {
                   if (arr.length === 0) return '';
                   return arr.map((r) => `${r.src}: +${r.val.toFixed(1)}`).join('\n');
                 };
+                const leftPct = (midT / maxT) * 100;
+                const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
                 return (
                   <div
                     key={i}
                     className="absolute flex flex-col gap-0.5 items-stretch"
                     style={{
-                      left: `${(midT / maxT) * 100}%`,
+                      left: `${leftPct}%`,
                       transform: 'translateX(-50%)',
                       width: '76px',
                     }}
                   >
-                    {items.map((it) => (
-                      <span
-                        key={it.key}
-                        className={`text-[10px] px-1 rounded font-mono border leading-[11px] text-center break-keep ${it.color}`}
-                        title={`${it.label} +${it.value.toFixed(1)}%\n\n${breakdown(it.key) || '(분해 없음)'}`}
-                      >
-                        {it.label} +{it.value.toFixed(0)}
-                      </span>
-                    ))}
+                    {items.map((it) => {
+                      const bdLines = breakdown(it.key);
+                      const tipId = `${i}-${it.key}`;
+                      return (
+                        <span
+                          key={it.key}
+                          className={`text-[10px] px-1 rounded font-mono border leading-[11px] text-center break-keep flex items-center justify-center gap-0.5 cursor-help ${it.color}`}
+                          onMouseEnter={(e) => {
+                            const r = e.currentTarget.getBoundingClientRect();
+                            setSnapTip({
+                              id: tipId,
+                              label: it.label,
+                              value: it.value,
+                              bdLines,
+                              x: r.left + r.width / 2,
+                              y: r.top,
+                            });
+                          }}
+                          onMouseLeave={() => setSnapTip((t) => (t?.id === tipId ? null : t))}
+                        >
+                          <span>{it.label} +{it.value.toFixed(0)}</span>
+                          <span className="text-[9px] opacity-70">?</span>
+                        </span>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -729,6 +766,40 @@ export default function CastTimelineSummary({ events }) {
         <span>🟡 법보</span>
         <span className="ml-2">| 녹색 바 = 버프 지속 시간</span>
       </div>
+      {snapTip && typeof document !== 'undefined' && createPortal(
+        (() => {
+          // 화면 밖으로 나가지 않게 좌우 클램프
+          const W = 288; // w-72 = 18rem ≈ 288px
+          const margin = 8;
+          const halfW = W / 2;
+          const vw = window.innerWidth;
+          let left = snapTip.x;
+          if (left - halfW < margin) left = margin + halfW;
+          if (left + halfW > vw - margin) left = vw - margin - halfW;
+          return (
+            <div
+              className="fixed z-[9999] w-72 p-3 bg-slate-950 border border-slate-600 rounded-lg shadow-xl pointer-events-none"
+              style={{
+                left: `${left}px`,
+                top: `${snapTip.y - 8}px`,
+                transform: 'translate(-50%, -100%)',
+              }}
+            >
+              <div className="text-xs font-bold text-slate-100 mb-1">
+                {snapTip.label} <span className="text-amber-300">+{snapTip.value.toFixed(2)}%</span>
+              </div>
+              {snapTip.bdLines ? (
+                <div className="text-[12px] text-slate-200 font-mono whitespace-pre-wrap leading-relaxed">
+                  {snapTip.bdLines}
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-300 italic">분해 정보 없음</div>
+              )}
+            </div>
+          );
+        })(),
+        document.body
+      )}
     </div>
   );
 }
