@@ -498,12 +498,12 @@ function SplitRankings({ results, sortBy, markerTime, onRowClick }) {
         <RankingTable results={sortedAll} sortBy={sortBy} onRowClick={onRowClick} limit={10} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div className="space-y-3">
         {LAW_BODY_CATS.map(({ cat, label, color }) => {
           const filtered = sortedAll.filter((r) => getBuildLawCat(r.build) === cat);
           if (filtered.length === 0) return null;
           return (
-            <div key={cat} className={`rounded-lg p-3 border ${color}`}>
+            <div key={cat} className={`rounded-lg p-3 sm:p-4 border ${color}`}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="font-bold text-slate-100">{label}</span>
                 <span className="text-xs text-slate-400 ml-auto">
