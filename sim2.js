@@ -3055,12 +3055,12 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             작열부여(state, 1, 36, '풍권·점화');
           }
         }
-        // [천로·단주 광염+충염] 다음 8회 신통 명중 시 작열 1중첩
-        // 단주 cast 자체에서도 발동 — 단주 cast 시 광염남은 초기화 후 1회 소모
+        // [천로·단주 광염+충염] 단주 cast 후 "다음 8회" 신통 명중 시 작열 1중첩
+        // spec "다음 N회" — 단주 cast 자체는 미포함, 후속 cast 부터 발동
         if (sk.name === '천로·단주' && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
           state.광염남은 = 8; state.광염max = 8;
-        }
-        if ((state.광염남은 || 0) > 0 && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
+          // 본 단주 cast 에서는 광염 trigger 발동 안 함 (다음 8회 부터)
+        } else if ((state.광염남은 || 0) > 0 && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
           const 광염used = (state.광염max || 8) - state.광염남은 + 1;
           TRACE(state, 'OPT', `🟠단주·광염 발동: 신통 명중 → 작열 1중첩 36% (${광염used}/${state.광염max || 8}회)`);
           state.광염남은--;
