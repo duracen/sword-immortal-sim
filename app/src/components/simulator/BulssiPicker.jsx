@@ -1,4 +1,5 @@
 import { BULSSI_DESCS } from '../../utils/skillOptions';
+import HoverTooltip from '../common/HoverTooltip';
 
 // 불씨 세트 장착 (총 9 슬롯 한도). 개수별 탑티어 효과 적용.
 // AutoSearch / ManualSim 양쪽에서 재사용.
@@ -18,35 +19,38 @@ export default function BulssiPicker({ value, onChange }) {
       </div>
       <div className="flex flex-wrap gap-2">
         {sets.map(({ key, choices, desc }) => (
-          <div
+          <HoverTooltip
             key={key}
-            className="relative group flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 cursor-help"
-          >
-            <span className="font-medium text-slate-100 text-sm">{key}</span>
-            <div className="flex gap-1">
-              {choices.map((n) => (
-                <button
-                  key={n}
-                  onClick={() => onChange({ ...value, [key]: n })}
-                  className={`px-2.5 h-7 text-xs rounded font-semibold ${
-                    (value[key] || 0) === n
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'bg-slate-700 hover:bg-slate-600'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-            {BULSSI_DESCS[key] && (
-              <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-80 p-3 bg-slate-950 border border-pink-600 rounded-lg shadow-xl pointer-events-none">
+            className="border-pink-600"
+            maxWidth={320}
+            content={BULSSI_DESCS[key] ? (
+              <>
                 <div className="text-xs font-bold text-pink-300 mb-1">🔥 불씨 · {key}</div>
                 <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                   {BULSSI_DESCS[key]}
                 </div>
+              </>
+            ) : null}
+          >
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 cursor-help">
+              <span className="font-medium text-slate-100 text-sm">{key}</span>
+              <div className="flex gap-1">
+                {choices.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => onChange({ ...value, [key]: n })}
+                    className={`px-2.5 h-7 text-xs rounded font-semibold ${
+                      (value[key] || 0) === n
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'bg-slate-700 hover:bg-slate-600'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
               </div>
-            )}
-          </div>
+            </div>
+          </HoverTooltip>
         ))}
       </div>
       {total > 9 && (

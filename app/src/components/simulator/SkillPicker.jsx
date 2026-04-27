@@ -1,5 +1,6 @@
 import { FAMILIES, FAMILIES_BY_CAT, CATEGORIES, SK, CFG } from '../../engine';
 import { SKILL_OPTIONS, FAMILY_EFFECTS, CAT_LAW_BODY, FAMILY_TIER, sortFamsByTier } from '../../utils/skillOptions';
+import HoverTooltip from '../common/HoverTooltip';
 
 // 통합 신통 선택기 — 유파 슬롯 선택을 흡수.
 // 사용자는 아무 유파에서든 신통을 클릭해 토글하고, 총 6개까지 선택 가능.
@@ -80,20 +81,25 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
           return (
           <div key={cat} className="border border-slate-700 bg-slate-900/40 rounded-lg p-2">
             <div className="flex items-center justify-between mb-1.5">
-              <div className="relative group/cat inline-block cursor-help">
-                <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
-                {catCount > 0 && <span className="text-[11px] text-amber-400 ml-1">({catCount})</span>}
-                {CAT_LAW_BODY[cat] && (
-                  <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
+              <HoverTooltip
+                className="border-purple-600"
+                maxWidth={420}
+                content={CAT_LAW_BODY[cat] ? (
+                  <>
                     <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
                     <div className="text-[11px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
                     <div className="text-[13px] text-slate-200 leading-relaxed space-y-1.5">
                       <div>{CAT_LAW_BODY[cat].effect2}</div>
                       <div>{CAT_LAW_BODY[cat].effect4}</div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  </>
+                ) : null}
+              >
+                <button type="button" className="cursor-help focus:outline-none focus:ring-1 focus:ring-purple-400 rounded">
+                  <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
+                  {catCount > 0 && <span className="text-[11px] text-amber-400 ml-1">({catCount})</span>}
+                </button>
+              </HoverTooltip>
               {catCount > 0 && (
                 <button
                   onClick={() => clearCategory(cat)}
@@ -116,19 +122,11 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                     className="flex items-center gap-1 border border-slate-800 rounded p-1 bg-slate-950/40"
                   >
                     {/* 유파명 */}
-                    <div className="relative group/fam w-14 shrink-0 cursor-help flex items-center gap-1">
-                      <span className="text-[11px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
-                      {FAMILY_TIER[fam] && (
-                        <span className={`text-[8px] px-0.5 rounded font-mono ${
-                          FAMILY_TIER[fam] === '합체기' ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60' :
-                          FAMILY_TIER[fam] === '반허기' ? 'bg-purple-900/60 text-purple-300 border border-purple-700/60' :
-                          'bg-slate-800 text-slate-400 border border-slate-700'
-                        }`}>
-                          {FAMILY_TIER[fam][0]}
-                        </span>
-                      )}
-                      {FAMILY_EFFECTS[fam] && (
-                        <div className="hidden group-hover/fam:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-blue-600 rounded-lg shadow-xl pointer-events-none">
+                    <HoverTooltip
+                      className="border-blue-600"
+                      maxWidth={384}
+                      content={FAMILY_EFFECTS[fam] ? (
+                        <>
                           <div className="text-xs font-bold text-blue-300 mb-1">
                             🏛 {fam} 유파 효과
                             <span className="text-[11px] text-amber-300 font-bold ml-2 px-1.5 py-0.5 bg-amber-900/50 rounded">2+</span>
@@ -137,9 +135,22 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                           <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                             {FAMILY_EFFECTS[fam]}
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        </>
+                      ) : null}
+                    >
+                      <button type="button" className="w-14 shrink-0 cursor-help flex items-center gap-1 focus:outline-none focus:ring-1 focus:ring-blue-400 rounded">
+                        <span className="text-[11px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
+                        {FAMILY_TIER[fam] && (
+                          <span className={`text-[8px] px-0.5 rounded font-mono ${
+                            FAMILY_TIER[fam] === '합체기' ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60' :
+                            FAMILY_TIER[fam] === '반허기' ? 'bg-purple-900/60 text-purple-300 border border-purple-700/60' :
+                            'bg-slate-800 text-slate-400 border border-slate-700'
+                          }`}>
+                            {FAMILY_TIER[fam][0]}
+                          </span>
+                        )}
+                      </button>
+                    </HoverTooltip>
                     {/* 신통 4개 */}
                     <div className="grid grid-cols-4 gap-0.5 flex-1 min-w-0">
                       {pool.map((name) => {
@@ -154,7 +165,26 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                         // 신통 이름에서 유파부분 제거 ("복룡·절화" → "절화")
                         const shortName = name.includes('·') ? name.split('·')[1] : name;
                         return (
-                          <div key={name} className="relative group">
+                          <HoverTooltip
+                            key={name}
+                            className="border-yellow-600"
+                            maxWidth={384}
+                            content={hasOpts ? (
+                              <>
+                                <div className="text-xs font-bold text-yellow-300 mb-2">
+                                  ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
+                                </div>
+                                <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
+                                  {Object.entries(opts).map(([opt, d]) => (
+                                    <div key={opt}>
+                                      <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
+                                      <span className="text-slate-300">{d}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            ) : null}
+                          >
                             <button
                               onClick={() => toggleSkill(fam, name)}
                               disabled={disabled}
@@ -175,22 +205,7 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                                 )}
                               </span>
                             </button>
-                            {hasOpts && (
-                              <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
-                                <div className="text-xs font-bold text-yellow-300 mb-2">
-                                  ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
-                                </div>
-                                <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
-                                  {Object.entries(opts).map(([opt, d]) => (
-                                    <div key={opt}>
-                                      <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
-                                      <span className="text-slate-300">{d}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
+                          </HoverTooltip>
                         );
                       })}
                     </div>

@@ -427,7 +427,7 @@ export default function CastTimelineSummary({ events }) {
                 {/* 시전 툴팁 */}
                 {(treasureDesc || skillOpts) && (
                   <div
-                    className={`hidden group-hover:block absolute ${tooltipSide} top-6 z-[200] w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none`}
+                    className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-6 z-[200] w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-yellow-300 mb-1">
                       {c.isTreasure ? '📿' : '▶'} {c.name}
@@ -491,7 +491,7 @@ export default function CastTimelineSummary({ events }) {
                       {style.icon} {tg.kind} ·{dur}s
                     </span>
                     <div
-                      className={`hidden group-hover:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
+                      className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
                     >
                       <div className="text-xs font-bold text-orange-300 mb-1">
                         {style.icon} {tg.kind}
@@ -518,7 +518,7 @@ export default function CastTimelineSummary({ events }) {
                     {style.icon}
                   </div>
                   <div
-                    className={`hidden group-hover:block absolute ${tooltipSide} top-6 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
+                    className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-6 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-orange-300 mb-1">
                       {style.icon} {tg.kind}
@@ -571,7 +571,7 @@ export default function CastTimelineSummary({ events }) {
                     {s.key} {s.peak}중첩 ·{(s.end - s.start).toFixed(0)}s
                   </span>
                   <div
-                    className={`hidden group-hover:block absolute ${tooltipSide} top-5 z-[200] w-80 p-3 bg-slate-950 border border-sky-600 rounded-lg shadow-xl pointer-events-none`}
+                    className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-80 p-3 bg-slate-950 border border-sky-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-sky-300 mb-1">
                       🔷 {s.key} (최대 {s.peak}중첩)
@@ -631,7 +631,7 @@ export default function CastTimelineSummary({ events }) {
                     🔥 {b.key}{b.isThisCastOnly ? ' *' : ` ·${realDur.toFixed(0)}s`}
                   </span>
                   <div
-                    className={`hidden group-hover:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-pink-600 rounded-lg shadow-xl pointer-events-none`}
+                    className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-pink-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-pink-300 mb-1">🔥 {header}</div>
                     <div className="text-[11px] text-slate-400 font-mono mb-2">
@@ -697,7 +697,7 @@ export default function CastTimelineSummary({ events }) {
                 </span>
                 {/* 커스텀 툴팁 — hover 시 즉시 표시 */}
                 <div
-                  className={`hidden group-hover:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-emerald-600 rounded-lg shadow-xl pointer-events-none`}
+                  className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-emerald-600 rounded-lg shadow-xl pointer-events-none`}
                 >
                   <div className="text-xs font-bold text-emerald-300 mb-1">{header}</div>
                   <div className="text-[11px] text-slate-400 font-mono mb-2">

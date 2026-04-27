@@ -284,7 +284,7 @@ export default function DamageBreakdown({ dmgEvents }) {
                 ))}
               </div>
               {/* hover 시 세그먼트 라벨 */}
-              <div className="hidden group-hover/bar:flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[10px] text-slate-400">
+              <div className="hidden group-hover/bar:flex group-focus-within/bar:flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5 text-[10px] text-slate-400">
                 {g.segs.map((seg, si) => (
                   <span key={seg.child}>
                     <span

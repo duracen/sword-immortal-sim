@@ -1,5 +1,6 @@
 import { FAMILIES, FAMILIES_BY_CAT, CATEGORIES, SK, CFG } from '../../engine';
 import { SKILL_OPTIONS, FAMILY_EFFECTS, CAT_LAW_BODY, FAMILY_TIER, sortFamsByTier } from '../../utils/skillOptions';
+import HoverTooltip from '../common/HoverTooltip';
 
 // pool: Set<string> of skill names
 // onChange: (nextSet) => void
@@ -60,19 +61,24 @@ export default function SkillPoolPicker({ pool, onChange }) {
           return (
           <div key={cat} className="border border-slate-700 bg-slate-900/40 rounded-lg p-2">
             <div className="flex items-center justify-between mb-1.5">
-              <div className="relative group/cat inline-block cursor-help">
-                <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
-                {CAT_LAW_BODY[cat] && (
-                  <div className="hidden group-hover/cat:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-[420px] p-3 bg-slate-950 border border-purple-600 rounded-lg shadow-xl pointer-events-none">
+              <HoverTooltip
+                className="border-purple-600"
+                maxWidth={420}
+                content={CAT_LAW_BODY[cat] ? (
+                  <>
                     <div className="text-xs font-bold text-purple-300 mb-1">⚜ {CAT_LAW_BODY[cat].name}</div>
                     <div className="text-[11px] text-slate-400 mb-2">{CAT_LAW_BODY[cat].상성}</div>
                     <div className="text-[13px] text-slate-200 leading-relaxed space-y-1.5">
                       <div>{CAT_LAW_BODY[cat].effect2}</div>
                       <div>{CAT_LAW_BODY[cat].effect4}</div>
                     </div>
-                  </div>
-                )}
-              </div>
+                  </>
+                ) : null}
+              >
+                <button type="button" className="cursor-help focus:outline-none focus:ring-1 focus:ring-purple-400 rounded">
+                  <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
+                </button>
+              </HoverTooltip>
               <button
                 onClick={() => setAllInCat(cat, !catAllSelected)}
                 className={`text-[11px] px-2 py-0.5 rounded border transition ${
@@ -94,19 +100,11 @@ export default function SkillPoolPicker({ pool, onChange }) {
                     key={fam}
                     className="flex items-center gap-1 border border-slate-800 rounded p-1 bg-slate-950/40"
                   >
-                    <div className="relative group/fam w-14 shrink-0 cursor-help flex items-center gap-1">
-                      <span className="text-[11px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
-                      {FAMILY_TIER[fam] && (
-                        <span className={`text-[8px] px-0.5 rounded font-mono ${
-                          FAMILY_TIER[fam] === '합체기' ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60' :
-                          FAMILY_TIER[fam] === '반허기' ? 'bg-purple-900/60 text-purple-300 border border-purple-700/60' :
-                          'bg-slate-800 text-slate-400 border border-slate-700'
-                        }`}>
-                          {FAMILY_TIER[fam][0]}
-                        </span>
-                      )}
-                      {FAMILY_EFFECTS[fam] && (
-                        <div className="hidden group-hover/fam:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-blue-600 rounded-lg shadow-xl pointer-events-none">
+                    <HoverTooltip
+                      className="border-blue-600"
+                      maxWidth={384}
+                      content={FAMILY_EFFECTS[fam] ? (
+                        <>
                           <div className="text-xs font-bold text-blue-300 mb-1">
                             🏛 {fam} 유파 효과
                             <span className="text-[11px] text-amber-300 font-bold ml-2 px-1.5 py-0.5 bg-amber-900/50 rounded">2+</span>
@@ -115,9 +113,22 @@ export default function SkillPoolPicker({ pool, onChange }) {
                           <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
                             {FAMILY_EFFECTS[fam]}
                           </div>
-                        </div>
-                      )}
-                    </div>
+                        </>
+                      ) : null}
+                    >
+                      <button type="button" className="w-14 shrink-0 cursor-help flex items-center gap-1 focus:outline-none focus:ring-1 focus:ring-blue-400 rounded">
+                        <span className="text-[11px] text-slate-200 font-medium border-b border-dotted border-slate-500">{fam}</span>
+                        {FAMILY_TIER[fam] && (
+                          <span className={`text-[8px] px-0.5 rounded font-mono ${
+                            FAMILY_TIER[fam] === '합체기' ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60' :
+                            FAMILY_TIER[fam] === '반허기' ? 'bg-purple-900/60 text-purple-300 border border-purple-700/60' :
+                            'bg-slate-800 text-slate-400 border border-slate-700'
+                          }`}>
+                            {FAMILY_TIER[fam][0]}
+                          </span>
+                        )}
+                      </button>
+                    </HoverTooltip>
                     <div className="grid grid-cols-4 gap-0.5 flex-1 min-w-0">
                       {skills.map((name) => {
                         const on = pool.has(name);
@@ -127,19 +138,12 @@ export default function SkillPoolPicker({ pool, onChange }) {
                         const hasOpts = opts && Object.keys(opts).length > 0;
                         const shortName = name.includes('·') ? name.split('·')[1] : name;
                         return (
-                          <div key={name} className="relative group">
-                            <button
-                              onClick={() => toggle(name)}
-                              className={`w-full text-center px-0.5 py-1.5 rounded border text-[11px] transition cursor-help leading-tight ${
-                                on
-                                  ? 'bg-amber-500/20 border-amber-500 text-amber-200'
-                                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
-                              }`}
-                            >
-                              <span className="font-medium truncate block">{shortName}</span>
-                            </button>
-                            {hasOpts && (
-                              <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
+                          <HoverTooltip
+                            key={name}
+                            className="border-yellow-600"
+                            maxWidth={384}
+                            content={hasOpts ? (
+                              <>
                                 <div className="text-xs font-bold text-yellow-300 mb-2">
                                   ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
                                 </div>
@@ -151,9 +155,20 @@ export default function SkillPoolPicker({ pool, onChange }) {
                                     </div>
                                   ))}
                                 </div>
-                              </div>
-                            )}
-                          </div>
+                              </>
+                            ) : null}
+                          >
+                            <button
+                              onClick={() => toggle(name)}
+                              className={`w-full text-center px-0.5 py-1.5 rounded border text-[11px] transition cursor-help leading-tight ${
+                                on
+                                  ? 'bg-amber-500/20 border-amber-500 text-amber-200'
+                                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'
+                              }`}
+                            >
+                              <span className="font-medium truncate block">{shortName}</span>
+                            </button>
+                          </HoverTooltip>
                         );
                       })}
                     </div>

@@ -1,5 +1,6 @@
 import { TREASURE_NAMES } from '../../engine';
 import { TREASURE_DESCS } from '../../utils/skillOptions';
+import HoverTooltip from '../common/HoverTooltip';
 
 // 표시 순서 (시전 기본 순서와 동일): 환음요탑 → 유리옥호 → 참원선검 → 오염혁선
 const DISPLAY_ORDER = ['환음요탑', '유리옥호', '참원선검', '오염혁선'];
@@ -44,7 +45,17 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
           const idx = selected.indexOf(tr);
           const desc = TREASURE_DESCS[tr];
           return (
-            <div key={tr} className="relative group">
+            <HoverTooltip
+              key={tr}
+              className="border-yellow-600"
+              maxWidth={288}
+              content={desc ? (
+                <>
+                  <div className="text-xs font-bold text-yellow-300 mb-1">📿 {tr}</div>
+                  <div className="text-[13px] text-slate-200 leading-relaxed">{desc}</div>
+                </>
+              ) : null}
+            >
               <button
                 onClick={() => toggle(tr)}
                 className={`relative px-3 py-2 rounded-md border font-medium text-sm cursor-help ${
@@ -63,13 +74,7 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
                   <span className="ml-2 text-xs text-amber-400">✓</span>
                 )}
               </button>
-              {desc && (
-                <div className="hidden group-hover:block absolute left-0 top-full mt-1 z-[200] w-[90vw] max-w-72 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none">
-                  <div className="text-xs font-bold text-yellow-300 mb-1">📿 {tr}</div>
-                  <div className="text-[13px] text-slate-200 leading-relaxed">{desc}</div>
-                </div>
-              )}
-            </div>
+            </HoverTooltip>
           );
         })}
       </div>
