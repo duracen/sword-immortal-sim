@@ -1318,8 +1318,10 @@ function 천검발동(s, slots, ampPct = 0) {
   const base = 60 + 60 * hpLowFactor(s);
   const mult = 1 + slots * 10 / 100;
   let amp = 1 + ampPct / 100;
-  // 관일·[검망]: 천검 발동 시 피해 +20~30% + 검세 +1 (기본 3회 + 쇄일 1회 = 4회)
+  // 관일·[검망]: 천검 발동 시 피해 +60% + 검세 +1 (max tier: 3회 + 쇄일 +3회 = 6회)
   if (s.검망남은 > 0) {
+    const used = (s.검망max || 6) - s.검망남은 + 1;
+    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → +${s.검망증폭}% 증폭 + 검세 +1 (${used}/${s.검망max || 6}회)`);
     s.검망남은--;
     amp *= 1 + s.검망증폭 / 100;
     if (s.famSlots.균천) 검세획득_균천(s, s.famSlots.균천, 1);
@@ -1401,7 +1403,7 @@ SK['균천·관일'] = {
   cast(s, slots) {
     // [검망 max: 3회] + [쇄일 max: +3회] = 6회, 증폭 40%+20% = 60% (max tier)
     // 관일 cast 동안 검세 누적으로 천검 발동될 수 있으므로 검세 부여 전에 검망 카운터 활성화
-    s.검망남은 = 6;
+    s.검망남은 = 6; s.검망max = 6;
     s.검망증폭 = 60;
     record(s, dealDamage(s, 250));
     s.관일End = s.t + 15;
