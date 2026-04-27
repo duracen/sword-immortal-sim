@@ -1399,6 +1399,10 @@ SK['균천·파월'] = {
 SK['균천·관일'] = {
   fam: '균천', cat: '영검', main: 250,
   cast(s, slots) {
+    // [검망 max: 3회] + [쇄일 max: +3회] = 6회, 증폭 40%+20% = 60% (max tier)
+    // 관일 cast 동안 검세 누적으로 천검 발동될 수 있으므로 검세 부여 전에 검망 카운터 활성화
+    s.검망남은 = 6;
+    s.검망증폭 = 60;
     record(s, dealDamage(s, 250));
     s.관일End = s.t + 15;
     s.관일종료처리 = false;
@@ -1409,9 +1413,6 @@ SK['균천·관일'] = {
     s._currentSource = prevSrc;
     if (s.famSlots.균천) 검세획득_균천(s, s.famSlots.균천, 1);
     s._관일이미처리 = true;
-    // [검망 max: 3회] + [쇄일 max: +3회] = 6회, 증폭 40%+20% = 60% (max tier)
-    s.검망남은 = 6;
-    s.검망증폭 = 60;
   }
 };
 
