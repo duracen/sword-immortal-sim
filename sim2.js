@@ -960,6 +960,7 @@ function detailedBuffBreakdown(state, bd) {
     if (b.defDebuff) cat.def.push(`${tag}-${(b.defDebuff * sc).toFixed(0)}`);
     if (b.cat === 'inc' && b.dmgMult) cat.신통피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
     if (b.cat === 'amp' && b.dmgMult) cat.심화피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
+    if (b.cat === 'dealt' && b.dmgMult) cat.입히는피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
   }
   // 자동 소스 (state.buffs 외 유파·공명·자원 기반 기여)
   if ((state.catSlots.화염 || 0) >= 2 && (state.stacks.작열 || 0) > 0) cat.공격력.push('현염법체2+9');
@@ -1077,10 +1078,13 @@ function isBypassShield(state, bd) {
 }
 
 function record(state, amount, source) {
-  // 첫 record 시점 buff/stack snapshot 캡처 — UI SNAP 용 ("DMG 적용 시점" 상태)
-  // post-DMG 트리거 (작열 부여로 인한 열산 buff 등) 는 제외하기 위해
+  // 첫 신통-type record 시점 buff/stack snapshot 캡처 — UI SNAP 용 ("본 신통 DMG 적용 시점" 상태)
+  // 호무/천뢰/작열 등 추가 데미지가 본 신통보다 먼저 record 되는 경우 (여명/동현/뇌벌 등),
+  // 그 이후 본 신통 record 직전에 부여되는 buff (제월/귀진/검망 등) 도 SNAP 에 포함되도록
+  // type==='신통' 인 record 까지 캡처 보류.
   // _inMainCast 가 true 일 때만 캡처 (pre-cast hook 의 폭파 record 는 무시)
-  if (state._inMainCast && !state._snapBuffsCaptured) {
+  const _bdType = state._lastBreakdown && state._lastBreakdown.type;
+  if (state._inMainCast && !state._snapBuffsCaptured && _bdType === '신통') {
     state._snapBuffsCaptured = true;
     state._snapBuffsAtDmg = state.buffs.map(b => ({
       key: b.key, endT: b.endT, stackCount: b.stackCount, maxStacks: b.maxStacks,
@@ -1318,12 +1322,29 @@ function 천검발동(s, slots, ampPct = 0) {
   const base = 60 + 60 * hpLowFactor(s);
   const mult = 1 + slots * 10 / 100;
   let amp = 1 + ampPct / 100;
-  // 관일·[검망]: 천검 발동 시 피해 +60% + 검세 +1 (max tier: 3회 + 쇄일 +3회 = 6회)
+  // 관일·[검망]: 천검 발동 시 발동 (max tier: 3회 + [쇄일] +3회 = 6회)
+  //   [검망] 효과: 입히는 피해 +40% (general dealt buff, 5초) + 검세 +1
+  //   [쇄일] 효과: 검망 발동 시 천검 자체 피해 +20%
   if (s.검망남은 > 0) {
     const used = (s.검망max || 6) - s.검망남은 + 1;
-    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → +${s.검망증폭}% 증폭 + 검세 +1 (${used}/${s.검망max || 6}회)`);
+    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → 입히는 피해 +40% 5s (general) + 천검 ×1.20 (쇄일) + 검세 +1 (${used}/${s.검망max || 6}회)`);
     s.검망남은--;
-    amp *= 1 + s.검망증폭 / 100;
+    // [검망] dealt +40% buff 5초 (전체 입히는 피해)
+    // 천검 자체 record 가 아직 안 일어났으므로 이번 천검 데미지에 대해서는 pre-DMG 부여.
+    // host cast 의 record 후 시점이라 _snapBuffsCaptured=true 일 수 있는데, 그대로 두면
+    // applyBuff 가 [post] 태그를 붙여 타임라인에서 +0.4s offset 표시됨 → 잘못된 시각.
+    // 천검 발동 시점=실제 적용 시점이므로 임시로 snap flag 해제하여 [post] 태그 방지.
+    const _prevSnap = s._snapBuffsCaptured;
+    s._snapBuffsCaptured = false;
+    // key 포맷 "균천관일_검망" → applyBuff 가 자동으로 "[균천·관일 → 검망]" 형식 로그 생성
+    // (lookupOption 의 포맷 1 로 파싱되어 옵션 desc 자동 매칭됨)
+    applyBuff(s, '균천관일_검망', { cat: 'dealt', dmgMult: 40 }, 5);
+    s._snapBuffsCaptured = _prevSnap;
+    // [쇄일] 천검 dmg +20% (이번 천검 한정 — 다음 데미지엔 적용 X)
+    // 실제 buff 등록은 안 함 (다음 데미지에 잘못 적용 방지). 타임라인 시각화 용도로만 BUF trace 찍음.
+    TRACE(s, 'BUF', `🔼버프 [균천·관일 → 쇄일] 천검 dmg ×1.20 (이번 천검 한정)`);
+    amp *= 1.20;
+    // 검세 +1
     if (s.famSlots.균천) 검세획득_균천(s, s.famSlots.균천, 1);
   }
   // 천검은 호신강기 무시 — type:'천검' 으로 처리
@@ -1345,8 +1366,15 @@ SK['균천·진악'] = {
   fam: '균천', cat: '영검', main: 225,
   cast(s, slots) {
     const js = s.stacks.검세;
-    // 본 신통 (술법 일반 피해)
+    // === "본 신통 시전 시" 트리거 (본 신통 record 전 — buff 가 본 신통에 반영) ===
+    // [종식] 검세 3+ 시: 즉시 천검 + atk 30% 10s (max tier)
+    if (js >= 3) {
+      applyBuff(s, '균천진악_종식', { atk: 30 }, 10);
+      천검발동(s, slots);
+    }
+    // === 본 신통 (술법 일반 피해) ===
     record(s, dealDamage(s, 225));
+    // === "본 신통 시전 시" 추가 데미지 (본 신통 후 — 별도 record) ===
     // [진악] 검세당 30% 호무 (max 5회, max tier)
     const flat1 = 30 * Math.min(js, 5);
     if (flat1) record(s, dealDamage(s, flat1, { noSkillMult: true, type: '호무' }), '진악(호무)');
@@ -1354,11 +1382,6 @@ SK['균천·진악'] = {
     record(s, dealDamage(s, 50 * 2, { noSkillMult: true, type: '호무' }), '동현(호무)');
     // [절학] 검세 5+ 시 105% 호무 × 2회 (max tier)
     if (js >= 5) record(s, dealDamage(s, 105 * 2, { noSkillMult: true, type: '호무' }), '절학(호무)');
-    // [종식] 검세 3+ 시 천검 발동 + atk 30% 10s (max tier)
-    if (js >= 3) {
-      천검발동(s, slots);
-      applyBuff(s, '균천진악_종식', { atk: 30 }, 10);
-    }
   }
 };
 SK['균천·현봉'] = {
@@ -1382,29 +1405,27 @@ SK['균천·현봉'] = {
 SK['균천·파월'] = {
   fam: '균천', cat: '영검', main: 225,
   cast(s, slots) {
-    // [파월] 리필 창: 본인 시전 후 4회의 임의 신통 시전마다 검세+1 + atk 15% 5s
-    s.파월남은 = 4;
-    // [귀진] def-20% 10s (max tier)
-    applyBuff(s, '균천파월_귀진', { defDebuff: 20 }, 10);
-    // 본 신통 (술법 일반)
-    record(s, dealDamage(s, 225));
+    // [파월] (신통 시전 시, 리필 창) — pre-DMG 섹션에서 reset+fire 처리됨 ([광염] 패턴)
+    // [제월] (즉시, 조건 없음) — pre-DMG 섹션에서 [파월] 보다 먼저 처리됨 (시전 시 보다 빠름)
+    // === "본 신통 시전 시" 트리거 (본 신통 record 전 — 추가 데미지 + 검세) ===
     // [여명] 100% 호무 추가 + 검세 +1 (max tier)
     record(s, dealDamage(s, 100, { noSkillMult: true, type: '호무' }), '여명(호무)');
     검세획득_균천(s, slots, 1);
-    // [귀진] 60% 호무 추가 (max tier)
+    // === "본 신통으로 적을 명중 시" 트리거 — 본 신통 record 직전 buff 부여 ===
+    // [귀진] def-20% 10s (max tier)
+    applyBuff(s, '균천파월_귀진', { defDebuff: 20 }, 10);
+    // === 본 신통 ===
+    record(s, dealDamage(s, 225));
+    // === 본 신통 명중 후 ===
+    // [귀진] 60% 호무 추가 — 본 신통 명중 후 추가 데미지 1회
     record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '귀진(호무)');
-    // [제월] 천검 즉시 + atk 26% 5초 (max tier)
-    천검발동(s, slots);
-    applyBuff(s, '균천파월_제월', { atk: 26 }, 5);
   }
 };
 SK['균천·관일'] = {
   fam: '균천', cat: '영검', main: 250,
   cast(s, slots) {
-    // [검망 max: 3회] + [쇄일 max: +3회] = 6회, 증폭 40%+20% = 60% (max tier)
-    // 관일 cast 동안 검세 누적으로 천검 발동될 수 있으므로 검세 부여 전에 검망 카운터 활성화
-    s.검망남은 = 6; s.검망max = 6;
-    s.검망증폭 = 60;
+    // [검망]/[쇄일] 은 관일 cast 와 무관 — "천검 발동 시" 트리거만 보면 됨.
+    //   초기화는 simulateBuild 에서 1회, 이후 사이클 (45초) 마다 리셋 (event loop).
     record(s, dealDamage(s, 250));
     s.관일End = s.t + 15;
     s.관일종료처리 = false;
@@ -1455,8 +1476,7 @@ SK['참허·횡추'] = {
 SK['참허·단진'] = {
   fam: '참허', cat: '영검', main: 200,
   cast(s, slots) {
-    // [단진+연광] 총 6회 리필 창 (각 신통 시전마다 검심+1, atk+12 5s)
-    s.단진남은 = 6;
+    // [단진+연광] 리필 창은 pre-DMG 섹션에서 reset+fire (자기 cast 포함, [광염] 패턴)
     // [참파] 본 신통 명중 시 atk 20% 5s
     applyBuff(s, '참허단진_참파', { atk: 20 }, 5);
     // [참멸] 검심 +2 + def-30% 10s
@@ -2857,6 +2877,12 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   // 호신강기 / HP 풀 초기화
   state.shieldRem = CFG.baseShield;
   state.hpRem = CFG.baseHP;
+  // 트리거 조건 옵션 초기화 — 신통 장착만으로 활성 (cast 무관)
+  if (state.selectedSkills.has('균천·관일')) {
+    state.검망남은 = 6; state.검망max = 6; state.검망증폭 = 60;
+  }
+  if (state.selectedSkills.has('열산·양운')) state.진염남은 = 3;
+  if (state.selectedSkills.has('열산·순일')) { state.진공남은 = 4; state.순일남은 = 5; }
   // 불씨 — opts 로 전달된 경우만 활성 (수동 시뮬), 자동 탐색에서는 기본 CFG(전부 0) 적용
   if (opts && opts.불씨) state.불씨 = opts.불씨;
   불씨검증(state);
@@ -2950,9 +2976,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
     if (state.관일End > 0 && state.t >= state.관일End && !state.관일종료처리) {
       const js = Math.min(state.stacks.검세, 5);
       for (let i = 0; i < js; i++) record(state, dealDamage(state, 30, { noSkillMult: true, type: '호무' }));
-      // 관일 종료 시 검망/쇄일 잔여 리셋 (창 닫힘)
-      state.검망남은 = 0;
-      state.검망증폭 = 0;
+      // [천연] 만 처리. 검망/쇄일 은 관일 창과 무관 — 잔여 리셋 안 함.
       state.관일종료처리 = true;
     }
     // [주술·유식 독주] 본 신통 시전 15초 후 발동 (발동 시점 계약합 기준)
@@ -3025,8 +3049,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           state._lastCycleResetIdx = cycleIdx;
           const sel = state.selectedSkills || new Set();
           const cast = state.castCounts || {};
-          // [검망] (관일 cast 후 활성)
-          if (sel.has('균천·관일') && cast['균천·관일'] > 0) { state.검망남은 = 6; state.검망증폭 = 60; }
+          // [검망] (관일 신통 장착 시 항상 활성, 천검 발동 시 fire — 관일 cast 무관)
+          if (sel.has('균천·관일')) { state.검망남은 = 6; state.검망증폭 = 60; }
           // [진염] (양운 장착 시 항상 활성, 염양 발동 시 fire)
           if (sel.has('열산·양운')) state.진염남은 = 3;
           // [진공]·[순일+분궁] (순일 장착 시 항상 활성, 염양 발동 시 fire)
@@ -3086,6 +3110,36 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           state.광염남은--;
           작열부여(state, 1, 36, '단주·광염');
         }
+        // [균천·파월 → 제월] 즉시 (조건 없음) — 파월 cast 시 가장 먼저 발동 (시전 시 트리거보다 빠름).
+        // atk+26 buff 가 본 신통 데미지에 반영, 천검도 가장 먼저 발동되어 [검망] cascade 가 본 신통 전 처리.
+        if (sk.name === '균천·파월' && state.famSlots.균천) {
+          TRACE(state, 'OPT', `🟠파월·제월 발동: 즉시 → 천검 1회 + atk 26% 5s`);
+          applyBuff(state, '균천파월_제월', { atk: 26 }, 5);
+          천검발동(state, state.famSlots.균천);
+        }
+        // [참허·단진+연광] per-cast: 6회 신통 시전 시 검심+1 + atk 12% 5s (단진 cast 포함)
+        // pre-DMG 위치 — 본 신통 record 전에 buff 적용되어 자기 cast 데미지에도 반영
+        if (sk.name === '참허·단진' && state.famSlots.참허) {
+          state.단진남은 = 6; state.단진max = 6;
+        }
+        if (state.famSlots.참허 && (state.단진남은 || 0) > 0) {
+          const 단진used = (state.단진max || 6) - state.단진남은 + 1;
+          TRACE(state, 'OPT', `🟠단진·단진 발동: 신통 시전 → 검심+1 + atk 12% 5s (${단진used}/${state.단진max || 6}회)`);
+          state.단진남은--;
+          검심획득(state, 1);
+          applyBuff(state, '참허단진_단진_' + state.단진남은, { atk: 12 }, 5);
+        }
+        // [균천·파월] per-cast: 4회 신통 시전 시 검세+1 + atk 15% 5s (파월 cast 포함)
+        if (sk.name === '균천·파월' && state.famSlots.균천) {
+          state.파월남은 = 4; state.파월max = 4;
+        }
+        if (state.famSlots.균천 && (state.파월남은 || 0) > 0) {
+          const 파월used = (state.파월max || 4) - state.파월남은 + 1;
+          TRACE(state, 'OPT', `🟠파월·파월 발동: 신통 시전 → 검세+1 + atk 15% 5s (${파월used}/${state.파월max || 4}회)`);
+          state.파월남은--;
+          검세획득_균천(state, state.famSlots.균천, 1);
+          applyBuff(state, '균천파월_파월_' + state.파월남은, { atk: 15 }, 5);
+        }
         // [열산·양운 적염] per-cast: 임의 신통 시전 시 작열 1중첩 44% (최대 4회 발동, 전투 누적)
         // 단, 양운이 한 번이라도 cast 된 후부터 활성화 (sk.name === '열산·양운' 이면 그 cast 부터 활성)
         if ((state.적염활성 || sk.name === '열산·양운') && state.selectedSkills && state.selectedSkills.has('열산·양운')) {
@@ -3144,7 +3198,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             if (b.defDebuff) pushBuff('defDebuff', label, b.defDebuff * stack);
             if (b.cat === 'amp' && b.dmgMult) pushBuff('amp', label, b.dmgMult * stack);
             if (b.cat === 'inc' && b.dmgMult) pushBuff('inc', label, b.dmgMult * stack);
-            if (b.dealt) pushBuff('dealt', label, b.dealt * stack);
+            if (b.cat === 'dealt' && b.dmgMult) pushBuff('dealt', label, b.dmgMult * stack);
+            if (b.dealt) pushBuff('dealt', label, b.dealt * stack);  // legacy fallback
           }
           // 유파/공명/불씨 패시브 — 스택은 snapStacks 기준
           if (famActive(state, '청명') && snapStacks.뇌인) pushBuff('cr', `뇌인×${snapStacks.뇌인}`, snapStacks.뇌인 * 5);
@@ -3205,18 +3260,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           }
         }
         state._분광이미처리 = false;
-        // [단진] 리필 트리거: 검심 +1 + atk 12% 5s (max tier)
-        if (state.famSlots.참허 && state.단진남은 > 0) {
-          state.단진남은--;
-          검심획득(state, 1);
-          applyBuff(state, '참허단진_단진_' + state.단진남은, { atk: 12 }, 5);
-        }
-        // [파월] 리필 트리거: 검세 +1 + atk 15% 5s (max tier, 4회)
-        if (state.famSlots.균천 && state.파월남은 > 0) {
-          state.파월남은--;
-          검세획득_균천(state, state.famSlots.균천, 1);
-          applyBuff(state, '균천파월_파월_' + state.파월남은, { atk: 15 }, 5);
-        }
+        // [단진]/[파월] 리필 트리거는 pre-DMG 섹션으로 이동 (자기 cast 포함하여 본 신통 데미지에 반영)
         // [사해·명화] per-cast: 30s간(15+암용15, max tier) 시전마다 살혼 20% 확정 (max tier)
         // [유령불] 명화 살혼 2회마다 30% 물리 (max tier) — 명화살혼발사에서 자동 처리
         if (state.명화End > 0 && state.t < state.명화End - 0.1) {
