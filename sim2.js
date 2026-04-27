@@ -691,12 +691,14 @@ function dealDamage(state, base, opts = {}) {
 
   // === 크리티컬 ===
   // isShintong=false인 피해(천뢰/낙뢰/작열/호무/평타 등)에는 "신통 치명타율/배율" 계열 buff 제외
-  const crIncPct = sumBuffCR(state, isShintong) + (opts.localCR || 0) + ncCR;
-  const finalCRPct = (opts.localFinalCR || 0) + ncFinalCR;
+  // nextCast.* 도 "다음번에 시전하는 신통" 한정 (예: [파정]) 이므로 isShintong 일 때만 적용
+  const ncApply = isShintong ? 1 : 0;
+  const crIncPct = sumBuffCR(state, isShintong) + (opts.localCR || 0) + ncCR * ncApply;
+  const finalCRPct = (opts.localFinalCR || 0) + ncFinalCR * ncApply;
   const crResPct = sumBuffCritRes(state);
   let cr = CFG.baseCR * (1 + crIncPct / 100) * (1 + finalCRPct / 100) * (1 + crResPct / 100);
-  const finalCDPct = (opts.localFinalCD || 0) + ncFinalCD;
-  let cd = CFG.baseCD + sumBuffCD(state, isShintong) + (opts.localCD || 0) + ncCD + finalCDPct;
+  const finalCDPct = (opts.localFinalCD || 0) + ncFinalCD * ncApply;
+  let cd = CFG.baseCD + sumBuffCD(state, isShintong) + (opts.localCD || 0) + ncCD * ncApply + finalCDPct;
   if (opts.forceCrit) cr = 100;
   let cMult, isCrit = null;
   if (opts.noCrit) cMult = 1;
