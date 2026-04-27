@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react';
+import { useMemo } from 'react';
 import { formatKR } from '../../utils/formatting';
 import { SKILL_OPTIONS } from '../../utils/skillOptions';
 
@@ -230,15 +230,34 @@ export default function DamageBreakdown({ dmgEvents }) {
           .sort((a, b) => b.value - a.value),
       }))
       .sort((a, b) => b.total - a.total);
-    // 평면 항목 — 그룹 차트와 동일하게 부모 단위 1행 (자식 항목들은 한 cell 에 요약)
-    const flatList = groupList.map((g) => ({
-      parent: g.parent,
-      total: g.total,
-      pct: g.pct,
-      count: g.segs.reduce((a, s) => a + s.count, 0),
-      avg: g.total / g.segs.reduce((a, s) => a + s.count, 0),
-      segs: g.segs,
-    }));
+    // 신통 발동 횟수 — 각 parent (신통/그룹) 의 고유 cast 수
+    // dmgEvents 의 activeCast = parent 인 이벤트의 unique t 개수로 추정.
+    // 신통 한 번 cast 시 여러 record() 가 호출되어도 모두 같은 state.t 라 t Set 의 크기 = cast 수.
+    // 평타/유파 효과/작열 DoT 등은 activeCast 가 null/다름이므로 cast 가 아닌 trigger 횟수로 fallback.
+    const castCountByParent = {};
+    for (const ev of dmgEvents) {
+      const p = ev.activeCast;
+      if (!p) continue;
+      if (!castCountByParent[p]) castCountByParent[p] = new Set();
+      castCountByParent[p].add(ev.t);
+    }
+    // 평면 항목 — 그룹 차트와 동일하게 부모 단위 1행
+    const flatList = groupList.map((g) => {
+      const totalRecords = g.segs.reduce((a, s) => a + s.count, 0);
+      // 신통 cast count: parent 와 일치하는 activeCast 의 unique t
+      const castCount = castCountByParent[g.parent]?.size || 0;
+      // cast 가 추적되지 않는 그룹 (유파 효과/평타/작열 DoT) 은 record 수를 그대로 사용
+      const fires = castCount > 0 ? castCount : totalRecords;
+      return {
+        parent: g.parent,
+        total: g.total,
+        pct: g.pct,
+        count: fires,
+        records: totalRecords,
+        avg: g.total / Math.max(1, fires),
+        segs: g.segs,
+      };
+    });
     return { total, groups: groupList, flat: flatList };
   }, [dmgEvents]);
 
@@ -300,55 +319,51 @@ export default function DamageBreakdown({ dmgEvents }) {
         })}
       </div>
 
-      {/* 상세 테이블 — 그룹 차트와 동일한 분류 기준으로 평탄화 */}
+      {/* 상세 항목 — 모바일 카드형, 데스크탑은 더 넓은 grid */}
       <details className="mt-4">
         <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-200 select-none">
           ▶ 평면 항목 전체 보기 ({flat.length}개)
         </summary>
-        <div className="mt-2 overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="text-slate-400">
-              <tr className="border-b border-slate-700">
-                <th className="text-left py-1 px-2">#</th>
-                <th className="text-left py-1 px-2">신통/그룹</th>
-                <th className="text-right py-1 px-2">피해</th>
-                <th className="text-right py-1 px-2">비율</th>
-                <th className="text-right py-1 px-2">발동</th>
-                <th className="text-right py-1 px-2">1회평균</th>
-              </tr>
-            </thead>
-            <tbody>
-              {flat.map((d, i) => (
-                <Fragment key={`${d.parent}|${i}`}>
-                  <tr className="border-b border-slate-800/70 hover:bg-slate-900/40">
-                    <td className="py-1 px-2 text-slate-300">{i + 1}</td>
-                    <td className="py-1 px-2 text-slate-200 font-medium">
-                      {d.parent}
-                      <span className="text-slate-300 ml-1.5 text-[11px]">({d.segs.length}항목)</span>
-                    </td>
-                    <td className="py-1 px-2 text-right text-amber-300 font-semibold">{formatKR(d.total)}</td>
-                    <td className="py-1 px-2 text-right text-slate-400">{d.pct.toFixed(2)}%</td>
-                    <td className="py-1 px-2 text-right text-blue-300 font-semibold">{d.count}회</td>
-                    <td className="py-1 px-2 text-right text-slate-400">{formatKR(d.avg)}</td>
-                  </tr>
-                  {d.segs.length > 1 && (
-                    <tr className="border-b border-slate-800/70 bg-slate-900/30">
-                      <td></td>
-                      <td colSpan={5} className="py-1 px-2 text-[11px] text-slate-400 font-mono">
-                        {d.segs.map((seg) => (
-                          <span key={seg.child} className="mr-3 inline-block">
-                            <span className="text-slate-300">{seg.child}</span>{' '}
-                            <span className="text-slate-300">{formatKR(seg.value)}</span>{' '}
-                            <span className="text-slate-400">({seg.count}회 · {seg.pct.toFixed(1)}%)</span>
-                          </span>
-                        ))}
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-2 space-y-2">
+          {flat.map((d, i) => (
+            <div
+              key={`${d.parent}|${i}`}
+              className="border border-slate-700 bg-slate-900/40 rounded-lg p-2 sm:p-3"
+            >
+              {/* 1줄: 순위 + 신통명 + 피해 */}
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-[11px] text-slate-300 font-mono shrink-0">#{i + 1}</span>
+                <span className="text-sm text-slate-100 font-medium flex-1 min-w-0 break-keep">
+                  {d.parent}
+                  <span className="text-[11px] text-slate-300 ml-1">({d.segs.length}항목)</span>
+                </span>
+                <span className="text-sm text-amber-300 font-semibold tabular-nums">{formatKR(d.total)}</span>
+              </div>
+              {/* 2줄: 비율 / 발동 / 1회평균 (모바일에서 줄바꿈) */}
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-300">
+                <span>비율: <span className="text-slate-100 font-semibold">{d.pct.toFixed(2)}%</span></span>
+                <span>발동: <span className="text-blue-300 font-semibold">{d.count}회{d.records !== d.count && (
+                  <span className="text-slate-400 font-normal"> ({d.records}건)</span>
+                )}</span></span>
+                <span>1회평균: <span className="text-slate-100 font-semibold tabular-nums">{formatKR(d.avg)}</span></span>
+              </div>
+              {/* 3줄: segs (자식 항목들) — 칩 형태 */}
+              {d.segs.length > 1 && (
+                <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] font-mono">
+                  {d.segs.map((seg) => (
+                    <span
+                      key={seg.child}
+                      className="px-1.5 py-0.5 bg-slate-800/60 border border-slate-700/50 rounded"
+                    >
+                      <span className="text-slate-300">{seg.child}</span>{' '}
+                      <span className="text-slate-100">{formatKR(seg.value)}</span>{' '}
+                      <span className="text-slate-400">({seg.count}회 · {seg.pct.toFixed(1)}%)</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </details>
     </div>
