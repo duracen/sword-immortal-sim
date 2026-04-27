@@ -1680,7 +1680,9 @@ SK['열산·염폭'] = {
 SK['열산·양운'] = {
   fam: '열산', cat: '화염', main: 212,
   cast(s, slots) {
-    // [적염] 임의 신통 시전 시 작열 1중첩 — simulateBuild 시작 시 활성화 (선택된 신통 기반)
+    // [적염] 임의 신통 시전 시 작열 1중첩 부여 (최대 4회) — 본 cast 포함 그 이후 활성
+    // (pre-cast hook 에서 sk.name === '열산·양운' 일 때 self-fire 처리)
+    s.적염활성 = true;
     // [양운] 염양 발동 시 atk 15% 5초 max5 → 염양발동 훅에서 처리
     // [진염] 염양 발동 시 60% 물리 (최대 3회 — 전투 누적, simulateBuild 시작 시 초기화)
     // 본 신통 DMG
@@ -2887,8 +2889,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       state.순일남은 = 5; state.순일max = 5;        // [순일+분궁] (최대 5회)
     }
     if (state.selectedSkills.has('열산·양운')) {
-      state.진염남은 = 3; state.진염max = 3;        // [진염] (최대 3회)
-      state.적염활성 = true;                        // [적염] 신통 시전 시 작열 1 (최대 4회 — 적염남은으로 추적)
+      state.진염남은 = 3; state.진염max = 3;        // [진염] (최대 3회 — 염양 시 발동, 신통 장착 즉시 활성)
+      // [적염] 은 [단진]/[파월] 패턴 — 양운 cast 후부터 활성. 양운 cast() 본문에서 적염활성=true.
     }
   }
 
