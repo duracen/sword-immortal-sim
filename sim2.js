@@ -1680,11 +1680,9 @@ SK['열산·염폭'] = {
 SK['열산·양운'] = {
   fam: '열산', cat: '화염', main: 212,
   cast(s, slots) {
-    // [적염] 임의 신통 시전 시 작열 1중첩 — main loop pre-cast 훅에서 처리
-    s.적염활성 = true;
+    // [적염] 임의 신통 시전 시 작열 1중첩 — simulateBuild 시작 시 활성화 (선택된 신통 기반)
     // [양운] 염양 발동 시 atk 15% 5초 max5 → 염양발동 훅에서 처리
-    // [진염] 염양 발동 시 60% 물리 max 3회
-    s.진염남은 = 3; s.진염max = 3;
+    // [진염] 염양 발동 시 60% 물리 (최대 3회 — 전투 누적, simulateBuild 시작 시 초기화)
     // 본 신통 DMG
     record(s, dealDamage(s, 212));
     // === DMG 후 작열 부여 ===
@@ -1719,10 +1717,8 @@ SK['열산·순일'] = {
   cast(s, slots) {
     // [치황] 20초간 신통 시전 시 작열 1중첩 — main loop pre-cast 훅에서 처리 (sk.name 으로 본 cast 도 발동)
     applyBuff(s, '열산순일_치황', {}, 20);
-    // [순일 + 분궁] 염양 발동 시 40% 물리 (5회) — 염양발동 훅
-    // [진공] 염양 발동 시 작열 1중첩 62% (4회) — 염양발동 훅
-    s.순일남은 = 5; s.순일max = 5;
-    s.진공남은 = 4; s.진공max = 4;
+    // [순일 + 분궁] 염양 발동 시 40% 물리 (최대 5회 — 전투 누적, simulateBuild 시작 시 초기화)
+    // [진공] 염양 발동 시 작열 1중첩 62% (최대 4회 — 전투 누적, simulateBuild 시작 시 초기화)
     record(s, dealDamage(s, 225));
   }
 };
@@ -2880,6 +2876,20 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   for (const [f, s] of build) {
     const cat = FAMILIES[f].cat;
     state.catSlots[cat] = (state.catSlots[cat] || 0) + s;
+  }
+  // === 신통 장착 시 활성화되는 옵션 카운터 초기화 ===
+  // spec 상 시간 윈도우 없이 "(최대 N회)" 만 명시된 옵션들은 신통 장착 시 전투 내내 활성 (cast 전에도 트리거 가능).
+  // 신통 cast() 본문에서 카운터 set 만 하면 cast 전 트리거 시 발동 안 함 → 여기서 미리 초기화.
+  // (시간 윈도우 있는 [업화]/[흑성]/[함양] 같은 옵션은 cast 시점에 *End 로 활성화되므로 여기서 set 안 함)
+  if (state.selectedSkills) {
+    if (state.selectedSkills.has('열산·순일')) {
+      state.진공남은 = 4; state.진공max = 4;        // [진공] (최대 4회)
+      state.순일남은 = 5; state.순일max = 5;        // [순일+분궁] (최대 5회)
+    }
+    if (state.selectedSkills.has('열산·양운')) {
+      state.진염남은 = 3; state.진염max = 3;        // [진염] (최대 3회)
+      state.적염활성 = true;                        // [적염] 신통 시전 시 작열 1 (최대 4회 — 적염남은으로 추적)
+    }
   }
 
   // 이벤트 스케줄 생성: 9개 슬롯 순차 발동 (5s 공통쿨 공유).
