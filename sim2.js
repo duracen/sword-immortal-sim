@@ -3015,26 +3015,20 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state.castCounts = state.castCounts || {};
         state.castCounts[sk.name] = (state.castCounts[sk.name] || 0) + 1;
         // === 사이클 (45초) 경계마다 옵션 카운터 reset ===
-        // "본인 신통 차례 아니어도 발동되는 옵션" 들의 cap 을 사이클 단위로 갱신.
-        // 이미 owner 가 cast 된 적 있는 옵션만 reset (한 번도 cast 안 된 옵션은 0 유지).
+        // "신통 시전 시 (최대 N회)" 류는 cast 마다 reset 이라 여기 제외.
+        // 사이클 reset 대상: 다른 트리거 (천검 발동 시 / 염양 발동 시) 로 발동되는 옵션
+        // [검망] (관일, 천검 시) / [진염] (양운, 염양 시) / [진공]·[순일+분궁] (순일, 염양 시)
         const cycleIdx = Math.floor(state.t / 45);
         if (cycleIdx > (state._lastCycleResetIdx || 0)) {
           state._lastCycleResetIdx = cycleIdx;
           const sel = state.selectedSkills || new Set();
           const cast = state.castCounts || {};
-          // cast-dependent (owner 가 한 번이라도 cast 되어야 활성)
-          if (sel.has('참허·단진') && cast['참허·단진'] > 0) state.단진남은 = 6;
-          if (sel.has('균천·파월') && cast['균천·파월'] > 0) state.파월남은 = 4;
+          // [검망] (관일 cast 후 활성)
           if (sel.has('균천·관일') && cast['균천·관일'] > 0) { state.검망남은 = 6; state.검망증폭 = 60; }
-          if (sel.has('천로·단주') && cast['천로·단주'] > 0) state.광염남은 = 8;
-          // 양운 cast 후 활성: 적염
-          if (sel.has('열산·양운') && cast['열산·양운'] > 0) state.적염남은 = 4;
-          // 신통 장착만 되어도 활성 (pre-init 옵션)
+          // [진염] (양운 장착 시 항상 활성, 염양 발동 시 fire)
           if (sel.has('열산·양운')) state.진염남은 = 3;
+          // [진공]·[순일+분궁] (순일 장착 시 항상 활성, 염양 발동 시 fire)
           if (sel.has('열산·순일')) { state.진공남은 = 4; state.순일남은 = 5; }
-          if (sel.has('형혹·업화') && cast['형혹·업화'] > 0) state.업화남은 = 8;
-          if (sel.has('형혹·흑성') && cast['형혹·흑성'] > 0) state.흑성남은 = 8;
-          if (sel.has('형혹·함양') && cast['형혹·함양'] > 0) state.함양남은 = 10;
         }
         // 활성 cast 신통명 — 이 cast 동안의 모든 record() 에 attached (DamageBreakdown 그룹화용)
         state._activeCast = sk.name;
