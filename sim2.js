@@ -1664,16 +1664,18 @@ SK['열산·염폭'] = {
       염양발동(s, slots);
       s._분겁보정 = 1;
     }
+    // [염식] crRes 20% 10초 (즉발 buff)
+    applyBuff(s, '열산염폭_염식', { crRes: 20 }, 10);
+    // [염폭] spec: "열산 상태에서 본 신통 시전 시, 2중첩 추가 부여" — DMG 전
+    if (startLaysan) 작열부여(s, 2, 44, '염폭·염폭(열산)');
     // 본 신통 DMG (+ [진연] 즉발 추가 피해)
     const bonus = startLaysan ? 150 : 0;
     record(s, dealDamage(s, 225 * MH[3]));
     if (bonus) record(s, dealDamage(s, bonus, { noSkillMult: true }), '진연');
-    // === DMG 후 작열 부여 (그냥 "부여" 옵션) ===
-    // [염폭] 작열 2중첩 (max tier: 44% 총 술법)
+    // === DMG 후 작열 부여 (시전 시 명시 없는 옵션) ===
+    // [염폭] 기본 작열 2중첩
     작열부여(s, 2, 44, '염폭·염폭');
-    if (startLaysan) 작열부여(s, 2, 44, '염폭·염폭(열산)');
-    // [염식] crRes 20% 10초 + 열산 시 작열 2중첩 (max tier)
-    applyBuff(s, '열산염폭_염식', { crRes: 20 }, 10);
+    // [염식] 열산 시 작열 2중첩 (spec 상 "시전 시" 명시 없음 → DMG 후)
     if (startLaysan) 작열부여(s, 2, 44, '염폭·염식(열산)');
   }
 };
@@ -1701,16 +1703,16 @@ SK['열산·성료'] = {
     applyBuff(s, '열산성료_성료', { atk: 30 }, 10);
     // [은염] defDebuff 20% 10초 (즉발 buff)
     applyBuff(s, '열산성료_은염', { defDebuff: 20 }, 10);
+    // [성료] spec: "열산 상태에서 본 신통 시전 시, 작열 2중첩 부여" — 본 신통 dmg 전에 부여
+    if (startLaysan) 작열부여(s, 2, 44, '성료·성료(열산)');
     // 본 신통 DMG (+ [치운] 열산 시 150% 술법 추가)
     const extra = startLaysan ? 150 : 0;
     record(s, dealDamage(s, 213 * MH[4]));
     if (extra) record(s, dealDamage(s, extra, { noSkillMult: true }), '치운');
     // === DMG 후 작열 부여 ===
-    // [분령] 작열 3중첩
+    // [분령] 작열 3중첩 (spec "시전 시" 없음 → dmg 후)
     작열부여(s, 3, 44, '성료·분령');
-    // [성료] 열산상태에서 +2중첩
-    if (startLaysan) 작열부여(s, 2, 44, '성료·성료(열산)');
-    // [은염] 작열 2중첩
+    // [은염] 작열 2중첩 (spec "시전 시" 없음 → dmg 후)
     작열부여(s, 2, 44, '성료·은염');
   }
 };
