@@ -70,6 +70,21 @@ function parseEvents(events) {
   const triggers = [];  // 천벌/천검/염양 등 특별 트리거
   // 각 트리거의 지속 시간 (초) — 0 이면 순간 발동
   const TRIG_DUR = { 천벌: 10, 염양: 10, 천검: 0, 열산: 10 };
+  // 같은 시각/종류 트리거는 합쳐서 count 누적 (×N 표시용)
+  function pushTrigger(tg) {
+    const last = triggers[triggers.length - 1];
+    // 같은 t (±0.05s) 와 같은 kind 면 병합
+    for (let i = triggers.length - 1; i >= 0; i--) {
+      const e = triggers[i];
+      if (e.kind === tg.kind && Math.abs(e.t - tg.t) < 0.05) {
+        e.count = (e.count || 1) + 1;
+        return;
+      }
+      // 너무 멀리 있는 경우 검색 중단 (성능)
+      if (tg.t - e.t > 0.5) break;
+    }
+    triggers.push({ ...tg, count: 1 });
+  }
   for (const ev of events) {
     if (ev.tag === 'CST') {
       const m = ev.msg.match(/^▶\s*([^\s\n]+)/);
@@ -88,13 +103,13 @@ function parseEvents(events) {
         }
       } catch (_) { /* ignore */ }
     } else if (ev.tag === 'TRG' && ev.msg.includes('천검발동')) {
-      triggers.push({ t: ev.t, kind: '천검', label: '천검', dur: TRIG_DUR.천검 });
+      pushTrigger({ t: ev.t, kind: '천검', label: '천검', dur: TRIG_DUR.천검 });
     } else if (ev.tag === 'OPT' && ev.msg.includes('⚡천벌')) {
-      triggers.push({ t: ev.t, kind: '천벌', label: '천벌 10s', dur: TRIG_DUR.천벌 });
+      pushTrigger({ t: ev.t, kind: '천벌', label: '천벌 10s', dur: TRIG_DUR.천벌 });
     } else if (ev.tag === 'OPT' && ev.msg.includes('🔥염양')) {
       // 염양은 본 신통 DMG 후에 발동 → 시각상 cast 라인보다 살짝 뒤에 표시
       // (이번 신통에는 buff 미적용 의미)
-      triggers.push({ t: ev.t + 0.4, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
+      pushTrigger({ t: ev.t + 0.4, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
     }
     // 열산상태 / 검심통명 등 유파 효과 buff 는 BUF 이벤트에서 처리
   }
@@ -474,6 +489,8 @@ export default function CastTimelineSummary({ events }) {
               const leftPct = (tg.t / maxT) * 100;
               const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
               const laneTop = (tg.lane || 0) * 22 + 2;
+              const count = tg.count || 1;
+              const countLabel = count > 1 ? ` ×${count}` : '';
               if (dur > 0) {
                 const width = (dur / maxT) * 100;
                 return (
@@ -488,13 +505,13 @@ export default function CastTimelineSummary({ events }) {
                     }}
                   >
                     <span className="text-[11px] text-white font-semibold truncate">
-                      {style.icon} {tg.kind} ·{dur}s
+                      {style.icon} {tg.kind}{countLabel} ·{dur}s
                     </span>
                     <div
                       className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
                     >
                       <div className="text-xs font-bold text-orange-300 mb-1">
-                        {style.icon} {tg.kind}
+                        {style.icon} {tg.kind}{count > 1 ? ` ×${count}회 발동` : ''}
                       </div>
                       <div className="text-[11px] text-slate-400 font-mono mb-2">
                         ⏱ {tg.t.toFixed(1)}s 발동 · 지속 {dur}초
@@ -514,14 +531,21 @@ export default function CastTimelineSummary({ events }) {
                   className="absolute flex flex-col items-center cursor-help group hover:z-[200]"
                   style={{ left: `${leftPct}%`, top: `${laneTop}px`, transform: 'translateX(-50%)' }}
                 >
-                  <div className={`w-5 h-5 rounded-full ${style.bg} ring-2 ring-slate-900 flex items-center justify-center text-[11px]`}>
-                    {style.icon}
+                  <div className="relative">
+                    <div className={`w-5 h-5 rounded-full ${style.bg} ring-2 ring-slate-900 flex items-center justify-center text-[11px]`}>
+                      {style.icon}
+                    </div>
+                    {count > 1 && (
+                      <span className="absolute -top-1 -right-2 text-[10px] font-bold bg-amber-500 text-slate-950 rounded-full px-1 leading-tight border border-slate-900">
+                        ×{count}
+                      </span>
+                    )}
                   </div>
                   <div
                     className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-6 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-orange-300 mb-1">
-                      {style.icon} {tg.kind}
+                      {style.icon} {tg.kind}{count > 1 ? ` ×${count}회 발동` : ''}
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono mb-2">
                       ⏱ {tg.t.toFixed(1)}s 발동
