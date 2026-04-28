@@ -181,11 +181,12 @@ export default function DamageBreakdown({ dmgEvents }) {
       const arrowMatch = s.match(/^(천뢰|낙뢰)←(.+)$/);
       const optParenMatch = !arrowMatch && s.match(/^([가-힣·]+)\((.+)\)$/);
       const yupaMatch = optParenMatch && optParenMatch[2] === '유파';
-      // 천검: 신통 옵션이 명시적으로 천검을 발동시키는 경우 (현재 [제월] = 균천·파월) 에만
-      // 해당 신통에 귀속. 그 외 천검 (검세 3중첩 누적 패시브 등) 은 유파 효과로.
-      const 천검직접발동신통 = new Set(['균천·파월']);
-      const is천검Skill = (s === '천검' || (s.startsWith('천검') && !s.includes('←'))) &&
-        ev.activeCast && 천검직접발동신통.has(ev.activeCast);
+      // 천검 src 패턴: '천검' (검세 카운터 누적 — 유파 효과) / '천검(옵션)' (옵션 직접 발동 — 해당 신통 귀속)
+      // 옵션 → 부모 신통 매핑
+      const 천검옵션부모맵 = { 제월: '균천·파월', 종식: '균천·진악', 남월: '균천·현봉' };
+      const 천검OptMatch = s.match(/^천검\(([가-힣]+)\)$/);
+      const is천검Skill = !!(천검OptMatch && 천검옵션부모맵[천검OptMatch[1]]);
+      const 천검부모신통 = is천검Skill ? 천검옵션부모맵[천검OptMatch[1]] : null;
       // 유파/법체 효과 — 신통 옵션이 아닌 패시브·트리거 (cast 무관 항상 동일 그룹)
       const isFamilyEffect = !is천검Skill && (
         s === '천검' || s.includes('천검') ||
@@ -198,7 +199,7 @@ export default function DamageBreakdown({ dmgEvents }) {
       if (s === '평타') {
         parent = '평타';
       } else if (is천검Skill) {
-        parent = ev.activeCast;
+        parent = 천검부모신통;
       } else if (isFamilyEffect) {
         parent = '유파 효과';
       } else if (arrowMatch) {

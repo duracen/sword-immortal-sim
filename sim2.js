@@ -1348,10 +1348,10 @@ SK['복룡·붕산'] = {
 };
 
 // ---------- 영검: 균천 (검세·천검) ----------
-function 천검발동(s, slots, ampPct = 0) {
-  TRACE(s, 'TRG', `천검발동 (검세=${s.stacks.검세||0}, +${ampPct}% 증폭, 검망남은=${s.검망남은||0})`);
+function 천검발동(s, slots, ampPct = 0, srcTag = '천검') {
+  TRACE(s, 'TRG', `천검발동 (검세=${s.stacks.검세||0}, +${ampPct}% 증폭, 검망남은=${s.검망남은||0}, src=${srcTag})`);
   const prevSrc = s._currentSource;
-  s._currentSource = '천검';
+  s._currentSource = srcTag;
   s.castCounts = s.castCounts || {};
   s.castCounts['천검'] = (s.castCounts['천검'] || 0) + 1;
   // 천검: 대상+주변 3명, 3회 공격, 총 60~120% 호무 피해 (저체력 선형 스케일)
@@ -1410,7 +1410,7 @@ SK['균천·진악'] = {
     if (js >= 3) {
       TRACE(s, 'OPT', `🟠진악·종식 발동: 검세 ${js}중첩 ≥ 3 → 즉시 천검 발동 + atk 30% 10s`);
       applyBuff(s, '균천진악_종식', { atk: 30 }, 10);
-      천검발동(s, slots);
+      천검발동(s, slots, 0, '천검(종식)');
     }
     // [진악] 검세당 30% 호무 1회 추가 (max 5회, max tier)
     const 진악Cnt = Math.min(js, 5);
@@ -1450,7 +1450,7 @@ SK['균천·현봉'] = {
     // [남월] 검세 5+ 시 천검 +80% 증폭 (max tier)
     if (js >= 5) {
       TRACE(s, 'OPT', `🟠현봉·남월 발동: 검세 ${js}중첩 ≥ 5 → 즉시 천검 발동 (천검 +80% 증폭)`);
-      천검발동(s, slots, 80);
+      천검발동(s, slots, 80, '천검(남월)');
     }
     // [절진] crRes 20% 10s (max tier) — "본 신통으로 명중 시" debuff, 본 신통 record 직전 부여 (본 신통이 디버프 받도록)
     applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10);
@@ -3198,7 +3198,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         if (sk.name === '균천·파월' && state.famSlots.균천) {
           TRACE(state, 'OPT', `🟠파월·제월 발동: 즉시 → 천검 1회 + atk 26% 5s`);
           applyBuff(state, '균천파월_제월', { atk: 26 }, 5);
-          천검발동(state, state.famSlots.균천);
+          천검발동(state, state.famSlots.균천, 0, '천검(제월)');
         }
         // [참허·단진+연광] per-cast: 6회 신통 시전 시 검심+1 + atk 12% 5s (단진 cast 포함)
         // pre-DMG 위치 — 본 신통 record 전에 buff 적용되어 자기 cast 데미지에도 반영
