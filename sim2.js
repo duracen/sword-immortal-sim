@@ -1311,8 +1311,9 @@ SK['복룡·붕산'] = {
     // [참선] HP 50% 이하 시 반드시 치명타 + cd 50% (max tier)
     // [통백] 본 신통 최종 피해 +20% (max tier)
     s.nextCast.finalDmg += 20;
+    // [신력] atk +20% 5초 (max tier) — 시전 시 buff, record 전 부여
+    applyBuff(s, '복룡붕산_신력', { atk: 20 }, 5);
     record(s, dealDamage(s, base, { forceCrit: forceC, localCD: forceC ? 50 : 0 }));
-    applyBuff(s, '복룡붕산_신력', { atk: 20 }, 5); // [신력] atk 20 (max tier)
   }
 };
 
@@ -1551,6 +1552,8 @@ function 호무mult(s) { return 1; } // 레거시 보존, 실제 효과 없음
 SK['중광·귀사'] = {
   fam: '중광', cat: '영검', main: 150,
   cast(s, slots) {
+    // [통찰] cr 30% 15s — 시전 시 buff, record 전 부여
+    applyBuff(s, '중광귀사_통찰', { cr: 30 }, 15);
     // 본 신통 (물리 일반)
     record(s, dealDamage(s, 150));
     // [여영] 36% 호무 × 2회 + [유광 max: +3회] = 총 5회
@@ -1559,8 +1562,6 @@ SK['중광·귀사'] = {
     }
     // [관일] HP 60% 이하 시 160% 호무 1회
     if (hpBelow(s, 0.60)) record(s, dealDamage(s, 160, { noSkillMult: true, type: '호무' }), '관일(호무)');
-    // [통찰] cr 30% 15s
-    applyBuff(s, '중광귀사_통찰', { cr: 30 }, 15);
   }
 };
 SK['중광·투영'] = {
@@ -1584,15 +1585,15 @@ SK['중광·육요'] = {
     // [검광] 30초 창 (15+검심15), 명중 시마다 23% 호무
     s.검광End = s.t + 30;
     s._검광이미처리 = true;
+    // [신력] atk 20% 5s — 시전 시 buff, record 전 부여
+    applyBuff(s, '중광육요_신력', { atk: 20 }, 5);
+    // [한광] HP 60% 이하 시 atk 20% 5s — 조건부 시전 시 buff
+    if (hpBelow(s, 0.60)) applyBuff(s, '중광육요_한광', { atk: 20 }, 5);
     const prev = s._currentSource; s._currentSource = '검광(트리거)';
     record(s, dealDamage(s, 23, { noSkillMult: true, type: '호무' }));
     s._currentSource = prev;
     // 본 신통
     record(s, dealDamage(s, 150));
-    // [신력] atk 20% 5s
-    applyBuff(s, '중광육요_신력', { atk: 20 }, 5);
-    // [한광] 검광 발동 시 HP 60% 이하면 atk 20% 5s
-    if (hpBelow(s, 0.60)) applyBuff(s, '중광육요_한광', { atk: 20 }, 5);
   }
 };
 SK['중광·환성'] = {
@@ -2137,6 +2138,8 @@ SK['옥추·수광'] = {
   cast(s, slots) {
     // [수광] 15초간 시전 시 옥추 +1 + 30% 물리 (max tier)
     applyBuff(s, '옥추수광_수광', {}, 15);
+    // [운류] atk 25% 15초 (max tier) — 시전 시 buff, 모든 record 전 부여
+    applyBuff(s, '옥추수광_운류', { atk: 25 }, 15);
     옥추획득(s);
     record(s, dealDamage(s, 30, { noSkillMult: true }), '수광(지속)');
     s._수광이미처리 = true;
@@ -2146,8 +2149,6 @@ SK['옥추·수광'] = {
     // [천붕] 수광 효과 종료 시 옥추 2중첩당 30% (수광End 트리거에서 처리)
     s.수광End = s.t + 15;
     s.수광종료처리 = false;
-    // [운류] atk 25% (max tier)
-    applyBuff(s, '옥추수광_운류', { atk: 25 }, 15);
     record(s, dealDamage(s, 170));
   }
 };
