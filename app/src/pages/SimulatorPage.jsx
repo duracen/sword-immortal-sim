@@ -166,7 +166,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
           ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +200 를 더한 수치입니다.
           <br />
-          ※ 기준 스탯 — 공격력 1.6억 · 치명타율 30% · 치명타 배율 200% · 체력 130억 · 호신강기 40억.
+          ※ 기준 스탯 — 공격력 1.6억 · 치명타율 30% · 치명타 배율 200% · 체력 170억 · 호신강기 60억.
         </div>
         <SkillPoolPicker pool={pool} onChange={setPool} />
       </section>
@@ -639,7 +639,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
           ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +200 를 더한 수치입니다.
           <br />
-          ※ 기준 스탯 — 공격력 1.6억 · 치명타율 30% · 치명타 배율 200% · 체력 130억 · 호신강기 40억.
+          ※ 기준 스탯 — 공격력 1.6억 · 치명타율 30% · 치명타 배율 200% · 체력 170억 · 호신강기 60억.
         </div>
         <SkillPicker skillSel={skillSel} onChange={setSkillSel} maxTotal={6} />
       </section>
