@@ -242,8 +242,7 @@ function sumBuffAtk(state) {
   for (const b of state.buffs) if (b.endT > state.t && b.atk) s += b.atk * (b.stackCount || 1);
   // 현염법체 기본(화 2+): 작열 상태 대상에게 신통 시전 시 공격력 +9%
   if ((state.catSlots.화염 || 0) >= 2 && (state.stacks.작열 || 0) > 0) s += 9;
-  // 영검법체 4set (영검 4+): HP 80% 이하 대상에게 공격력 +20% (실시간 HP 기반)
-  if ((state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)) s += 20;
+  // 영검법체 4set 은 buff '영검법체4' 로 등록되어 위 루프에서 합산됨 (트리거: 신통 명중 시 + HP 80% 이하)
   return s;
 }
 // isShintong=true: 신통 본체 피해에서 호출 (신통 전용 buff도 포함)
@@ -964,7 +963,7 @@ function detailedBuffBreakdown(state, bd) {
   }
   // 자동 소스 (state.buffs 외 유파·공명·자원 기반 기여)
   if ((state.catSlots.화염 || 0) >= 2 && (state.stacks.작열 || 0) > 0) cat.공격력.push('현염법체2+9');
-  if ((state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)) cat.공격력.push('영검법체4+20');
+  // 영검법체4 는 buff '영검법체4' 로 등록되어 위 루프에서 자동 처리됨 (manual push 제거)
   // 신통피해 소스는 type='신통'일 때만 실제 적용됨 → 표시도 그때만
   const isShintongType = isShintong;
   if (isShintongType) {
@@ -1105,6 +1104,11 @@ function record(state, amount, source) {
   state.dmgEvents.push({ t: state.t, amt: amount, src, activeCast });
   // === 호신강기/HP 풀 적용 ===
   const bd = state._lastBreakdown;
+  // === 영검법체 4set 트리거: 신통으로 적을 명중 시 + HP 80% 이하 → 5초간 atk+20% buff ===
+  // (사양: "신통으로 적을 명중 시, 대상의 현재 생명력 백분율이 80% 이하인 경우, 5초간 공격력이 20% 증가")
+  if (bd && bd.type === '신통' && (state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)) {
+    applyBuff(state, '영검법체4', { atk: 20 }, 5);
+  }
   const bypassShield = isBypassShield(state, bd);
   let shieldHit = 0, hpHit = 0;
   if (bypassShield) {
