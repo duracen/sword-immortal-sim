@@ -1427,8 +1427,13 @@ SK['균천·현봉'] = {
   fam: '균천', cat: '영검', main: 252,
   cast(s, slots) {
     const js = s.stacks.검세;
-    // [현봉] 검세당 본 신통 피해 +3% (max tier) — localInc로 신통 피해 버킷에 추가
+    // [현봉] 검세당 본 신통 피해 +3% (max tier, 이번 cast 한정)
     const selfMult = 1 + js * 3 / 100;
+    if (js > 0) TRACE(s, 'BUF', `🔼버프 [균천·현봉 → 현봉] 본 신통 피해 +${(js * 3).toFixed(0)}% (검세 ${js}중첩, 이번 cast 한정)`);
+    // [새벽빛] 검세 3+ 시 발동 안내
+    if (js >= 3) TRACE(s, 'BUF', `🔼버프 [균천·현봉 → 새벽빛] 발동: 검세 ${js}중첩 ≥ 3 → 140% 호무 추가 (이번 cast 한정)`);
+    // [남월] 검세 5+ 시 발동 안내
+    if (js >= 5) TRACE(s, 'BUF', `🔼버프 [균천·현봉 → 남월] 발동: 검세 ${js}중첩 ≥ 5 → 천검 +80% 증폭 (이번 cast 한정)`);
     // [절진] crRes 20% 10s (max tier)
     applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10);
     // 본 신통 (물리, 현봉 +3%/검세)
