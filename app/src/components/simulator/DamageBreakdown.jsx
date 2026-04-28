@@ -153,7 +153,8 @@ export default function DamageBreakdown({ dmgEvents }) {
     function normalizeSrc(raw) {
       if (!raw) return '?';
       if (raw.startsWith('작열(DoT)') || raw.startsWith('작열DoT') || raw === '작열DoT') return '작열 DoT (합계)';
-      return raw;
+      // 다회 발동 옵션의 회차 suffix 제거 — 예: "진악(호무) 3/5" → "진악(호무)" (DamageBreakdown 통합 표시용)
+      return raw.replace(/\s+\d+\/\d+$/, '');
     }
     // 기존 평면 그룹화 (테이블용)
     const bySrc = {};
