@@ -3108,6 +3108,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state._snapBuffsAtDmg = null;
         state._snapStacksAtDmg = null;
         state._snapNextCastConsumed = null;  // nextCast 소비 스냅샷 리셋
+        state._consumedNextCastSources = [];  // 이전 cast 의 소비 source 가 stale 로 남지 않도록 리셋
         state._inMainCast = false;  // pre-cast hook 단계에선 false (메인 cast 진입 시 true)
         // 태현잔화: cast 시작 시 1회 roll (랜덤 모드에서만), 캐시해서 dealDamage 여러 번 호출돼도 동일 값
         if (CFG.randomCrit) {
