@@ -612,6 +612,8 @@ function randomTries(tries, p) {
 // - 랜덤 모드: 이번 cast 의 실제 crit 횟수만큼 full 피해 × N회
 function tickCritTriggers(state) {
   const activeKeys = new Set(state.buffs.filter(b => b.endT > state.t).map(b => b.key));
+  // 본 신통의 hit 수 (multi-hit 신통은 hit 별 crit roll → expected 모드에서도 hits × crEff)
+  const _hits = (state._activeCast && SKILL_HITS[state._activeCast]) || 1;
   // 청명·풍뢰 [풍뢰+천적 max]: crit 시 16+12=28% 물리 천뢰, 최대 14회
   if (state.famSlots.청명 && activeKeys.has('청명풍뢰_풍뢰') && (state.풍뢰남은 || 0) > 0) {
     const base = 16 + 12;
@@ -625,8 +627,9 @@ function tickCritTriggers(state) {
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      record(state, dealDamage(state, base * crEff, { type: '천뢰' }), '천뢰←풍뢰(crit)');
-      state.풍뢰남은 = Math.max(0, state.풍뢰남은 - crEff);
+      const expectedCrits = Math.min(_hits * crEff, state.풍뢰남은);
+      record(state, dealDamage(state, base * expectedCrits, { type: '천뢰' }), '천뢰←풍뢰(crit)');
+      state.풍뢰남은 = Math.max(0, state.풍뢰남은 - expectedCrits);
     }
   }
   // 오뢰·용음 [뇌정+어뢰 max]: crit 시 15% 술법 낙뢰, 최대 12회
@@ -641,8 +644,9 @@ function tickCritTriggers(state) {
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      record(state, dealDamage(state, 15 * crEff, { type: '낙뢰' }), '낙뢰←뇌정(crit)');
-      state.뇌정남은 = Math.max(0, state.뇌정남은 - crEff);
+      const expectedCrits = Math.min(_hits * crEff, state.뇌정남은);
+      record(state, dealDamage(state, 15 * expectedCrits, { type: '낙뢰' }), '낙뢰←뇌정(crit)');
+      state.뇌정남은 = Math.max(0, state.뇌정남은 - expectedCrits);
     }
   }
 }
@@ -3412,9 +3416,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             }
           } else {
             const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-            state.뇌격남은 -= crEff;
+            const _hits뇌격 = (sk && SKILL_HITS[sk.name]) || 1;
+            const expectedCrits = Math.min(_hits뇌격 * crEff, state.뇌격남은);
+            state.뇌격남은 -= expectedCrits;
             state._currentSource = '뇌격(지속)';
-            record(state, dealDamage(state, 8 * crEff, { noSkillMult: true }));
+            record(state, dealDamage(state, 8 * expectedCrits, { noSkillMult: true }));
           }
         }
         // 백족 공통 트리거 (살혼은 사해 ≥2 시 모든 신통 명중에서 발동)
