@@ -1283,14 +1283,15 @@ SK['복룡·약영'] = {
     applyBuff(s, '복룡약영_통찰', { cr: 30 }, 15);
     // [축세] 5초간 atk +20 (max tier)
     applyBuff(s, '복룡약영_축세', { atk: 20 }, 5);
-    // [현미] HP 60% 이하 시 다음 신통 최종피해 45% (max tier) — nextCast 1회용
+    // === 본 신통 ===
+    record(s, dealDamage(s, 135));
+    // [현미] HP 60% 이하 시 *다음* 신통 시전 시 최종피해 45% (max tier) — nextCast 1회용
+    // 본 신통 record 후 부여해야 자기 record 가 소비하지 않고 다음 cast 가 받음.
     if (hpBelow(s, 0.60)) {
       s.nextCast.finalDmg += 45;
       s._nextCastSources = s._nextCastSources || [];
-      s._nextCastSources.push({ key: '복룡·약영 → 현미', pct: 45, msg: `HP ${hpPct}% ≤ 60% → 다음 신통 최종피해 +45%` });
+      s._nextCastSources.push({ key: '복룡·약영 → 현미', pct: 45, field: 'finalDmg', msg: `HP ${hpPct}% ≤ 60% → 다음 신통 최종피해 +45%` });
     }
-    // === 본 신통 ===
-    record(s, dealDamage(s, 135));
   }
 };
 SK['복룡·결운'] = {
