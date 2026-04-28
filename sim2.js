@@ -469,11 +469,17 @@ function addStackTTL(state, resource, n, max, dur = 20) {
   st.count = Math.min(before + n, max);
   st.endT = state.t + dur + 0.001; // +epsilon — dur초 뒤 정확히 cast되는 시점까지 포함
   state.stacks[resource] = st.count;
+  // 검세 (균천) 의 경우 획득 카운터 (N+n)/3 을 트레이스에 포함 — 다음 천검 발동까지 누적치 표시
+  let extraStr = '';
+  if (resource === '검세' && famActive(state, '균천')) {
+    const nextCnt = ((state.검세획득카운터 || 0) + n) % 3;
+    extraStr = ` (획득카운터 ${nextCnt}/3)`;
+  }
   if (st.count !== before) {
-    TRACE(state, 'STK', `${resource} ${before}→${st.count} (TTL=${dur}s reset)`);
+    TRACE(state, 'STK', `${resource} ${before}→${st.count} (TTL=${dur}s reset)${extraStr}`);
   } else if (st.count > 0) {
     // 최대치라 count 불변이지만 TTL 만 갱신 — 타임라인 표시용으로 trace
-    TRACE(state, 'STK', `${resource} ${st.count}↻ (TTL=${dur}s reset, 최대치 유지)`);
+    TRACE(state, 'STK', `${resource} ${st.count}↻ (TTL=${dur}s reset, 최대치 유지)${extraStr}`);
   }
 }
 function pruneStackTTL(state) {
