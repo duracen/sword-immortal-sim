@@ -721,6 +721,8 @@ function dealDamage(state, base, opts = {}) {
       for (const src of state._nextCastSources) {
         TRACE(state, 'BUF', `🔼버프 [${src.key}] 본 신통 적용 (${src.msg})`);
       }
+      // 소비 시점 source 보존 — record() 의 SNAP 캡처에서 정확한 라벨에 사용
+      state._consumedNextCastSources = state._nextCastSources.slice();
       state._nextCastSources = [];
     }
     state.nextCast.cr = 0;
@@ -731,11 +733,13 @@ function dealDamage(state, base, opts = {}) {
   }
 
   // === 최종 피해 (scope: 신통만) ===
-  //   소스: nextCast.finalDmg (현미/통백/풍세) + 유뢰4법체(crit) + 현염4법체(작열)
+  //   소스: nextCast.finalDmg (다음 신통 — 현미/풍세) + localFinalDmg (본 신통 — 통백 등)
+  //         + 유뢰4법체(crit) + 현염4법체(작열)
   let finalPct = 0;
   let 유뢰법체Final = 0, 현염법체Final = 0;
+  const localFinalDmg = opts.localFinalDmg || 0;
   if (isShintong) {
-    finalPct += ncFinalDmg;
+    finalPct += ncFinalDmg + localFinalDmg;
     if (state.catSlots.뇌전 >= 4) {
       const crEff = Math.min(cr, 100) / 100;
       // 랜덤 모드: isCrit 확정 기반 (crit 나면 full 20%, 아니면 0)
@@ -807,7 +811,7 @@ function dealDamage(state, base, opts = {}) {
     shintongPct, localInc: opts.localInc || 0,
     ampPct, localAmp: opts.localAmp || 0,
     dealtPct, localDealt: opts.localDealt || 0,
-    finalPct, finalDmgPct: ncFinalDmg, 유뢰법체Final, 현염법체Final,
+    finalPct, finalDmgPct: ncFinalDmg, localFinalDmg, localFinalDmgSrc: opts.localFinalDmgSrc || null, 유뢰법체Final, 현염법체Final,
     ncCR, ncCD, ncFinalCR, ncFinalCD,
     crIncPct, finalCRPct, crResPct, forceCrit: !!opts.forceCrit,
     cr: Math.min(cr, 100), cd, cMult,
@@ -1099,7 +1103,10 @@ function record(state, amount, source) {
       cd: bd.ncCD || 0,
       finalCR: bd.ncFinalCR || 0,
       finalCD: bd.ncFinalCD || 0,
-      finalDmg: bd.finalDmgPct || 0,
+      finalDmg: bd.finalDmgPct || 0,        // nextCast 의 finalDmg (다음 신통 류)
+      localFinalDmg: bd.localFinalDmg || 0, // 본 cast 한정 finalDmg ([통백] 등)
+      localFinalDmgSrc: bd.localFinalDmgSrc || null,
+      consumedSources: (state._consumedNextCastSources || []).slice(),
     };
   }
   // 법체 상성 보너스 일괄 반영
@@ -1320,10 +1327,10 @@ SK['복룡·붕산'] = {
     if (forceC) TRACE(s, 'BUF', `🔼버프 [복룡·붕산 → 참선] 발동: HP ${hpPct}% ≤ 50% → 치명타 확정 + cd+50% (이번 cast)`);
     // [참선] HP 50% 이하 시 반드시 치명타 + cd 50% (max tier)
     // [통백] 본 신통 최종 피해 +20% (max tier)
-    s.nextCast.finalDmg += 20;
     // [신력] atk +20% 5초 (max tier) — 시전 시 buff, record 전 부여
     applyBuff(s, '복룡붕산_신력', { atk: 20 }, 5);
-    record(s, dealDamage(s, base, { forceCrit: forceC, localCD: forceC ? 50 : 0 }));
+    // [통백] "본 신통으로 입히는 최종 피해 +20%" — local 적용 (nextCast 가 아닌 본 cast 한정)
+    record(s, dealDamage(s, base, { forceCrit: forceC, localCD: forceC ? 50 : 0, localFinalDmg: 20, localFinalDmgSrc: '복룡·붕산 → 통백' }));
   }
 };
 
@@ -3258,21 +3265,34 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (state.진무절화스택) pushBuff('dealt', '불씨·진무절화', state.진무절화스택);
           // nextCast (다음 신통 1회 소비)
           if (state.nextCast) {
-            // nextCast (현미/통백/풍세/파정 등) — 본 cast dealDamage 가 소비했으므로
-            // _snapNextCastConsumed (record() 가 첫 신통 record 시점에 캡처) 사용.
-            // 현재 state.nextCast 는 미소비(다음 cast 용)분만 남아있어서 둘 다 표시.
+            // nextCast (다음 신통 — 현미/풍세/파정) 와 localFinal* (본 cast — 통백 등) 을 각각 표시.
+            // 본 cast dealDamage 가 nextCast 를 소비했으므로 _snapNextCastConsumed 사용.
             const nc = state.nextCast || {};
             const ncSnap = state._snapNextCastConsumed || {};
-            const ncCr = (ncSnap.cr || 0) + (nc.cr || 0);
-            const ncCd = (ncSnap.cd || 0) + (nc.cd || 0);
-            const ncFCR = (ncSnap.finalCR || 0) + (nc.finalCR || 0);
-            const ncFCD = (ncSnap.finalCD || 0) + (nc.finalCD || 0);
-            const ncFD = (ncSnap.finalDmg || 0) + (nc.finalDmg || 0);
-            if (ncCr) pushBuff('cr', 'nextCast', ncCr);
-            if (ncCd) pushBuff('cd', 'nextCast', ncCd);
-            if (ncFCR) pushBuff('finalCR', 'nextCast', ncFCR);
-            if (ncFCD) pushBuff('finalCD', 'nextCast', ncFCD);
-            if (ncFD) pushBuff('finalDmg', 'nextCast', ncFD);
+            // 다음 cast 용 (미소비) — 'nextCast' 라벨
+            if (nc.cr) pushBuff('cr', 'nextCast (다음)', nc.cr);
+            if (nc.cd) pushBuff('cd', 'nextCast (다음)', nc.cd);
+            if (nc.finalCR) pushBuff('finalCR', 'nextCast (다음)', nc.finalCR);
+            if (nc.finalCD) pushBuff('finalCD', 'nextCast (다음)', nc.finalCD);
+            if (nc.finalDmg) pushBuff('finalDmg', 'nextCast (다음)', nc.finalDmg);
+            // 본 cast 가 소비한 nextCast 분 — source 라벨로 표시
+            if (ncSnap.consumedSources && ncSnap.consumedSources.length > 0) {
+              for (const src of ncSnap.consumedSources) {
+                const field = src.field || 'finalDmg';
+                pushBuff(field, src.key, src.pct || 0);
+              }
+            } else {
+              // source 없으면 fallback (구버전 호환)
+              if (ncSnap.cr) pushBuff('cr', 'nextCast (소비)', ncSnap.cr);
+              if (ncSnap.cd) pushBuff('cd', 'nextCast (소비)', ncSnap.cd);
+              if (ncSnap.finalCR) pushBuff('finalCR', 'nextCast (소비)', ncSnap.finalCR);
+              if (ncSnap.finalCD) pushBuff('finalCD', 'nextCast (소비)', ncSnap.finalCD);
+              if (ncSnap.finalDmg) pushBuff('finalDmg', 'nextCast (소비)', ncSnap.finalDmg);
+            }
+            // 본 cast 한정 localFinalDmg ([통백] 등) — source 라벨 사용
+            if (ncSnap.localFinalDmg) {
+              pushBuff('finalDmg', ncSnap.localFinalDmgSrc || '본 cast 한정', ncSnap.localFinalDmg);
+            }
           }
           // 합계
           const sum = (arr) => arr.reduce((a, b) => a + b.val, 0);
