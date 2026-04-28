@@ -1283,11 +1283,13 @@ SK['복룡·약영'] = {
     applyBuff(s, '복룡약영_통찰', { cr: 30 }, 15);
     // [축세] 5초간 atk +20 (max tier)
     applyBuff(s, '복룡약영_축세', { atk: 20 }, 5);
+    // [현미] HP 60% 이하 조건은 시전 시점 (본 신통 record 전 HP) 으로 검사 — 본 신통이 HP 를 더 깎기 전 기준
+    const 현미발동 = hpBelow(s, 0.60);
     // === 본 신통 ===
     record(s, dealDamage(s, 135));
-    // [현미] HP 60% 이하 시 *다음* 신통 시전 시 최종피해 45% (max tier) — nextCast 1회용
-    // 본 신통 record 후 부여해야 자기 record 가 소비하지 않고 다음 cast 가 받음.
-    if (hpBelow(s, 0.60)) {
+    // [현미] 발동 시 다음 신통 최종피해 +45% (max tier) — nextCast 1회용
+    // 부여(nextCast.finalDmg 설정) 는 record 후에 해야 자기 record 가 소비하지 않고 다음 cast 가 받음.
+    if (현미발동) {
       s.nextCast.finalDmg += 45;
       s._nextCastSources = s._nextCastSources || [];
       s._nextCastSources.push({ key: '복룡·약영 → 현미', pct: 45, field: 'finalDmg', msg: `HP ${hpPct}% ≤ 60% → 다음 신통 최종피해 +45%` });
