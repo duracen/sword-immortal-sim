@@ -1450,11 +1450,13 @@ SK['균천·현봉'] = {
       TRACE(s, 'OPT', `🟠현봉·남월 발동: 검세 ${js}중첩 ≥ 5 → 즉시 천검 발동 (천검 +80% 증폭)`);
       천검발동(s, slots, 80);
     }
-    // [절진] 60% 호무 추가 + crRes 20% 10s (max tier)
+    // [절진] crRes 20% 10s (max tier) — "본 신통으로 명중 시" debuff, 본 신통 record 직전 부여 (본 신통이 디버프 받도록)
     applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10);
-    record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '절진(호무)');
     // === 본 신통 (물리, 현봉 +3%/검세) ===
     record(s, dealDamage(s, 252 * selfMult));
+    // === 본 신통 명중 후 추가 데미지 ===
+    // [절진] 60% 호무 추가 — 명중 시 트리거
+    record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '절진(호무)');
   }
 };
 SK['균천·파월'] = {
