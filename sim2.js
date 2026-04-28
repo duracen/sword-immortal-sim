@@ -1375,13 +1375,21 @@ SK['균천·진악'] = {
     // === 본 신통 (술법 일반 피해) ===
     record(s, dealDamage(s, 225));
     // === "본 신통 시전 시" 추가 데미지 (본 신통 후 — 별도 record) ===
-    // [진악] 검세당 30% 호무 (max 5회, max tier)
-    const flat1 = 30 * Math.min(js, 5);
-    if (flat1) record(s, dealDamage(s, flat1, { noSkillMult: true, type: '호무' }), '진악(호무)');
-    // [동현] 50% 호무 × 2회 (max tier)
-    record(s, dealDamage(s, 50 * 2, { noSkillMult: true, type: '호무' }), '동현(호무)');
-    // [절학] 검세 5+ 시 105% 호무 × 2회 (max tier)
-    if (js >= 5) record(s, dealDamage(s, 105 * 2, { noSkillMult: true, type: '호무' }), '절학(호무)');
+    // [진악] 검세당 30% 호무 1회 추가 (max 5회, max tier) — 각 회를 별도 record (트레이스 가시성 + 히트카운터)
+    const 진악Cnt = Math.min(js, 5);
+    for (let i = 0; i < 진악Cnt; i++) {
+      record(s, dealDamage(s, 30, { noSkillMult: true, type: '호무' }), `진악(호무) ${i+1}/${진악Cnt}`);
+    }
+    // [동현] 50% 호무 × 2회 (max tier) — 각 회를 별도 record
+    for (let i = 0; i < 2; i++) {
+      record(s, dealDamage(s, 50, { noSkillMult: true, type: '호무' }), `동현(호무) ${i+1}/2`);
+    }
+    // [절학] 검세 5+ 시 105% 호무 × 2회 (max tier) — 각 회를 별도 record
+    if (js >= 5) {
+      for (let i = 0; i < 2; i++) {
+        record(s, dealDamage(s, 105, { noSkillMult: true, type: '호무' }), `절학(호무) ${i+1}/2`);
+      }
+    }
   }
 };
 SK['균천·현봉'] = {
