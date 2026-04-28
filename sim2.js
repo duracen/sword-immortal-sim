@@ -1330,11 +1330,11 @@ SK['복룡·붕산'] = {
     // [참선] HP 50% 이하 시 반드시 치명타 + cd 50%
     const forceC = hpBelow(s, 0.50);
     if (forceC) TRACE(s, 'BUF', `🔼버프 [복룡·붕산 → 참선] 발동: HP ${hpPct}% ≤ 50% → 치명타 확정 + cd+50% (이번 cast)`);
-    // [참선] HP 50% 이하 시 반드시 치명타 + cd 50% (max tier)
-    // [통백] 본 신통 최종 피해 +20% (max tier)
     // [신력] atk +20% 5초 (max tier) — 시전 시 buff, record 전 부여
     applyBuff(s, '복룡붕산_신력', { atk: 20 }, 5);
     // [통백] "본 신통으로 입히는 최종 피해 +20%" — local 적용 (nextCast 가 아닌 본 cast 한정)
+    // 타임라인 가시성을 위해 BUF trace 도 emit (검혼/참선 패턴과 동일, "이번 cast 한정")
+    TRACE(s, 'BUF', `🔼버프 [복룡·붕산 → 통백] 본 신통 최종 피해 +20% (이번 cast 한정)`);
     record(s, dealDamage(s, base, { forceCrit: forceC, localCD: forceC ? 50 : 0, localFinalDmg: 20, localFinalDmgSrc: '복룡·붕산 → 통백' }));
   }
 };
@@ -1534,8 +1534,10 @@ SK['참허·엄동'] = {
     const cm = s.stacks.검심통명 ? 1 : 0;
     // [응세] 본 신통 피해 +15%, 검심통명 시 +15% 추가 (= +30)
     const selfMult = 1 + (cm ? 30 : 15) / 100;
+    TRACE(s, 'BUF', `🔼버프 [참허·엄동 → 응세] 본 신통 피해 +${cm ? 30 : 15}% (이번 cast 한정${cm ? ', 검심통명 +15%' : ''})`);
     // [참심] 검심통명 시 본 신통 최종 cr +60
     const localFinalCR = cm ? 60 : 0;
+    if (cm) TRACE(s, 'BUF', `🔼버프 [참허·엄동 → 참심] 본 신통 최종 cr +60% (검심통명, 이번 cast 한정)`);
     // [검식] crRes 25~40% 15초 저체력 스케일
     applyBuff(s, '참허엄동_검식', { crRes: 25 + 15 * hpLowFactor(s) }, 15);
     // 본 신통
@@ -2186,6 +2188,8 @@ SK['옥추·청사'] = {
     // [운청] 옥추 2중첩당 본 신통 피해 +6% (max tier) — localInc 로 신통피해 버킷에 추가
     const uc = 옥추Stack >= 2 ? Math.floor(옥추Stack / 2) * 6 : 0;
     if (uc) TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 운청] 발동: 옥추 ${옥추Stack}중첩 → 본 신통 피해 +${uc}%`);
+    // [명뢰] 본 신통 최종 cr +30% (max tier, 이번 cast 한정)
+    TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 명뢰] 본 신통 최종 cr +30% (이번 cast 한정)`);
     // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스)
     record(s, dealDamage(s, 170 * MH[4] * 옥추유파Mult(s, slots), {
       localInc: uc,
@@ -2237,6 +2241,7 @@ SK['오뢰·호후'] = {
   cast(s, slots) {
     // [비전] 본 신통 최종cr +25 (max tier) — localFinalCR
     const 로컬FinalCR = 25;
+    TRACE(s, 'BUF', `🔼버프 [오뢰·호후 → 비전] 본 신통 최종 cr +25% (이번 cast 한정)`);
     // 본 신통 cr 기댓값 계산 (비전 포함)
     const baseCR = CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + (로컬FinalCR + s.nextCast.finalCR) / 100) * (1 + sumBuffCritRes(s) / 100);
     const crEff = Math.min(100, baseCR) / 100;
@@ -2298,7 +2303,8 @@ SK['신소·운록'] = {
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
     const 벽력val = probScale(crEff) * 40;
     if (벽력val > 0) applyBuff(s, '신소운록_벽력', { atk: 벽력val }, 10);
-    // 본 신통 + [파군] 본 신통 cd +35 (localCD)
+    // [파군] 본 신통 cd +35 (max tier, 이번 cast 한정)
+    TRACE(s, 'BUF', `🔼버프 [신소·운록 → 파군] 본 신통 cd +35% (이번 cast 한정)`);
     record(s, dealDamage(s, 135, { localCD: 35 }));
     // [전철] 범위 내 3명 81% 물리 추가
     record(s, dealDamage(s, 81, { noSkillMult: true }), '전철');
@@ -2309,7 +2315,8 @@ SK['신소·천고'] = {
   cast(s, slots) {
     addStack(s, '신소', 1, Infinity);
     applyBuff(s, '신소천고_뇌명', { cr: 7 }, 10); // [뇌명] cr 7% (max tier)
-    // [통할] 본 신통 cd +35 (max tier)
+    // [통할] 본 신통 cd +35 (max tier, 이번 cast 한정)
+    TRACE(s, 'BUF', `🔼버프 [신소·천고 → 통할] 본 신통 cd +35% (이번 cast 한정)`);
     // [경뢰] crRes 30% (max tier)
     applyBuff(s, '신소천고_경뢰', { crRes: 30 }, 15);
     // [만균] crit 시 3명에게 165% 물리 (max tier)
@@ -2323,7 +2330,8 @@ SK['신소·환뢰'] = {
   cast(s, slots) {
     addStack(s, '신소', 1, Infinity);
     applyBuff(s, '신소환뢰_구소', { atk: 15 }, 5); // [구소] atk 15% (max tier)
-    // [뇌전] 본 신통 cd +35 (max tier)
+    // [뇌전] 본 신통 cd +35 (max tier, 이번 cast 한정)
+    TRACE(s, 'BUF', `🔼버프 [신소·환뢰 → 뇌전] 본 신통 cd +35% (이번 cast 한정)`);
     // [호탕] crit 시 방어력 50% 감소 (max tier)
     // 기댓값: 4히트 중 ≥1 crit 확률 × 50 스케일
     // 랜덤: 4번 roll, 1회 이상 crit 이면 full 50
@@ -2373,6 +2381,8 @@ SK['신소·청삭'] = {
     }
     // [천위] 신소 상태 시 3명 140% 물리 추가
     const 천위 = 천위활성 ? 140 : 0;
+    // [위능] 본 신통 cd +35 (max tier, 이번 cast 한정)
+    TRACE(s, 'BUF', `🔼버프 [신소·청삭 → 위능] 본 신통 cd +35% (이번 cast 한정)`);
     // 본 신통 (6회 반사) + 위능 cd+35 localCD
     record(s, dealDamage(s, 128 * MH[6], { localCD: 35 }));
     // 추가 피해들 (모두 일반 물리, 유파 bonus는 신통피해 버킷)
