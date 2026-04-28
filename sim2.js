@@ -1258,18 +1258,22 @@ SK['복룡·약영'] = {
   cast(s, slots) {
     const f = hpLowFactor(s);
     const hpPct = (hpRatio(s) * 100).toFixed(0);
+    // === 시전 시 buff (조건 없음) — 본 신통 record 전 부여하여 본 신통에 반영 ===
     // [능허] 5초간 atk 20~30% (max tier, 저체력 선형 스케일)
     const neung = 20 + 10 * f;
     applyBuff(s, '복룡약영_능허', { atk: neung }, 5);
-    record(s, dealDamage(s, 135));
-    applyBuff(s, '복룡약영_통찰', { cr: 30 }, 15); // [통찰] cr 30 (max tier)
-    applyBuff(s, '복룡약영_축세', { atk: 20 }, 5); // [축세] atk 20 (max tier)
+    // [통찰] 15초간 cr +30 (max tier)
+    applyBuff(s, '복룡약영_통찰', { cr: 30 }, 15);
+    // [축세] 5초간 atk +20 (max tier)
+    applyBuff(s, '복룡약영_축세', { atk: 20 }, 5);
     // [현미] HP 60% 이하 시 다음 신통 최종피해 45% (max tier) — nextCast 1회용
     if (hpBelow(s, 0.60)) {
       s.nextCast.finalDmg += 45;
       s._nextCastSources = s._nextCastSources || [];
       s._nextCastSources.push({ key: '복룡·약영 → 현미', pct: 45, msg: `HP ${hpPct}% ≤ 60% → 다음 신통 최종피해 +45%` });
     }
+    // === 본 신통 ===
+    record(s, dealDamage(s, 135));
   }
 };
 SK['복룡·결운'] = {
