@@ -2144,19 +2144,24 @@ function 옥추유파Mult(s, slots) {
 SK['옥추·황룡'] = {
   fam: '옥추', cat: '뇌전', main: 172,
   cast(s, slots) {
-    // [황룡] 60% 술법 추가 + 옥추2+ 방어력 20% (max tier)
+    // === "본 신통 시전 시" buff/debuff (record 전 부여) ===
+    // [황룡] 옥추2+ 방어력 20% 10초 (max tier)
     if (s.stacks.옥추 >= 2) applyBuff(s, '옥추황룡_황룡', { defDebuff: 20 }, 10);
-    // [운한] crRes 30% + 옥추4+ 60% 추가 (max tier)
+    // [운한] crRes 30% 15초 (max tier)
     applyBuff(s, '옥추황룡_운한', { crRes: 30 }, 15);
-    // [섬천] 옥추5+ atk 30% (max tier)
+    // [섬천] 옥추5+ atk 30% 10초 (max tier)
     if (s.stacks.옥추 >= 5) applyBuff(s, '옥추황룡_섬천', { atk: 30 }, 10);
-    // [정위] cd 30% (max tier)
+    // [정위] cd 30% 10초 (max tier)
     applyBuff(s, '옥추황룡_정위', { cd: 30, shintongOnly: true }, 10);
-    // 본 신통 (신통 피해 적용)
+    // [운한] 옥추4+ 시 60% 술법 추가 — 시간 조건 옵션이라 record 전 (시전 시 트리거)
+    if (s.stacks.옥추 >= 4) {
+      TRACE(s, 'OPT', `🟠황룡·운한 발동: 옥추 ${s.stacks.옥추}중첩 ≥ 4 → 60% 술법 추가`);
+      record(s, dealDamage(s, 60, { noSkillMult: true }), '운한');
+    }
+    // === 본 신통 (신통 피해 적용) ===
     record(s, dealDamage(s, 172));
-    // 옵션 추가 피해 — 신통 피해 증가 적용 안 함
+    // [황룡] 60% 술법 추가 — 조건 없는 일반 추가 데미지, 본 신통 데미지와 함께 (record 후)
     record(s, dealDamage(s, 60, { noSkillMult: true }), '황룡');
-    if (s.stacks.옥추 >= 4) record(s, dealDamage(s, 60, { noSkillMult: true }), '운한');
   }
 };
 SK['옥추·소명'] = {
