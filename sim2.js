@@ -1021,6 +1021,7 @@ function detailedBuffBreakdown(state, bd) {
   // 최종피해 (신통만)
   if (bd?.type === '신통') {
     if (bd?.finalDmgPct) cat.최종피해.push(`nextCast+${bd.finalDmgPct.toFixed(0)}`);
+    if (bd?.localFinalDmg) cat.최종피해.push(`${bd.localFinalDmgSrc || 'local'}+${bd.localFinalDmg.toFixed(0)}`);
     if (bd?.유뢰법체Final) cat.최종피해.push(`유뢰4법체+${bd.유뢰법체Final.toFixed(1)}`);
     if (bd?.현염법체Final) cat.최종피해.push(`현염4법체+${bd.현염법체Final.toFixed(0)}`);
   }
