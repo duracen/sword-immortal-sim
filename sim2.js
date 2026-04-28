@@ -1121,11 +1121,6 @@ function record(state, amount, source) {
   state.dmgEvents.push({ t: state.t, amt: amount, src, activeCast });
   // === 호신강기/HP 풀 적용 ===
   const bd = state._lastBreakdown;
-  // === 영검법체 4set 트리거: 신통으로 적을 명중 시 + HP 80% 이하 → 5초간 atk+20% buff ===
-  // (사양: "신통으로 적을 명중 시, 대상의 현재 생명력 백분율이 80% 이하인 경우, 5초간 공격력이 20% 증가")
-  if (bd && bd.type === '신통' && (state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)) {
-    applyBuff(state, '영검법체4', { atk: 20 }, 5);
-  }
   const bypassShield = isBypassShield(state, bd);
   let shieldHit = 0, hpHit = 0;
   if (bypassShield) {
@@ -1173,6 +1168,12 @@ function record(state, amount, source) {
   else if (hpHit > 0) poolStr = ` [HP -${(hpHit/1e8).toFixed(2)}억]`;
   const poolRemStr = ` (shield=${((state.shieldRem||0)/1e8).toFixed(2)}억, hp=${((state.hpRem||0)/1e8).toFixed(2)}억)`;
   TRACE(state, 'DMG', `[${src}] +${amount.toFixed(0)}${critStr}  (누적 ${state.totalDmg.toFixed(0)})${poolStr}${poolRemStr}${activeStr}${breakdownStr}`);
+  // === 영검법체 4set 트리거: 신통으로 적을 명중 시 + HP 80% 이하 → 5초간 atk+20% buff ===
+  // (사양: "신통으로 적을 명중 시, 대상의 현재 생명력 백분율이 80% 이하인 경우, 5초간 공격력이 20% 증가")
+  // 명중 시 트리거이므로 DMG trace 후 발동 (이번 신통 데미지엔 미반영, 다음 5초 데미지에 적용)
+  if (bd && bd.type === '신통' && (state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)) {
+    applyBuff(state, '영검법체4', { atk: 20 }, 5);
+  }
 }
 
 // 중복 명중/반사 감쇠: 이전 타의 90% 배수
