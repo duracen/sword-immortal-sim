@@ -1403,31 +1403,33 @@ SK['균천·진악'] = {
   fam: '균천', cat: '영검', main: 225,
   cast(s, slots) {
     const js = s.stacks.검세;
-    // === "본 신통 시전 시" 트리거 (본 신통 record 전 — buff 가 본 신통에 반영) ===
+    // === "본 신통 시전 시" 트리거 (본 신통 record 전) ===
     // [종식] 검세 3+ 시: 즉시 천검 + atk 30% 10s (max tier)
     if (js >= 3) {
       TRACE(s, 'OPT', `🟠진악·종식 발동: 검세 ${js}중첩 ≥ 3 → 즉시 천검 발동 + atk 30% 10s`);
       applyBuff(s, '균천진악_종식', { atk: 30 }, 10);
       천검발동(s, slots);
     }
-    // === 본 신통 (술법 일반 피해) ===
-    record(s, dealDamage(s, 225));
-    // === "본 신통 시전 시" 추가 데미지 (본 신통 후 — 별도 record) ===
-    // [진악] 검세당 30% 호무 1회 추가 (max 5회, max tier) — 각 회를 별도 record (트레이스 가시성 + 히트카운터)
+    // [진악] 검세당 30% 호무 1회 추가 (max 5회, max tier)
     const 진악Cnt = Math.min(js, 5);
+    if (진악Cnt > 0) TRACE(s, 'OPT', `🟠진악·진악 발동: 검세 ${진악Cnt}중첩 → 30% 호무 ×${진악Cnt}`);
     for (let i = 0; i < 진악Cnt; i++) {
       record(s, dealDamage(s, 30, { noSkillMult: true, type: '호무' }), `진악(호무) ${i+1}/${진악Cnt}`);
     }
-    // [동현] 50% 호무 × 2회 (max tier) — 각 회를 별도 record
+    // [동현] 50% 호무 × 2회 (max tier)
+    TRACE(s, 'OPT', `🟠진악·동현 발동: 50% 호무 ×2`);
     for (let i = 0; i < 2; i++) {
       record(s, dealDamage(s, 50, { noSkillMult: true, type: '호무' }), `동현(호무) ${i+1}/2`);
     }
-    // [절학] 검세 5+ 시 105% 호무 × 2회 (max tier) — 각 회를 별도 record
+    // [절학] 검세 5+ 시 105% 호무 × 2회 (max tier)
     if (js >= 5) {
+      TRACE(s, 'OPT', `🟠진악·절학 발동: 검세 ${js}중첩 ≥ 5 → 105% 호무 ×2`);
       for (let i = 0; i < 2; i++) {
         record(s, dealDamage(s, 105, { noSkillMult: true, type: '호무' }), `절학(호무) ${i+1}/2`);
       }
     }
+    // === 본 신통 (술법 일반 피해) ===
+    record(s, dealDamage(s, 225));
   }
 };
 SK['균천·현봉'] = {
