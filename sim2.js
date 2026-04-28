@@ -1091,6 +1091,16 @@ function record(state, amount, source) {
       cat: b.cat, dmgMult: b.dmgMult, dealt: b.dealt, shintongOnly: b.shintongOnly,
     }));
     state._snapStacksAtDmg = { ...state.stacks };
+    // nextCast (현미/통백/풍세/파정 등) 은 dealDamage 가 이미 소비했으므로,
+    // 본 cast 의 첫 신통 record 의 _lastBreakdown 에서 소비된 값을 보존.
+    const bd = state._lastBreakdown || {};
+    state._snapNextCastConsumed = {
+      cr: bd.ncCR || 0,
+      cd: bd.ncCD || 0,
+      finalCR: bd.ncFinalCR || 0,
+      finalCD: bd.ncFinalCD || 0,
+      finalDmg: bd.finalDmgPct || 0,
+    };
   }
   // 법체 상성 보너스 일괄 반영
   amount = amount * lawCounterMult(state);
@@ -3089,6 +3099,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state._snapBuffsCaptured = false;
         state._snapBuffsAtDmg = null;
         state._snapStacksAtDmg = null;
+        state._snapNextCastConsumed = null;  // nextCast 소비 스냅샷 리셋
         state._inMainCast = false;  // pre-cast hook 단계에선 false (메인 cast 진입 시 true)
         // 태현잔화: cast 시작 시 1회 roll (랜덤 모드에서만), 캐시해서 dealDamage 여러 번 호출돼도 동일 값
         if (CFG.randomCrit) {
@@ -3247,11 +3258,21 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (state.진무절화스택) pushBuff('dealt', '불씨·진무절화', state.진무절화스택);
           // nextCast (다음 신통 1회 소비)
           if (state.nextCast) {
-            if (state.nextCast.cr) pushBuff('cr', 'nextCast', state.nextCast.cr);
-            if (state.nextCast.cd) pushBuff('cd', 'nextCast', state.nextCast.cd);
-            if (state.nextCast.finalCR) pushBuff('finalCR', 'nextCast', state.nextCast.finalCR);
-            if (state.nextCast.finalCD) pushBuff('finalCD', 'nextCast', state.nextCast.finalCD);
-            if (state.nextCast.finalDmg) pushBuff('finalDmg', 'nextCast', state.nextCast.finalDmg);
+            // nextCast (현미/통백/풍세/파정 등) — 본 cast dealDamage 가 소비했으므로
+            // _snapNextCastConsumed (record() 가 첫 신통 record 시점에 캡처) 사용.
+            // 현재 state.nextCast 는 미소비(다음 cast 용)분만 남아있어서 둘 다 표시.
+            const nc = state.nextCast || {};
+            const ncSnap = state._snapNextCastConsumed || {};
+            const ncCr = (ncSnap.cr || 0) + (nc.cr || 0);
+            const ncCd = (ncSnap.cd || 0) + (nc.cd || 0);
+            const ncFCR = (ncSnap.finalCR || 0) + (nc.finalCR || 0);
+            const ncFCD = (ncSnap.finalCD || 0) + (nc.finalCD || 0);
+            const ncFD = (ncSnap.finalDmg || 0) + (nc.finalDmg || 0);
+            if (ncCr) pushBuff('cr', 'nextCast', ncCr);
+            if (ncCd) pushBuff('cd', 'nextCast', ncCd);
+            if (ncFCR) pushBuff('finalCR', 'nextCast', ncFCR);
+            if (ncFCD) pushBuff('finalCD', 'nextCast', ncFCD);
+            if (ncFD) pushBuff('finalDmg', 'nextCast', ncFD);
           }
           // 합계
           const sum = (arr) => arr.reduce((a, b) => a + b.val, 0);
