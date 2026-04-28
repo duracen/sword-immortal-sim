@@ -2992,7 +2992,14 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
     // 관일 종료 체크 (천연: 검세 1중첩당 30% 호무, 최대 5회) max tier
     if (state.관일End > 0 && state.t >= state.관일End && !state.관일종료처리) {
       const js = Math.min(state.stacks.검세, 5);
-      for (let i = 0; i < js; i++) record(state, dealDamage(state, 30, { noSkillMult: true, type: '호무' }));
+      const _prevSrc = state._currentSource;
+      const _prevAct = state._activeCast;
+      state._activeCast = '균천·관일';
+      for (let i = 0; i < js; i++) {
+        record(state, dealDamage(state, 30, { noSkillMult: true, type: '호무' }), `천연(호무) ${i+1}/${js}`);
+      }
+      state._currentSource = _prevSrc;
+      state._activeCast = _prevAct;
       // [천연] 만 처리. 검망/쇄일 은 관일 창과 무관 — 잔여 리셋 안 함.
       state.관일종료처리 = true;
     }
