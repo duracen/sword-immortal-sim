@@ -728,11 +728,15 @@ async function handleMessage(e) {
       };
 
       let evalRes;
+      // 진행 중 빌드 main thread 로 알림 (디버그 — 어디서 멈추는지 확인용)
+      self.postMessage({ type: 'workerDebug', workerId, msg: `processing: ${bd.label} (${bd.skills.map(s=>s.name).join('+')})` });
       try {
         evalRes = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass1Optimize, orderTopK, onOrderProgress, onPartialTop);
       } catch (err) {
         // 단일 빌드 평가 중 에러 (예: simulateBuild 내부 안전장치 throw) — 빌드 skip 후 다음 진행
-        console.warn('[worker] build evaluation skipped due to error:', bd.label, err.message);
+        const skipMsg = `[worker] build evaluation skipped: ${bd.label} (${bd.skills.map(s=>s.name).join('+')}) — ${err.message}`;
+        console.warn(skipMsg);
+        self.postMessage({ type: 'workerDebug', workerId, msg: skipMsg });
         validProcessed++;
         self.postMessage({
           type: 'progress', current: validProcessed, total: totalCombos, validProcessed,

@@ -400,6 +400,8 @@ export function useRanking() {
             aggregateResults();  // 최종 flush
             setRunning(false);
           }
+        } else if (msg.type === 'workerDebug') {
+          console.log(`[worker ${msg.workerId}] ${msg.msg}`);
         } else if (msg.type === 'workerError') {
           console.error('[useRanking] worker reported error:', msg.error);
           setError(`워커 ${idx + 1} 내부 에러: ${msg.error}`);
