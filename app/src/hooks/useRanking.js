@@ -328,11 +328,12 @@ export function useRanking() {
       if (changed) resultsDirty = true;
     };
     const aggregateProgress = () => {
-      // 화면에 표시되는 진행률은 유효 빌드(법체 통과) 평가 완료 수 기준 + Pass 2 진행분.
+      // 메인 진행률은 Pass 1 (전체 빌드 평가) 만. Pass 2 는 별도 phase 로 표시.
       const validDone = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
       const pass2Done = perWorkerPass2Ref.current.reduce((a, b) => a + (b.done || 0), 0);
       const pass2Total = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
-      setProgress({ current: validDone + pass2Done, total: validTotal + pass2Total, label: '' });
+      const label = pass2Total > 0 ? `정밀 재검증 ${pass2Done}/${pass2Total}` : '';
+      setProgress({ current: validDone, total: validTotal, label });
     };
 
     ranges.forEach((range, idx) => {
@@ -405,11 +406,10 @@ export function useRanking() {
           }
           doneCount++;
           aggregateProgress();
-          // 모든 worker done 시 progress 강제 100% (남은 sliver 정리)
+          // 모든 worker done 시 progress = total (Pass 1 기준)
           if (doneCount >= ranges.length) {
             const fullValid = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
-            const fullPass2 = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
-            setProgress({ current: fullValid + fullPass2, total: fullValid + fullPass2, label: '' });
+            setProgress({ current: fullValid, total: validTotal, label: '' });
           }
           // 워커 자기 담당 구간 완료 → 해당 워커의 subProgress 행 제거
           setSubProgress((prev) => { const n = { ...prev }; delete n[idx]; return n; });
