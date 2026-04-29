@@ -793,6 +793,18 @@ async function handleMessage(e) {
     const topK = pass1Results.slice(0, pass2TopK);
     const pass2Optimize = fixedTreasures ? optimizeBuild : optimizeBuildStrong;
     self.postMessage({ type: 'phaseChange', workerId, phase: 'pass2', topK: topK.length });
+    // Pass 2 시작 즉시 — 첫 빌드 평가가 끝나기 전에 main thread 가 Pass 2 진행률 bar 를 보여줄 수 있도록
+    // pass2Done=0, pass2Total=topK.length 미리 전송
+    self.postMessage({
+      type: 'progress',
+      current: validProcessed,
+      total: totalCombos,
+      validProcessed,
+      workerId,
+      phase: 'pass2',
+      pass2Done: 0,
+      pass2Total: topK.length,
+    });
 
     for (let i = 0; i < topK.length; i++) {
       if (cancelled) { self.postMessage({ type: 'cancelled' }); return; }

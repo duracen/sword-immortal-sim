@@ -162,6 +162,7 @@ function countValidBuilds(skillPool, requiredLawBody) {
 export function useRanking() {
   const [results, setResults] = useState([]);
   const [progress, setProgress] = useState({ current: 0, total: 0, label: '' });
+  const [pass2Progress, setPass2Progress] = useState({ done: 0, total: 0 });
   const [subProgress, setSubProgress] = useState({});
   const [running, setRunning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -202,7 +203,8 @@ export function useRanking() {
     setWorkerCount(N);
 
     setResults([]);
-    setProgress({ current: 0, total: validTotal, label: '' });
+    setProgress({ current: 0, total: validTotal, label: '1차 탐색 중...' });
+    setPass2Progress({ done: 0, total: 0 });
     setSubProgress({});
     setPhase({});
     setError(null);
@@ -328,12 +330,21 @@ export function useRanking() {
       if (changed) resultsDirty = true;
     };
     const aggregateProgress = () => {
-      // 메인 진행률은 Pass 1 (전체 빌드 평가) 만. Pass 2 는 별도 phase 로 표시.
+      // 메인 진행률은 Pass 1 (전체 빌드 평가) 만. Pass 2 는 별도 progress bar 로 표시.
       const validDone = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
       const pass2Done = perWorkerPass2Ref.current.reduce((a, b) => a + (b.done || 0), 0);
       const pass2Total = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
-      const label = pass2Total > 0 ? `정밀 재검증 ${pass2Done}/${pass2Total}` : '';
+      // 라벨: Pass 2 진입 후엔 정밀 재검증 표시, 아니면 1차 탐색
+      let label = '1차 탐색 중...';
+      if (pass2Total > 0) {
+        if (validDone >= validTotal) {
+          label = `2차 정밀 재검증 진행 중 (${pass2Done}/${pass2Total})`;
+        } else {
+          label = `1차 탐색 중... (일부 워커 정밀 재검증 ${pass2Done}/${pass2Total})`;
+        }
+      }
       setProgress({ current: validDone, total: validTotal, label });
+      setPass2Progress({ done: pass2Done, total: pass2Total });
     };
 
     ranges.forEach((range, idx) => {
@@ -408,7 +419,10 @@ export function useRanking() {
           aggregateProgress();
           // 모든 worker done 시 진행률 강제 100% — 일부 worker 의 validProcessed 가 max 못 찍어도 검색은 끝났음을 명시
           if (doneCount >= ranges.length) {
-            setProgress({ current: validTotal, total: validTotal, label: '검색 완료' });
+            const finalPass2Total = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
+            const finalPass2Done = perWorkerPass2Ref.current.reduce((a, b) => a + (b.done || 0), 0);
+            setProgress({ current: validTotal, total: validTotal, label: '✅ 검색 완료' });
+            setPass2Progress({ done: finalPass2Total, total: finalPass2Total });
           }
           // 워커 자기 담당 구간 완료 → 해당 워커의 subProgress 행 제거
           setSubProgress((prev) => { const n = { ...prev }; delete n[idx]; return n; });
@@ -466,5 +480,5 @@ export function useRanking() {
     }, 3000);
   }, []);
 
-  return { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase };
+  return { results, progress, pass2Progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase };
 }
