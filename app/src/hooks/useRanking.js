@@ -406,10 +406,9 @@ export function useRanking() {
           }
           doneCount++;
           aggregateProgress();
-          // 모든 worker done 시 progress = total (Pass 1 기준)
+          // 모든 worker done 시 진행률 강제 100% — 일부 worker 의 validProcessed 가 max 못 찍어도 검색은 끝났음을 명시
           if (doneCount >= ranges.length) {
-            const fullValid = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
-            setProgress({ current: fullValid, total: validTotal, label: '' });
+            setProgress({ current: validTotal, total: validTotal, label: '검색 완료' });
           }
           // 워커 자기 담당 구간 완료 → 해당 워커의 subProgress 행 제거
           setSubProgress((prev) => { const n = { ...prev }; delete n[idx]; return n; });
