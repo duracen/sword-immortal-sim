@@ -116,7 +116,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       return () => clearTimeout(t);
     }
   }, [selected]);
-  const { results, progress, pass2Progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase } = useRanking();
+  const { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase } = useRanking();
 
   const sortBy = ['45', '60', '120', '180'][markerIdx];
 
@@ -363,28 +363,6 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           <div className="w-full bg-slate-700 rounded h-2 overflow-hidden">
             <div className="h-full bg-amber-500 transition-all" style={{ width: `${pct}%` }} />
           </div>
-          {/* Pass 2 (정밀 재검증) 전용 progress bar — Pass 2 가 활성화됐을 때만 표시 */}
-          {pass2Progress && pass2Progress.total > 0 && (
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="text-amber-300 font-semibold">
-                  🔬 2차 정밀 재검증
-                  {running && pass2Progress.done < pass2Progress.total && (
-                    <span className="ml-1 inline-block animate-pulse">●</span>
-                  )}
-                </span>
-                <span className="font-mono text-amber-200">
-                  {pass2Progress.done} / {pass2Progress.total} ({pass2Progress.total > 0 ? ((pass2Progress.done / pass2Progress.total) * 100).toFixed(1) : 0}%)
-                </span>
-              </div>
-              <div className="w-full bg-slate-700 rounded h-2 overflow-hidden">
-                <div
-                  className="h-full bg-amber-300 transition-all"
-                  style={{ width: `${pass2Progress.total > 0 ? (pass2Progress.done / pass2Progress.total) * 100 : 0}%` }}
-                />
-              </div>
-            </div>
-          )}
           {Object.keys(subProgress || {}).length > 0 && (
             <div className="mt-3 space-y-1.5 border-t border-slate-700 pt-3">
               <div className="text-xs text-slate-400 mb-1">각 워커 현재 빌드 진행:</div>
