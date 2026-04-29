@@ -1026,6 +1026,7 @@ function detailedBuffBreakdown(state, bd) {
   if (bd?.localAmp) cat.심화피해.push(`local+${bd.localAmp}`);
   if (bd?.localCR) cat.cr.push(`local+${bd.localCR}`);
   if (bd?.localCD) cat.cd.push(`local+${bd.localCD}`);
+  if (bd?.localDealt) cat.입히는피해.push(`관일·검망+${bd.localDealt}`);
   if (bd?.localFinalCR) cat.cr.push(`localFinal+${bd.localFinalCR}`);
   if (bd?.localFinalCD) cat.cd.push(`localFinal+${bd.localFinalCD}`);
   // 최종피해 (신통만)
@@ -1366,32 +1367,24 @@ function 천검발동(s, slots, ampPct = 0, srcTag = '천검') {
   const mult = 1 + slots * 10 / 100;
   let amp = 1 + ampPct / 100;
   // 관일·[검망]: 천검 발동 시 발동 (max tier: 3회 + [쇄일] +3회 = 6회)
-  //   [검망] 효과: 입히는 피해 +40% (general dealt buff, 5초) + 검세 +1
-  //   [쇄일] 효과: 검망 발동 시 천검 자체 피해 +20%
+  //   [검망] 효과: 천검 효과 발동 시 입히는 피해 +40% (지속시간 없음 → 이번 천검 record 한정 localDealt) + 검세 +1
+  //   [쇄일] 효과: 검망 발동 시 천검 자체 피해 +20% (이번 천검 한정)
+  let 검망localDealt = 0;
   if (s.검망남은 > 0) {
     const used = (s.검망max || 6) - s.검망남은 + 1;
-    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → 입히는 피해 +40% 5s (general) + 천검 ×1.20 (쇄일) + 검세 +1 (${used}/${s.검망max || 6}회)`);
+    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → 입히는 피해 +40% (이번 천검 한정) + 천검 ×1.20 (쇄일) + 검세 +1 (${used}/${s.검망max || 6}회)`);
     s.검망남은--;
-    // [검망] dealt +40% buff 5초 (전체 입히는 피해)
-    // 천검 자체 record 가 아직 안 일어났으므로 이번 천검 데미지에 대해서는 pre-DMG 부여.
-    // host cast 의 record 후 시점이라 _snapBuffsCaptured=true 일 수 있는데, 그대로 두면
-    // applyBuff 가 [post] 태그를 붙여 타임라인에서 +0.4s offset 표시됨 → 잘못된 시각.
-    // 천검 발동 시점=실제 적용 시점이므로 임시로 snap flag 해제하여 [post] 태그 방지.
-    const _prevSnap = s._snapBuffsCaptured;
-    s._snapBuffsCaptured = false;
-    // key 포맷 "균천관일_검망" → applyBuff 가 자동으로 "[균천·관일 → 검망]" 형식 로그 생성
-    // (lookupOption 의 포맷 1 로 파싱되어 옵션 desc 자동 매칭됨)
-    applyBuff(s, '균천관일_검망', { cat: 'dealt', dmgMult: 40 }, 5);
-    s._snapBuffsCaptured = _prevSnap;
-    // [쇄일] 천검 dmg +20% (이번 천검 한정 — 다음 데미지엔 적용 X)
-    // 실제 buff 등록은 안 함 (다음 데미지에 잘못 적용 방지). 타임라인 시각화 용도로만 BUF trace 찍음.
+    // [검망]: 이번 천검 record 한정 dealt +40 (사양상 지속시간 없음 → 5초 buff 가 아닌 1회용)
+    검망localDealt = 40;
+    TRACE(s, 'BUF', `🔼버프 [균천·관일 → 검망] 천검 dealt +40% (이번 천검 한정)`);
+    // [쇄일] 천검 dmg +20% (이번 천검 한정)
     TRACE(s, 'BUF', `🔼버프 [균천·관일 → 쇄일] 천검 dmg ×1.20 (이번 천검 한정)`);
     amp *= 1.20;
     // 검세 +1
     if (s.famSlots.균천) 검세획득_균천(s, s.famSlots.균천, 1);
   }
-  // 천검은 호신강기 무시 — type:'천검' 으로 처리
-  record(s, dealDamage(s, base * mult * amp, { noSkillMult: true, type: '천검' }));
+  // 천검은 호신강기 무시 — type:'천검' 으로 처리. [검망] 의 +40 dealt 는 localDealt 로 이번 record 한정.
+  record(s, dealDamage(s, base * mult * amp, { noSkillMult: true, type: '천검', localDealt: 검망localDealt }));
   s._currentSource = prevSrc;
 }
 function 검세획득_균천(s, slots, n = 1) {
