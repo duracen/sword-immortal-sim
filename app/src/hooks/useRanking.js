@@ -330,17 +330,16 @@ export function useRanking() {
       if (changed) resultsDirty = true;
     };
     const aggregateProgress = () => {
-      // 메인 진행률은 Pass 1 (전체 빌드 평가) 만. Pass 2 는 별도 progress bar 로 표시.
+      // 메인 진행률 = Pass 1. Pass 2 는 별도 bar.
       const validDone = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
       const pass2Done = perWorkerPass2Ref.current.reduce((a, b) => a + (b.done || 0), 0);
       const pass2Total = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
-      // 라벨: Pass 2 진입 후엔 정밀 재검증 표시, 아니면 1차 탐색
       let label = '1차 탐색 중...';
       if (pass2Total > 0) {
         if (validDone >= validTotal) {
-          label = `2차 정밀 재검증 진행 중 (${pass2Done}/${pass2Total})`;
+          label = '2차 정밀 재검증 진행 중';
         } else {
-          label = `1차 탐색 중... (일부 워커 정밀 재검증 ${pass2Done}/${pass2Total})`;
+          label = '1차 + 2차 동시 진행 중';
         }
       }
       setProgress({ current: validDone, total: validTotal, label });
@@ -417,12 +416,13 @@ export function useRanking() {
           }
           doneCount++;
           aggregateProgress();
-          // 모든 worker done 시 진행률 강제 100% — 일부 worker 의 validProcessed 가 max 못 찍어도 검색은 끝났음을 명시
+          // 모든 worker done 시 — 라벨만 업데이트, 진행률 점프 없음 (자연스럽게 도달한 값 유지)
           if (doneCount >= ranges.length) {
+            const finalValid = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
             const finalPass2Total = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
             const finalPass2Done = perWorkerPass2Ref.current.reduce((a, b) => a + (b.done || 0), 0);
-            setProgress({ current: validTotal, total: validTotal, label: '✅ 검색 완료' });
-            setPass2Progress({ done: finalPass2Total, total: finalPass2Total });
+            setProgress({ current: finalValid, total: validTotal, label: '✅ 검색 완료' });
+            setPass2Progress({ done: finalPass2Done, total: finalPass2Total });
           }
           // 워커 자기 담당 구간 완료 → 해당 워커의 subProgress 행 제거
           setSubProgress((prev) => { const n = { ...prev }; delete n[idx]; return n; });

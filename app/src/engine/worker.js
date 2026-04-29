@@ -612,8 +612,10 @@ async function handleMessage(e) {
 
   // === Pass 1 (fast 모드) 또는 단일 패스 (exhaustive 모드) ===
   const pass1Optimize = searchMode === 'fast' ? optimizeBuildFast : optimizeBuild;
-  // 정밀 탐색 시 유파 시너지 필수 신통은 1슬롯 유파에서 제외 — 단, 사용자가 직접 선택한 작은 풀(<=10) 은 그대로 존중.
-  const strictSkillMin = (searchMode === 'exhaustive' && skillPool.length > 10) ? STRICT_SKILL_MIN_FAM_SLOTS : null;
+  // strictSkillMin: 메인 스레드(useRanking.js)와 동일하게 userSearchMode 기준으로 결정.
+  // 워커 내부 smallSearch 로 searchMode='exhaustive' 가 되더라도 strictSkillMin 은 변경 안 됨 →
+  // 메인 스레드의 validTotal 계산과 워커가 실제 yield 하는 combos 수가 일치 (validProcessed 가 정확히 validTotal 도달).
+  const strictSkillMin = (userSearchMode === 'exhaustive' && skillPool.length > 10) ? STRICT_SKILL_MIN_FAM_SLOTS : null;
 
   for (const structure of structures) {
     if (cancelled) { self.postMessage({ type: 'cancelled' }); return; }
@@ -826,12 +828,33 @@ async function handleMessage(e) {
         subTotal: topK.length,
         bestSoFar: candidate[sortKey] ?? -1,
         phase: 'pass2',
+        pass2Idx: i + 1,
+        pass2K: topK.length,
       });
+      // Pass 2 도 onOrderProgress 콜백 연결 — 순서 전수탐색 bar 가 움직이도록
+      const onPass2OrderProgress = (done, total, best) => {
+        self.postMessage({
+          type: 'subProgress',
+          workerId,
+          buildIdx: validProcessed,
+          buildLabel: bd.label,
+          buildStructure: bd.build,
+          skillLabel: bd.skillLabel,
+          subDone: i + 1,
+          subTotal: topK.length,
+          orderDone: done,
+          orderTotal: total,
+          bestSoFar: best,
+          phase: 'pass2',
+          pass2Idx: i + 1,
+          pass2K: topK.length,
+        });
+      };
       let refined;
       const _p2T0 = Date.now();
       self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 START: ${bd.label} (${i+1}/${topK.length})` });
       try {
-        refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass2Optimize, 1, null);
+        refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass2Optimize, 1, onPass2OrderProgress);
         self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 END: ${bd.label} (${Date.now()-_p2T0}ms)` });
       } catch (err) {
         self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 SKIP: ${bd.label} — ${err.message}` });
