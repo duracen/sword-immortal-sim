@@ -847,5 +847,7 @@ async function handleMessage(e) {
     }
   }
 
-  self.postMessage({ type: 'done', workerId, consumed: validProcessed, validProcessed });
+  // Pass 2 가 완전히 끝났음을 명시적으로 알림 (pass2Done = pass2Total 로 100% 카운트)
+  const pass2FinalTotal = (searchMode === 'fast' && pass1Results) ? Math.min(pass1Results.length, pass2TopK) : 0;
+  self.postMessage({ type: 'done', workerId, consumed: validProcessed, validProcessed, pass2Done: pass2FinalTotal, pass2Total: pass2FinalTotal });
 }

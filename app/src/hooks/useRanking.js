@@ -399,8 +399,18 @@ export function useRanking() {
         } else if (msg.type === 'done') {
           perWorkerProgressRef.current[idx] = msg.consumed ?? 0;
           perWorkerValidRef.current[idx] = msg.validProcessed ?? 0;
+          // Pass 2 최종 카운트 — done 시점에 pass2Done = pass2Total 로 마무리
+          if (msg.pass2Total !== undefined) {
+            perWorkerPass2Ref.current[idx] = { done: msg.pass2Done || 0, total: msg.pass2Total || 0 };
+          }
           doneCount++;
           aggregateProgress();
+          // 모든 worker done 시 progress 강제 100% (남은 sliver 정리)
+          if (doneCount >= ranges.length) {
+            const fullValid = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
+            const fullPass2 = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
+            setProgress({ current: fullValid + fullPass2, total: fullValid + fullPass2, label: '' });
+          }
           // 워커 자기 담당 구간 완료 → 해당 워커의 subProgress 행 제거
           setSubProgress((prev) => { const n = { ...prev }; delete n[idx]; return n; });
           if (doneCount >= ranges.length) {
