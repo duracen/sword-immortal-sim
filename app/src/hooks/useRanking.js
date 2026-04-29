@@ -232,6 +232,8 @@ export function useRanking() {
     const ranges = workerBuckets.map((b) => ({ structures: b.structures, load: b.load }));
     // 워커별 raw consumed (chunk 진행도) 와 valid processed (유효 빌드 평가 완료) 분리 트래킹
     const perWorkerValidRef = { current: new Array(N).fill(0) };
+    // Pass 2 (정밀 재검증) 진행도 별도 트래킹 — Pass 1 끝나도 진행률 멈추지 않도록
+    const perWorkerPass2Ref = { current: new Array(N).fill({ done: 0, total: 0 }) };
     // 워커별 "현재 구조(label) 안에서 몇 번째 신통조합 보고 있는지" — label 바뀌면 리셋
     const perWorkerStructureRef = {
       current: new Array(N).fill(null).map(() => ({ label: null, count: 0 })),
@@ -326,9 +328,11 @@ export function useRanking() {
       if (changed) resultsDirty = true;
     };
     const aggregateProgress = () => {
-      // 화면에 표시되는 진행률은 유효 빌드(법체 통과) 평가 완료 수 기준.
+      // 화면에 표시되는 진행률은 유효 빌드(법체 통과) 평가 완료 수 기준 + Pass 2 진행분.
       const validDone = perWorkerValidRef.current.reduce((a, b) => a + b, 0);
-      setProgress({ current: validDone, total: validTotal, label: '' });
+      const pass2Done = perWorkerPass2Ref.current.reduce((a, b) => a + (b.done || 0), 0);
+      const pass2Total = perWorkerPass2Ref.current.reduce((a, b) => a + (b.total || 0), 0);
+      setProgress({ current: validDone + pass2Done, total: validTotal + pass2Total, label: '' });
     };
 
     ranges.forEach((range, idx) => {
@@ -353,6 +357,10 @@ export function useRanking() {
           // 증분 방식: 방금 완료한 result 1건을 global map 에 반영.
           perWorkerProgressRef.current[idx] = msg.current;
           if (msg.validProcessed !== undefined) perWorkerValidRef.current[idx] = msg.validProcessed;
+          // Pass 2 진행률 추적
+          if (msg.phase === 'pass2' && msg.pass2Done !== undefined) {
+            perWorkerPass2Ref.current[idx] = { done: msg.pass2Done, total: msg.pass2Total || 0 };
+          }
           if (msg.newResult) onNewResult(msg.newResult);
           if (msg.phase) setPhase((prev) => prev[idx] === msg.phase ? prev : ({ ...prev, [idx]: msg.phase }));
           aggregateProgress();

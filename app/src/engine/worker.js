@@ -815,10 +815,19 @@ async function handleMessage(e) {
         bestSoFar: candidate[sortKey] ?? -1,
         phase: 'pass2',
       });
-      const refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass2Optimize, 1, null);
+      let refined;
+      const _p2T0 = Date.now();
+      self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 START: ${bd.label} (${i+1}/${topK.length})` });
+      try {
+        refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass2Optimize, 1, null);
+        self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 END: ${bd.label} (${Date.now()-_p2T0}ms)` });
+      } catch (err) {
+        self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 SKIP: ${bd.label} — ${err.message}` });
+        continue;
+      }
       if (refined.cancelled) { self.postMessage({ type: 'cancelled' }); return; }
       const refinedResult = (refined.results && refined.results[0]) || null;
-      if (!refinedResult) continue;
+      // Pass 2 진행률 — refinedResult 없어도 progress emit (validProcessed 는 그대로, subDone 만 갱신)
       self.postMessage({
         type: 'progress',
         current: validProcessed,
@@ -832,6 +841,8 @@ async function handleMessage(e) {
         newResult: refinedResult,
         workerId,
         phase: 'pass2',
+        pass2Done: i + 1,
+        pass2Total: topK.length,
       });
     }
   }
