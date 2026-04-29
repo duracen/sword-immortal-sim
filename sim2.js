@@ -3045,8 +3045,15 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   // maxTime 옵션: 지정 시간 이후 이벤트 스킵 (조기 종료)
   const maxT = (opts && opts.maxTime) ? opts.maxTime + 0.001 : Infinity;
 
+  // 안전장치 — 단일 이벤트 처리 시간 cap (ms 기준, 무한 루프 방지)
+  const _simStartMs = Date.now();
+  const _SIM_TIMEOUT_MS = 5000; // 한 빌드 sim 이 5초 넘으면 abort
+
   for (const ev of events) {
     if (ev.t > maxT) break;
+    if (Date.now() - _simStartMs > _SIM_TIMEOUT_MS) {
+      throw new Error(`simulateBuild timeout (${_SIM_TIMEOUT_MS}ms) — 무한 루프 가능성, 빌드 skip`);
+    }
     state.t = ev.t;
     state.buffs = state.buffs.filter(b => b.endT > state.t - 0.1);
     // TTL 스택 만료 처리 (검세/뇌인/옥추 개별 20s)
