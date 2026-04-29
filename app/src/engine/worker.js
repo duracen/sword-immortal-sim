@@ -754,21 +754,31 @@ async function handleMessage(e) {
         // Pass 2 용 후보는 순서별 Top 1 만 저장 (재검증 시 전수탐색 다시 하므로 충분)
         if (resultsArr[0]) pass1Results.push(resultsArr[0]);
       }
-      for (const result of resultsArr) {
+      // 빈 결과여도 progress 1 회는 보내야 main thread 가 진행 카운트 갱신함
+      if (resultsArr.length === 0) {
         self.postMessage({
-          type: 'progress',
-          current: validProcessed,
-          total: totalCombos,
-          validProcessed,
-          buildLabel: bd.label,
-          buildStructure: bd.build,
-          skillLabel,
-          subDone: structIdx,
-          subTotal: structTotal,
-          newResult: result,
-          workerId,
-          phase: searchMode === 'fast' ? 'pass1' : 'single',
+          type: 'progress', current: validProcessed, total: totalCombos, validProcessed,
+          buildLabel: bd.label, buildStructure: bd.build, skillLabel,
+          subDone: structIdx, subTotal: structTotal, workerId,
+          phase: searchMode === 'fast' ? 'pass1' : 'single', emptyResult: true,
         });
+      } else {
+        for (const result of resultsArr) {
+          self.postMessage({
+            type: 'progress',
+            current: validProcessed,
+            total: totalCombos,
+            validProcessed,
+            buildLabel: bd.label,
+            buildStructure: bd.build,
+            skillLabel,
+            subDone: structIdx,
+            subTotal: structTotal,
+            newResult: result,
+            workerId,
+            phase: searchMode === 'fast' ? 'pass1' : 'single',
+          });
+        }
       }
     }
   }
