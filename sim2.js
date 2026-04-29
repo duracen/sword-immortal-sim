@@ -1093,6 +1093,11 @@ function isBypassShield(state, bd) {
 }
 
 function record(state, amount, source) {
+  // 안전장치: 단일 simulation 내 record 호출 횟수 cap (무한 재귀/루프 방지)
+  state._recordCount = (state._recordCount || 0) + 1;
+  if (state._recordCount > 200000) {
+    throw new Error(`record() 호출 횟수 200k 초과 — 무한 루프 가능성 (state.t=${state.t.toFixed(2)}s, src=${source || state._currentSource})`);
+  }
   // 첫 신통-type record 시점 buff/stack snapshot 캡처 — UI SNAP 용 ("본 신통 DMG 적용 시점" 상태)
   // 호무/천뢰/작열 등 추가 데미지가 본 신통보다 먼저 record 되는 경우 (여명/동현/뇌벌 등),
   // 그 이후 본 신통 record 직전에 부여되는 buff (제월/귀진/검망 등) 도 SNAP 에 포함되도록

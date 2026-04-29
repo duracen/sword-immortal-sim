@@ -727,7 +727,20 @@ async function handleMessage(e) {
         }
       };
 
-      const evalRes = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass1Optimize, orderTopK, onOrderProgress, onPartialTop);
+      let evalRes;
+      try {
+        evalRes = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass1Optimize, orderTopK, onOrderProgress, onPartialTop);
+      } catch (err) {
+        // 단일 빌드 평가 중 에러 (예: simulateBuild 내부 안전장치 throw) — 빌드 skip 후 다음 진행
+        console.warn('[worker] build evaluation skipped due to error:', bd.label, err.message);
+        validProcessed++;
+        self.postMessage({
+          type: 'progress', current: validProcessed, total: totalCombos, validProcessed,
+          buildLabel: bd.label + ' (오류 skip)', buildStructure: bd.build, skillLabel,
+          subDone: structIdx, subTotal: structTotal, workerId, phase: 'pass1', skipped: true,
+        });
+        continue;
+      }
       if (evalRes.cancelled) { self.postMessage({ type: 'cancelled' }); return; }
       validProcessed++;
 
