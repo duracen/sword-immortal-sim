@@ -2348,10 +2348,18 @@ SK['신소·천고'] = {
     TRACE(s, 'BUF', `🔼버프 [신소·천고 → 통할] 본 신통 cd +35% (이번 cast 한정)`);
     // [경뢰] crRes 30% (max tier)
     applyBuff(s, '신소천고_경뢰', { crRes: 30 }, 15);
-    // [만균] crit 시 3명에게 165% 물리 (max tier)
+    // [만균] crit 시 3명에게 165% 물리 (max tier) — "치명타를 입힐 경우" = 한 cast 의 crit 1회 이상 시 발동
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
     record(s, dealDamage(s, 135, { localCD: 35 }));
-    if (crEff > 0) record(s, dealDamage(s, 165 * crEff, { noSkillMult: true }));
+    // 발동 확률: 1 - (1 - crEff)^hits (3 hits)
+    if (CFG.randomCrit) {
+      let anyCrit = false;
+      for (let i = 0; i < 3; i++) if (Math.random() < crEff) { anyCrit = true; break; }
+      if (anyCrit) record(s, dealDamage(s, 165, { noSkillMult: true }));
+    } else {
+      const p만균 = 1 - Math.pow(1 - crEff, 3);
+      if (p만균 > 0) record(s, dealDamage(s, 165 * p만균, { noSkillMult: true }));
+    }
   }
 };
 SK['신소·환뢰'] = {
