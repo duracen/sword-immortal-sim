@@ -352,9 +352,6 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
               {workerCount > 1 && (
                 <span className="ml-2 text-xs text-purple-300">· {workerCount}개 워커 병렬</span>
               )}
-              {progress.label && (
-                <span className="ml-2 text-xs text-amber-300">· {progress.label}</span>
-              )}
             </span>
             <span className="text-slate-400">
               경과 {formatDuration(elapsedSec)} · 남은 약 {formatDuration(estRemainSec)}
