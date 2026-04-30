@@ -91,8 +91,9 @@ function TabButton({ active, onClick, children }) {
 
 /* ─────────────────  자동 탐색  ───────────────── */
 function AutoSearch({ targetLawBody, setTargetLawBody }) {
-  const MARKER_TIMES = [45, 60, 120, 180];
-  const [markerIdx, setMarkerIdx] = useState(0);  // 45초 기본
+  const MARKER_TIMES = [34, 60, 120, 180];
+  const MARKER_LABELS = ['34초 (1사이클)', '60초', '120초', '180초'];
+  const [markerIdx, setMarkerIdx] = useState(0);  // 34초 (1사이클) 기본
   // 기본은 아무것도 선택 안 된 빈 상태. 사용자가 직접 "전체 선택" 또는 카테고리/유파별로 추가.
   const [pool, setPool] = useState(() => new Set());
   // requiredLawBody: null (무필터) | 'any' (아무거나 4+) | '영검'/'화염'/'뇌전'/'백족' (특정)
@@ -118,7 +119,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   }, [selected]);
   const { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase } = useRanking();
 
-  const sortBy = ['45', '60', '120', '180'][markerIdx];
+  const sortBy = ['34', '60', '120', '180'][markerIdx];
 
   function handleStart() {
     setSelected(null);
@@ -219,7 +220,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                     markerIdx === i ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-700'
                   }`}
                 >
-                  {MARKER_TIMES[i]}초
+                  {MARKER_LABELS[i]}
                 </button>
               ))}
             </div>
@@ -525,7 +526,8 @@ function SplitRankings({ results, sortBy, markerTime, onRowClick }) {
 }
 
 /* ─────────────────  수동 시뮬  ───────────────── */
-const MANUAL_MARKER_TIMES = [45, 60, 120, 180];
+const MANUAL_MARKER_TIMES = [34, 60, 120, 180];
+const MANUAL_MARKER_LABELS = ['34초 (1사이클)', '60초', '120초', '180초'];
 
 function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [skillSel, setSkillSel] = useState({});
@@ -673,7 +675,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
                   markerIdx === i ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-700'
                 }`}
               >
-                {MANUAL_MARKER_TIMES[i]}초
+                {MANUAL_MARKER_LABELS[i]}
               </button>
             ))}
           </div>

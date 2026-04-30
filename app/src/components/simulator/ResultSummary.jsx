@@ -2,9 +2,9 @@ import { formatKR, formatFull } from '../../utils/formatting';
 
 export default function ResultSummary({ result, highlight }) {
   if (!result) return null;
-  const [c45, c60, c120, c180] = result.cumByMarker;
+  const [c34, c60, c120, c180] = result.cumByMarker;
   const items = [
-    { label: '45초', t: 45, v: c45, color: 'text-amber-400' },
+    { label: '34초 (1사이클)', t: 34, v: c34, color: 'text-amber-400' },
     { label: '60초', t: 60, v: c60, color: 'text-amber-300' },
     { label: '120초', t: 120, v: c120, color: 'text-amber-200' },
     { label: '180초', t: 180, v: c180, color: 'text-amber-100' },

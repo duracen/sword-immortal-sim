@@ -126,7 +126,7 @@ function defaultOrder() {
 
 let FIXED_TREASURES = ['환음요탑', '유리옥호', '참원선검'];
 let G_TREASURE_POOL = null;  // fixedTreasures ON + user-selected pool (array of names, size >=3)
-const MARKER_TIME = [45, 60, 120, 180];
+const MARKER_TIME = [34, 60, 120, 180];
 function getMaxTime(markerIdx) { return MARKER_TIME[markerIdx]; }
 
 let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
@@ -561,7 +561,7 @@ async function evaluateSkillCombo(bd, markerIdx, fixedTreasures, isCancelled, op
       treasuresArr: tr || [],
       orderArr: t.ord,
       orderRank: idx + 1,   // 이 신통 조합 내에서 몇 번째 우수 순서인지
-      s45: markerIdx === 0 ? cum[0] : null,
+      s34: markerIdx === 0 ? cum[0] : null,
       s60: markerIdx === 1 ? cum[1] : null,
       s120: markerIdx === 2 ? cum[2] : null,
       s180: markerIdx === 3 ? cum[3] : null,
@@ -607,7 +607,7 @@ async function handleMessage(e) {
   self.postMessage({ type: 'start', total: totalCombos, workerId, searchMode, orderTopK });
 
   let validProcessed = 0;
-  const sortKey = `s${[45, 60, 120, 180][markerIdx]}`;
+  const sortKey = `s${[34, 60, 120, 180][markerIdx]}`;
   const pass1Results = (searchMode === 'fast') ? [] : null;
 
   // === Pass 1 (fast 모드) 또는 단일 패스 (exhaustive 모드) ===
@@ -702,7 +702,7 @@ async function handleMessage(e) {
             treasuresArr: t.bestTr || [],
             orderArr: t.ord,
             orderRank: idx + 1,
-            s45: markerIdx === 0 ? cum[0] : null,
+            s34: markerIdx === 0 ? cum[0] : null,
             s60: markerIdx === 1 ? cum[1] : null,
             s120: markerIdx === 2 ? cum[2] : null,
             s180: markerIdx === 3 ? cum[3] : null,

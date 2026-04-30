@@ -44,7 +44,7 @@ export default function WinnerPodium({ results, sortBy }) {
         <div className="text-sm text-slate-200 mb-3">법보: {winner.treasures}</div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3">
           {[
-            { label: '45초', v: winner.s45, hl: sortBy === '45' },
+            { label: '34초 (1사이클)', v: winner.s34, hl: sortBy === '34' },
             { label: '60초', v: winner.s60, hl: sortBy === '60' },
             { label: '120초', v: winner.s120, hl: sortBy === '120' },
             { label: '180초', v: winner.s180, hl: sortBy === '180' },

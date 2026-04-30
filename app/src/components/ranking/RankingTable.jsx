@@ -23,7 +23,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
               <th className="text-left py-2 px-2 w-12">#</th>
               <th className="text-left py-2 px-2">빌드</th>
               <th className="text-left py-2 px-2">법보</th>
-              <th className="text-right py-2 px-2">45초</th>
+              <th className="text-right py-2 px-2">34초<br/><span className="text-[10px] text-slate-400 font-normal">(1사이클)</span></th>
               <th className="text-right py-2 px-2">60초</th>
               <th className="text-right py-2 px-2">120초</th>
               <th className="text-right py-2 px-2">180초</th>
@@ -55,7 +55,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                   )}
                 </td>
                 <td className="py-2 px-2 text-slate-400 text-xs">{r.treasures}</td>
-                <td className={`py-2 px-2 text-right ${sortBy === '45' ? 'font-bold text-amber-300' : ''}`}>{formatKR(r.s45)}</td>
+                <td className={`py-2 px-2 text-right ${sortBy === '34' ? 'font-bold text-amber-300' : ''}`}>{formatKR(r.s34)}</td>
                 <td className={`py-2 px-2 text-right ${sortBy === '60' ? 'font-bold text-amber-300' : ''}`}>{formatKR(r.s60)}</td>
                 <td className={`py-2 px-2 text-right ${sortBy === '120' ? 'font-bold text-amber-300' : ''}`}>{formatKR(r.s120)}</td>
                 <td className={`py-2 px-2 text-right ${sortBy === '180' ? 'font-bold text-amber-300' : ''}`}>{formatKR(r.s180)}</td>
@@ -102,7 +102,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
             {/* 시간별 누적 — 가로 4분할 */}
             <div className="grid grid-cols-4 gap-1 mb-2">
               {[
-                { lbl: '45초', v: r.s45, on: sortBy === '45' },
+                { lbl: '34초(1사이클)', v: r.s34, on: sortBy === '34' },
                 { lbl: '60초', v: r.s60, on: sortBy === '60' },
                 { lbl: '120초', v: r.s120, on: sortBy === '120' },
                 { lbl: '180초', v: r.s180, on: sortBy === '180' },

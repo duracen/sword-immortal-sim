@@ -259,7 +259,7 @@ export function useRanking() {
     // 전체 = 법체 무관하게 sortKey 기준 Top 10
     // 카테고리별 = 해당 cat 의 빌드 중 Top 10
     // aggregateResults 시 5 버킷 union 후 setResults
-    const sortKey = `s${['45','60','120','180'][config.markerIdx || 0]}`;
+    const sortKey = `s${['34','60','120','180'][config.markerIdx || 0]}`;
     const BUCKET_LIMIT = 10;
     const CATS = ['영검', '화염', '뇌전', '백족'];
     function makeBucket() {

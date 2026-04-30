@@ -3593,8 +3593,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
     // 다음 cast의 첫 dealDamage에서 그대로 소비된다.
   }
 
-  // 마커별 누적 피해 (t ≤ marker). 45s=1cyc, 60s, 120s, 180s
-  const markers = [45, 60, 120, 180];
+  // 마커별 누적 피해 (t ≤ marker). 34s=1cycle 끝, 60s, 120s, 180s
+  const markers = [34, 60, 120, 180];
   const cumByMarker = markers.map(m =>
     (state.dmgEvents || []).filter(e => e.t < m + 0.001).reduce((a, e) => a + e.amt, 0)
   );
