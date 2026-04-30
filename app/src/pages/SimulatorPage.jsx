@@ -535,7 +535,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [treasures, setTreasures] = useState([]);
   const [order, setOrder] = useState(null);
   const [showLog, setShowLog] = useState(false);
-  const [markerIdx, setMarkerIdx] = useState(0); // 45초 기본
+  const [markerIdx, setMarkerIdx] = useState(0); // 34초 (1사이클) 기본
   const [randomCrit, setRandomCrit] = useState(false);
   // 불씨 세트 장착 (총 9 슬롯). 개수별 최대 급수 효과 적용.
   const [불씨, set불씨] = useState({
