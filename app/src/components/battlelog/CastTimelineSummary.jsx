@@ -242,8 +242,8 @@ function parseEvents(events) {
   for (const key in stackSpans) {
     for (const s of stackSpans[key]) maxT = Math.max(maxT, s.end);
   }
-  // 5초 단위 올림
-  maxT = Math.ceil(maxT / 5) * 5;
+  // 3초 단위 올림 (cast 글로벌 CD 가 3초)
+  maxT = Math.ceil(maxT / 3) * 3;
   if (maxT < 10) maxT = 10;
 
   // 유파 효과 (트리거 lane 에 별도 표시) — 버프 lane 에서 제외
@@ -349,9 +349,9 @@ export default function CastTimelineSummary({ events }) {
 
   if (!events || events.length === 0) return null;
 
-  // 그리드 눈금 (5초 간격)
+  // 그리드 눈금 (3초 간격, cast 글로벌 CD 와 동일)
   const ticks = [];
-  for (let t = 0; t <= maxT; t += 5) ticks.push(t);
+  for (let t = 0; t <= maxT; t += 3) ticks.push(t);
 
   return (
     <div className="bg-slate-900 rounded-xl p-2 sm:p-4 border border-slate-700">
