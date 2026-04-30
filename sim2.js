@@ -3024,35 +3024,65 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   // 시뮬 시간 = maxTime 정확히. 이벤트 루프는 maxT 이후 break 하므로 버퍼 불필요.
   const simMaxTime = (opts && opts.maxTime) ? opts.maxTime : 180;
   const totalSec = simMaxTime;
-  // === 인게임 검증 모델 (2026-04 기준) ===
-  // - 영압 대결 10초: cast 안 발사 (평타는 t=0 부터 1초 간격으로 발사됨)
-  // - 평타 4대 (t=10~13) 후 첫 cast at t=14 (visible warmup)
-  // - 사이클: 9 cast × 3초 글로벌 CD = 24초 (cast 1 at t=14 → cast 9 at t=38)
-  // - 사이클 텀: 10초 (cast 9 → 다음 사이클 cast 10)
-  // - 사이클 주기 = 24 + 10 = 34초 (cast 1 → cast 10)
-  // 검증 (60초 sim): cast 14 (cycle 2 cast 5) at t=60, 평타 ~46대
-  // 검증 (120초 sim): cast 29 (cycle 4 cast 2) at t=119, 종료 직전
-  const 영압대결시간 = 10;
-  const 시작평타전대기 = 4;
+  // === 인게임 검증 모델 (2026-04 기준, 영상 분석으로 확정) ===
+  // - 영압 대결 9초: cast 안 발사 (평타는 t=0 부터 1초 간격으로 발사됨)
+  // - 평타 3대 (t=9~11) 후 첫 cast at t=12
+  // - 글로벌 CD: 3초 (cast 간 간격)
+  // - 사이클 길이: 9 cast × 3초 = 24초 (cast 1 → cast 9)
+  // - 사이클 텀: 6초 (cast 9 → cast 10), 단 자체쿨로 인해 더 길어질 수 있음
+  // - 자체쿨: 신통 30초 (인게임 표기 32초이지만 효과적으로 30초), 법보 32초
+  // - 영역: 누적 10번째 cast 시 발동, 6초간 cast 정지, 재사용 180초
+  //   영역 종료 후 글로벌 3초 적용 → cast 11 = 영역 종료 + 3초
+  // 검증 (60s): cast 14 at t=60 (사이클 2 cast 5)
+  // 검증 (120s): cycle 4 진행, cycle 3 끝부분 법보 자체쿨로 96/99/102 → 98/101/104 지연
+  const 영압대결시간 = 9;
+  const 시작평타전대기 = 3;
   const 글로벌CD = 3;
   const 사이클길이 = order.length || 9;
-  const 사이클텀 = 10;
-  const 첫cast시점 = 영압대결시간 + 시작평타전대기; // = 14
+  const 사이클텀 = 6;
+  const 신통자체쿨 = 30;  // 인게임 표기 32, 영상 관측 30
+  const 법보자체쿨 = 32;
+  const 영역_DUR = 6;
+  const 영역_CD = 180;
+  const 영역_TRIGGER = 10;  // 누적 10번째 cast 시 발동
+  const 첫cast시점 = 영압대결시간 + 시작평타전대기; // = 12
 
-  // cast 이벤트: 첫 cast t=14, 사이클 패턴 반복 (9 cast × 3s + 10s 텀)
+  // cast 이벤트: 글로벌 CD + 사이클 텀 + 자체쿨 enforce + 영역 메커니즘
   let castIdx = 0;
   {
-    let t = 첫cast시점;
-    while (t < totalSec + 0.001) {
-      let pushed = 0;
-      for (let i = 0; i < 사이클길이; i++) {
-        if (t >= totalSec + 0.001) break;
-        events.push({ t, kind: order[castIdx].kind, idx: order[castIdx].idx });
-        castIdx = (castIdx + 1) % order.length;
-        t += (i < 사이클길이 - 1) ? 글로벌CD : 사이클텀;
-        pushed++;
+    let castNum = 0;
+    let scheduled = 첫cast시점;
+    let 영역_endT = -Infinity;
+    let 영역_lastFire = -Infinity;
+    const slotLast = {}; // slotKey → last fire time (자체쿨 enforce 용)
+    let safety = 0;
+    while (scheduled < totalSec + 0.001 && safety++ < 5000) {
+      const slot = order[castIdx];
+      const slotKey = `${slot.kind}-${slot.idx}`;
+      const slotCD = slot.kind === 'treasure' ? 법보자체쿨 : 신통자체쿨;
+      const slotReady = (slotLast[slotKey] !== undefined) ? slotLast[slotKey] + slotCD : 0;
+      let actualT = Math.max(scheduled, slotReady);
+      // 영역 진행 중이면 cast 정지, 영역 종료 후 글로벌 CD 적용
+      if (영역_endT > actualT) actualT = 영역_endT + 글로벌CD;
+      if (actualT >= totalSec + 0.001) break;
+
+      events.push({ t: actualT, kind: slot.kind, idx: slot.idx });
+      slotLast[slotKey] = actualT;
+      castNum++;
+
+      // 영역 trigger (누적 10번째 cast, CD 체크)
+      if (castNum === 영역_TRIGGER && actualT >= 영역_lastFire + 영역_CD) {
+        영역_endT = actualT + 영역_DUR;
+        영역_lastFire = actualT;
       }
-      if (pushed === 0) break; // 안전장치: 무한 루프 방지
+
+      castIdx = (castIdx + 1) % order.length;
+      // 다음 cast 예약: 사이클 끝(9의 배수)이면 사이클 텀, 아니면 글로벌 CD
+      if (castNum % 사이클길이 === 0) {
+        scheduled = actualT + 사이클텀;
+      } else {
+        scheduled = actualT + 글로벌CD;
+      }
     }
   }
   // 작열 틱 이벤트: 매 초, 부여 후 1초 뒤 첫 틱
