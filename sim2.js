@@ -3024,20 +3024,51 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   // 시뮬 시간 = maxTime 정확히. 이벤트 루프는 maxT 이후 break 하므로 버퍼 불필요.
   const simMaxTime = (opts && opts.maxTime) ? opts.maxTime : 180;
   const totalSec = simMaxTime;
-  // cast 이벤트: 5초 간격으로 order 순환 (신통6+법보3 = 9cast = 45s/cyc)
+  // === 인게임 검증 모델 (2026-04 기준) ===
+  // - 영압 대결 10초: cast 안 발사 (평타는 t=0 부터 1초 간격으로 발사됨)
+  // - 평타 4대 (t=10~13) 후 첫 cast at t=14 (visible warmup)
+  // - 사이클: 9 cast × 3초 글로벌 CD = 24초 (cast 1 at t=14 → cast 9 at t=38)
+  // - 사이클 텀: 10초 (cast 9 → 다음 사이클 cast 10)
+  // - 사이클 주기 = 24 + 10 = 34초 (cast 1 → cast 10)
+  // 검증 (60초 sim): cast 14 (cycle 2 cast 5) at t=60, 평타 ~46대
+  // 검증 (120초 sim): cast 29 (cycle 4 cast 2) at t=119, 종료 직전
+  const 영압대결시간 = 10;
+  const 시작평타전대기 = 4;
+  const 글로벌CD = 3;
+  const 사이클길이 = order.length || 9;
+  const 사이클텀 = 10;
+  const 첫cast시점 = 영압대결시간 + 시작평타전대기; // = 14
+
+  // cast 이벤트: 첫 cast t=14, 사이클 패턴 반복 (9 cast × 3s + 10s 텀)
   let castIdx = 0;
-  for (let t = 0; t < totalSec; t += 5) {
-    events.push({ t, kind: order[castIdx].kind, idx: order[castIdx].idx });
-    castIdx = (castIdx + 1) % order.length;
+  {
+    let t = 첫cast시점;
+    while (t < totalSec + 0.001) {
+      let pushed = 0;
+      for (let i = 0; i < 사이클길이; i++) {
+        if (t >= totalSec + 0.001) break;
+        events.push({ t, kind: order[castIdx].kind, idx: order[castIdx].idx });
+        castIdx = (castIdx + 1) % order.length;
+        t += (i < 사이클길이 - 1) ? 글로벌CD : 사이클텀;
+        pushed++;
+      }
+      if (pushed === 0) break; // 안전장치: 무한 루프 방지
+    }
   }
   // 작열 틱 이벤트: 매 초, 부여 후 1초 뒤 첫 틱
   for (let sec = 1; sec < totalSec; sec++) {
     events.push({ t: sec, kind: '작열tick', pri: 1 });
   }
-  // 평타 이벤트: 60초에 40회 = 1.5초 간격
-  const 평타간격 = 60 / 40; // 1.5초
-  for (let t = 평타간격; t < totalSec; t += 평타간격) {
-    events.push({ t: t, kind: '평타', pri: 2 });
+  // 평타 이벤트: 1초 간격, t=0 부터 발사 (영압 동안에도 발사됨)
+  // cast 시점과 같은 정수 초에는 cast 가 preempt → 평타 skip
+  const castTimeSet = new Set();
+  for (const ev of events) {
+    if (ev.kind === 'skill' || ev.kind === 'treasure') castTimeSet.add(ev.t);
+  }
+  for (let t = 0; t < totalSec; t += 1) {
+    if (!castTimeSet.has(t)) {
+      events.push({ t, kind: '평타', pri: 2 });
+    }
   }
   // 정렬: 같은 시간이면 pri 오름차순 (시전=0 → 작열=1 → 평타=2)
   events.sort((a, b) => a.t - b.t || (a.pri || 0) - (b.pri || 0));
