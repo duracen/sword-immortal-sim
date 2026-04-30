@@ -392,6 +392,25 @@ export default function CastTimelineSummary({ events }) {
           ))}
         </div>
 
+        {/* 영압 대결 (전투 시작 0~10초): cast 가 발사 안 되는 구간 */}
+        {maxT >= 10 && (
+          <div className="relative mb-1" style={{ height: '20px' }}>
+            <div
+              className="absolute top-0 bottom-0 rounded bg-gradient-to-r from-violet-700/60 to-violet-500/60 border border-violet-400/70 flex items-center justify-center"
+              style={{
+                left: '0%',
+                width: `${(10 / maxT) * 100}%`,
+                minWidth: '60px',
+              }}
+              title="영압 대결: 전투 시작 후 10초간 cast 발사 불가 (평타만 발사)"
+            >
+              <span className="text-[11px] text-white font-semibold whitespace-nowrap px-1 truncate">
+                ⚔️ 영압 대결 10s
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* 시전 마커 (상단) — stack 뱃지가 많을 수 있어 동적 높이 (각 cast 의 최대 stack 수 기준) */}
         <div
           className="relative mb-2"
