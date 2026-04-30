@@ -3025,22 +3025,22 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   const simMaxTime = (opts && opts.maxTime) ? opts.maxTime : 180;
   const totalSec = simMaxTime;
   // === 인게임 검증 모델 (2026-04 기준, 영상 분석으로 확정) ===
-  // - 영압 대결 9초: cast 안 발사 (평타는 t=0 부터 1초 간격으로 발사됨)
-  // - 평타 3대 (t=9~11) 후 첫 cast at t=12
+  // - 영압 대결 6초: cast 안 발사 (평타는 t=0 부터 1초 간격으로 발사됨)
+  // - 평타 3대 (t=6~8) 후 첫 cast at t=9
   // - 글로벌 CD: 3초 (cast 간 간격)
   // - 사이클 길이: 9 cast × 3초 = 24초 (cast 1 → cast 9)
-  // - 사이클 텀: 6초 (cast 9 → cast 10), 단 자체쿨로 인해 더 길어질 수 있음
-  // - 자체쿨: 신통 30초 (인게임 표기 32초이지만 효과적으로 30초), 법보 32초
+  // - 사이클 텀: 6초 (cast 9 → cast 10), 자체쿨로 인해 더 길어질 수 있음
+  // - 자체쿨: 신통/법보 모두 32초
   // - 영역: 누적 10번째 cast 시 발동, 6초간 cast 정지, 재사용 180초
   //   영역 종료 후 글로벌 3초 적용 → cast 11 = 영역 종료 + 3초
-  // 검증 (60s): cast 14 at t=60 (사이클 2 cast 5)
-  // 검증 (120s): cycle 4 진행, cycle 3 끝부분 법보 자체쿨로 96/99/102 → 98/101/104 지연
-  const 영압대결시간 = 9;
+  // 검증 (60s): cast 14 (cycle 2 cast 5) at t=59
+  // 검증 (120s): cast 28 t=109, cast 29 t=114, cast 30 (skill 3) t=117, cast 31 t=120
+  const 영압대결시간 = 6;
   const 시작평타전대기 = 3;
   const 글로벌CD = 3;
   const 사이클길이 = order.length || 9;
   const 사이클텀 = 6;
-  const 신통자체쿨 = 30;  // 인게임 표기 32, 영상 관측 30
+  const 신통자체쿨 = 32;
   const 법보자체쿨 = 32;
   const 영역_DUR = 6;
   const 영역_CD = 180;
