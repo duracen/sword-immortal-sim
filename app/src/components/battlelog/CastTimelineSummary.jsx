@@ -232,19 +232,26 @@ function parseEvents(events) {
     }
   }
 
-  // maxT 계산
+  // maxT 계산 — 원본 events 의 최대 t 기준 (= sim 종료 시점)
+  // buff/trigger 의 end 시간은 sim 종료 후로 연장되더라도 sim 시간 내에서만 표시
   let maxT = 0;
-  for (const c of casts) maxT = Math.max(maxT, c.t);
-  for (const t of triggers) maxT = Math.max(maxT, t.t + (t.dur || 0));
+  for (const ev of events) {
+    if (typeof ev.t === 'number') maxT = Math.max(maxT, ev.t);
+  }
+  // 3초 단위 올림 (cast 글로벌 CD 가 3초) + 1초 버퍼
+  maxT = Math.ceil((maxT + 1) / 3) * 3;
+  if (maxT < 10) maxT = 10;
+  // buff/stack/trigger 의 end 시간은 maxT 로 clip
   for (const [, spans] of buffMap) {
-    for (const s of spans) maxT = Math.max(maxT, s.end);
+    for (const s of spans) if (s.end > maxT) s.end = maxT;
   }
   for (const key in stackSpans) {
-    for (const s of stackSpans[key]) maxT = Math.max(maxT, s.end);
+    for (const s of stackSpans[key]) if (s.end > maxT) s.end = maxT;
   }
-  // 3초 단위 올림 (cast 글로벌 CD 가 3초)
-  maxT = Math.ceil(maxT / 3) * 3;
-  if (maxT < 10) maxT = 10;
+  for (const t of triggers) {
+    const tEnd = t.t + (t.dur || 0);
+    if (tEnd > maxT) t.dur = Math.max(0, maxT - t.t);
+  }
 
   // 유파 효과 (트리거 lane 에 별도 표시) — 버프 lane 에서 제외
   const FAMILY_EFFECT_KEYS = new Set(['열산상태', '열산']);
