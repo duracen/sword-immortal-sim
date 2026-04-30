@@ -3089,13 +3089,13 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   for (let sec = 1; sec < totalSec; sec++) {
     events.push({ t: sec, kind: '작열tick', pri: 1 });
   }
-  // 평타 이벤트: 1초 간격, t=0 부터 발사 (영압 동안에도 발사됨)
+  // 평타 이벤트: 1초 간격, 영압 대결 종료 후부터 발사 (영압 동안 평타 안 나감)
   // cast 시점과 같은 정수 초에는 cast 가 preempt → 평타 skip
   const castTimeSet = new Set();
   for (const ev of events) {
     if (ev.kind === 'skill' || ev.kind === 'treasure') castTimeSet.add(ev.t);
   }
-  for (let t = 0; t < totalSec; t += 1) {
+  for (let t = 영압대결시간; t < totalSec; t += 1) {
     if (!castTimeSet.has(t)) {
       events.push({ t, kind: '평타', pri: 2 });
     }
