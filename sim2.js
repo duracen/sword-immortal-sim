@@ -3332,6 +3332,9 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // _inMainCast: 본 신통 cast 실행 중에만 true.
         // record() 가 _snapBuffsCaptured 를 set 하는 조건과 applyBuff [post] 태깅 조건의
         // 기준이 되는 플래그 — pre-cast hook 의 폭파 record / applyBuff 와 구분하기 위함.
+        // 시전 모션 딜레이: 시전 시점에서 1초 뒤 실제 데미지 hit (인게임 모델)
+        // pre-cast hook 은 시전 시점에 발동, 본 신통 데미지는 +1초 시점에 hit
+        state.t += 1;
         state._inMainCast = true;
         SK[sk.name].cast(state, slots);
         state._inMainCast = false;
@@ -3585,6 +3588,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       state.castCounts[trSrc] = (state.castCounts[trSrc] || 0) + 1;
       state._currentSource = trSrc;
       state._activeCast = trSrc;
+      // 시전 모션 딜레이 1초: 신통과 동일하게 +1초 시점에 데미지 hit
+      state.t += 1;
       TREASURES[trName].cast(state);
       state._activeCast = null;
     }
