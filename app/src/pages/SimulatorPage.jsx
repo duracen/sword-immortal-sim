@@ -736,6 +736,32 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
               : '※ 모든 확률 기반 효과 (치명타·태현잔화·유뢰법체 조건·crit 트리거류 등) 를 기댓값으로 스케일 계산. 결정적 (형혹 60% 폭파만 예외로 항상 랜덤).'}
           </div>
         </div>
+
+        {/* 기댓값 vs 랜덤 모드 동작 안내 (자동 탐색과 동일 내용) */}
+        <details className="text-[11px] text-slate-300 bg-slate-800/40 border border-slate-700 rounded mt-2">
+          <summary className="cursor-pointer px-3 py-2 hover:bg-slate-700/40 select-none">
+            ℹ️ <strong className="text-amber-300">기댓값 vs 랜덤 모드 — 동작 방식 안내</strong>
+          </summary>
+          <div className="px-3 py-2 leading-relaxed space-y-2 border-t border-slate-700">
+            <p>
+              확률 기반 효과 (만고귀종 격발, 크리티컬 트리거, 태현잔화 등) 는 모드에 따라 다르게 계산됩니다.
+            </p>
+            <div className="bg-slate-900/60 rounded p-2 space-y-1">
+              <div className="text-amber-200 font-semibold">예시: 만고귀종 (백족법체) 격발 → 계약 4종</div>
+              <ul className="list-disc ml-4 text-slate-300">
+                <li><strong className="text-emerald-300">기댓값 모드</strong>: 확률 가중 fractional 발동 (예: 4종 각 +0.26 → cr+1.6%, amp+1.6%) — 분산 작음, 빌드 비교 적합</li>
+                <li><strong className="text-purple-300">랜덤 모드</strong>: 격발 시 1 type 만 +1 (full +6% cr 또는 amp) — 매 실행 다름, 실전 변동성 체감</li>
+              </ul>
+            </div>
+            <p>
+              <strong>총량은 동일</strong>: 횟수 cap 옵션 (제율 5회, 검망 6회 등) 은 fractional 카운터로 분할 소진되어 장기 누적 데미지가 같습니다 (랜덤 5회 × full = 기댓값 多회 × frac).
+            </p>
+            <p className="text-slate-400">
+              타임라인의 활성 버프 수치도 모드에 따라 다르게 표시됩니다.
+              기댓값 모드의 "계약 cr+1.6%" 같은 수치는 <strong>확률로 낮아진 실제 적용값</strong>입니다.
+            </p>
+          </div>
+        </details>
       </section>
 
       {/* 시뮬 실행 버튼 (결과/로그 위) */}
