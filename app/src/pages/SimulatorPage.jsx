@@ -292,6 +292,34 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
             </div>
           )}
         </div>
+
+        {/* 기댓값 모드 안내 (확률·랜덤 효과 처리 방식) */}
+        <details className="mt-3 text-[11px] text-slate-300 bg-slate-800/40 border border-slate-700 rounded">
+          <summary className="cursor-pointer px-3 py-2 hover:bg-slate-700/40 select-none">
+            ℹ️ <strong className="text-amber-300">기댓값 계산 방식</strong> — 자동 탐색이 사용하는 시뮬 모드 안내
+          </summary>
+          <div className="px-3 py-2 leading-relaxed space-y-2 border-t border-slate-700">
+            <p>
+              자동 탐색은 <strong className="text-emerald-300">기댓값 모드</strong> 로 시뮬합니다.
+              크리티컬, 격발, 만고귀종 등 확률 기반 효과를 <strong>발생 확률 × 효과값</strong> 으로 평균 계산합니다.
+            </p>
+            <div className="bg-slate-900/60 rounded p-2 space-y-1">
+              <div className="text-amber-200 font-semibold">예시: 만고귀종 (백족법체) 격발 → 계약 4종 (강령/환생/실혼/매혹)</div>
+              <ul className="list-disc ml-4 text-slate-300">
+                <li><strong className="text-emerald-300">기댓값 모드</strong> (자동 탐색): 격발 확률에 비례한 fractional 중첩 (예: 4종 각 +0.26 → cr+1.6%, amp+1.6%) — <span className="text-slate-400">실제 sim 데미지에도 그 낮은 수치 그대로 반영</span></li>
+                <li><strong className="text-purple-300">랜덤 모드</strong>: 격발 시 1 type 만 +1 (full +6% cr 또는 amp) — 확률은 시뮬 시점에 주사위, 분산 큼</li>
+              </ul>
+            </div>
+            <p>
+              <strong>요약</strong>: 자동 탐색의 데미지 값은 격발/크리 확률을 평균낸 <strong>장기 기대값</strong>입니다.
+              실제 인게임 한 판 한 판은 운에 따라 더 높거나 낮을 수 있습니다.
+            </p>
+            <p className="text-slate-400">
+              타임라인의 활성 버프 수치도 동일하게 기댓값 처리되어,
+              "계약 cr+1.6%" 같은 수치는 <strong>확률로 낮아진 실제 적용값</strong>입니다.
+            </p>
+          </div>
+        </details>
       </section>
 
       {/* 탐색 시작 / 중지 (진행바 위) */}
