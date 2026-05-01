@@ -2524,6 +2524,8 @@ function 제율트리거(s, frac = 1) {
   const prevSrc = s._currentSource;
   s._currentSource = '제율(계약트리거)';
   record(s, dealDamage(s, (30 + 30) * eff, { noSkillMult: true }));
+  // 타임라인 버프 lane 시각화 — [제율] 격발 marker (1초)
+  applyBuff(s, '주술제율_제율', {}, 1);
   // [고식] 5초 atk 14% (max 3중첩, max tier)
   applyBuffFrac(s, '주술제율_고식', { atk: 14 }, 5, 3, eff);
   // [저주] max tier: 독고 1 추가 + 대상 방어력 10% 감소 10초 (max 3중첩)
