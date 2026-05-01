@@ -2815,6 +2815,8 @@ SK['주술·유식'] = {
     s._currentSource = prev;
     // [독주] 본 신통 시전 15초 후 발동 예약 (계약합 snapshot은 발동 시점 기준)
     s.독주FireT = s.t + 15;
+    // 타임라인 버프 lane 표시용 — 15초 지연 발동 대기 buff (효과 spec 없음, 시각화 전용)
+    applyBuff(s, '주술유식_독주', {}, 15);
   }
 };
 
