@@ -2446,14 +2446,28 @@ function expectedFiresFromPool(N) {
 
 // fractional 중첩 지원 — applyBuff와 같지만 stack 증가량을 frac 으로 받음
 function applyBuffFrac(state, key, spec, dur, maxStack, frac) {
+  const isWeak = !!(spec.defDebuff || spec.crRes);
+  const postTag = state._snapBuffsCaptured ? ' [post]' : '';
+  // 키 라벨: "주술제율_고식" → "[주술·제율 → 고식]"
+  const m = key.match(/^(..)(..)_(.+)$/);
+  const keyLabel = m ? `[${m[1]}·${m[2]} → ${m[3]}]` : `[${key}]`;
   const ex = state.buffs.find(b => b.key === key && b.endT > state.t);
   if (ex) {
     ex.endT = state.t + dur + 0.001;
     const prev = ex.stackCount || 1;
     ex.stackCount = Math.min(prev + frac, maxStack);
+    // 갱신 로그
+    if (ex.stackCount > prev + 0.01) {
+      TRACE(state, 'BUF', `↑중첩 ${keyLabel} ${prev.toFixed(2)}→${ex.stackCount.toFixed(2)} (${dur}초 재갱신, 중첩최대 ${maxStack})${postTag}`);
+    } else {
+      TRACE(state, 'BUF', `↻갱신 ${keyLabel} (${dur}초 재갱신, 중첩 ${ex.stackCount.toFixed(2)}/${maxStack} 유지)${postTag}`);
+    }
     return;
   }
   state.buffs.push({ key, endT: state.t + dur + 0.001, stackCount: Math.min(frac, maxStack), maxStacks: maxStack, ...spec });
+  const specStr = Object.entries(spec).map(([k,v])=>k+'+'+v).join(',') || '(효과표시없음)';
+  const kindTag = isWeak ? '🔻디버프' : '🔼버프';
+  TRACE(state, 'BUF', `${kindTag} ${keyLabel} ${specStr} (${dur}초, 중첩 ${frac.toFixed(2)}/${maxStack})${postTag}`);
 }
 
 // 명화 살혼 발사 — 유령불 카운터(2회마다 30% 물리) 자동 처리 래퍼 (max tier)
