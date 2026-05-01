@@ -79,16 +79,20 @@ export default function SkillPoolPicker({ pool, onChange }) {
                   <span className="font-bold text-slate-100 text-xs border-b border-dotted border-slate-500">{cat}</span>
                 </button>
               </HoverTooltip>
-              <button
-                onClick={() => setAllInCat(cat, !catAllSelected)}
-                className={`text-[11px] px-2 py-0.5 rounded border transition ${
-                  catAllSelected
-                    ? 'bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60'
-                    : 'bg-slate-700/60 border-slate-600 text-slate-200 hover:bg-slate-700'
-                }`}
-              >
-                {catAllSelected ? '계열 해제' : '계열 전체'}
-              </button>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setAllInCat(cat, true)}
+                  className="text-[11px] px-2 py-0.5 rounded border border-slate-600 bg-slate-700/60 text-slate-200 hover:bg-slate-700 transition"
+                >
+                  계열 선택
+                </button>
+                <button
+                  onClick={() => setAllInCat(cat, false)}
+                  className="text-[11px] px-2 py-0.5 rounded border border-rose-700/50 bg-rose-900/40 text-rose-300 hover:bg-rose-900/60 transition"
+                >
+                  계열 해제
+                </button>
+              </div>
             </div>
             <div className="space-y-1">
               {sortFamsByTier(FAMILIES_BY_CAT[cat]).map((fam) => {
@@ -172,16 +176,20 @@ export default function SkillPoolPicker({ pool, onChange }) {
                         );
                       })}
                     </div>
-                    <button
-                      onClick={() => setAllInFam(fam, !allSelected)}
-                      className={`text-[11px] px-2 py-1 rounded border transition shrink-0 font-semibold ${
-                        allSelected
-                          ? 'bg-rose-900/40 border-rose-700/50 text-rose-300 hover:bg-rose-900/60'
-                          : 'bg-slate-700/60 border-slate-600 text-slate-200 hover:bg-slate-700'
-                      }`}
-                    >
-                      {allSelected ? '해제' : '유파 전체'}
-                    </button>
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      <button
+                        onClick={() => setAllInFam(fam, true)}
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-slate-600 bg-slate-700/60 text-slate-200 hover:bg-slate-700 transition font-semibold"
+                      >
+                        선택
+                      </button>
+                      <button
+                        onClick={() => setAllInFam(fam, false)}
+                        className="text-[10px] px-1.5 py-0.5 rounded border border-rose-700/50 bg-rose-900/40 text-rose-300 hover:bg-rose-900/60 transition font-semibold"
+                      >
+                        해제
+                      </button>
+                    </div>
                   </div>
                 );
               })}
