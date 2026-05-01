@@ -215,6 +215,14 @@ export function lookupOption(bufKey) {
     return { skill: null, option: bufKey, desc: STACK_DESCS[bufKey] };
   }
 
+  // 포맷 6: '계약·강령' / '계약·실혼' 등 prefix 형식 — STACK_DESCS prefix 매칭
+  if (bufKey.includes('·')) {
+    const prefix = bufKey.split('·')[0];
+    if (STACK_DESCS[prefix]) {
+      return { skill: prefix, option: bufKey, desc: STACK_DESCS[prefix] };
+    }
+  }
+
   return { skill: null, option: bufKey, desc: null };
 }
 
