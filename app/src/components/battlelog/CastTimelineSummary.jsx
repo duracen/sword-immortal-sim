@@ -768,83 +768,95 @@ export default function CastTimelineSummary({ events }) {
           })}
         </div>
 
-        {/* 버프 수치 스냅샷 (cast 구간 중앙) — 최하단 */}
+        {/* 활성 버프 수치 히트맵 — stat 별 행, cast 시점 별 셀 (색 농도 = 수치 크기) */}
         {casts.some((c) => c.snap) && (() => {
           const labels = [
-            { key: 'atk', label: '공격력', color: 'bg-amber-900/70 text-amber-200 border-amber-700/60' },
-            { key: 'inc', label: '신통 피해 증가', color: 'bg-red-900/70 text-red-200 border-red-700/60' },
-            { key: 'amp', label: '신통 피해 심화', color: 'bg-fuchsia-900/70 text-fuchsia-200 border-fuchsia-700/60' },
-            { key: 'dealt', label: '입히는 피해 증가', color: 'bg-orange-900/70 text-orange-200 border-orange-700/60' },
-            { key: 'finalDmg', label: '최종 피해 증가', color: 'bg-rose-900/70 text-rose-200 border-rose-700/60' },
-            { key: 'cr', label: '치명타율', color: 'bg-cyan-900/70 text-cyan-200 border-cyan-700/60' },
-            { key: 'cd', label: '치명타 배율', color: 'bg-indigo-900/70 text-indigo-200 border-indigo-700/60' },
-            { key: 'finalCR', label: '최종 치명타율', color: 'bg-cyan-900/70 text-cyan-200 border-cyan-700/60' },
-            { key: 'finalCD', label: '최종 치명타 배율', color: 'bg-indigo-900/70 text-indigo-200 border-indigo-700/60' },
-            { key: 'defDebuff', label: '방어력 감소', color: 'bg-violet-900/70 text-violet-200 border-violet-700/60' },
-            { key: 'crRes', label: '치명타 저항 감소', color: 'bg-teal-900/70 text-teal-200 border-teal-700/60' },
+            { key: 'atk', label: '공격력', baseRgb: '245, 158, 11' },         // amber-500
+            { key: 'inc', label: '신통 피해 증가', baseRgb: '239, 68, 68' },   // red-500
+            { key: 'amp', label: '신통 피해 심화', baseRgb: '217, 70, 239' }, // fuchsia-500
+            { key: 'dealt', label: '입히는 피해', baseRgb: '249, 115, 22' },  // orange-500
+            { key: 'finalDmg', label: '최종 피해', baseRgb: '244, 63, 94' },  // rose-500
+            { key: 'cr', label: '치명타율', baseRgb: '6, 182, 212' },          // cyan-500
+            { key: 'cd', label: '치명타 배율', baseRgb: '99, 102, 241' },     // indigo-500
+            { key: 'finalCR', label: '최종 치명타율', baseRgb: '8, 145, 178' }, // cyan-700
+            { key: 'finalCD', label: '최종 치명타 배율', baseRgb: '79, 70, 229' }, // indigo-600
+            { key: 'defDebuff', label: '방어력 감소', baseRgb: '139, 92, 246' }, // violet-500
+            { key: 'crRes', label: '치명타 저항 감소', baseRgb: '20, 184, 166' }, // teal-500
           ];
+          // 각 stat 별 max 값 계산 — 색 농도 정규화에 사용
+          const statMax = {};
+          for (const l of labels) {
+            let m = 0;
+            for (const c of casts) {
+              const v = c.snap?.[l.key];
+              if (v && Math.abs(v) > m) m = Math.abs(v);
+            }
+            statMax[l.key] = m;
+          }
+          // 모든 cast 에서 0인 stat 은 행 자체 숨김
+          const visibleLabels = labels.filter((l) => statMax[l.key] > 0.01);
+          if (visibleLabels.length === 0) return null;
+
           return (
-            <div className="relative mt-2 border-t border-dashed border-slate-700 pt-2" style={{ minHeight: '220px' }}>
+            <div className="relative mt-2 border-t border-dashed border-slate-700 pt-3">
               <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
-                활성 버프 수치 (시전 직후)
+                활성 버프 수치 히트맵 (시전 직후 · 색 농도 = 수치 크기)
               </div>
-              {casts.map((c, i) => {
-                if (!c.snap) return null;
-                const items = [];
-                for (const l of labels) {
-                  const v = c.snap[l.key];
-                  if (v && Math.abs(v) > 0.01) items.push({ ...l, value: v });
-                }
-                if (items.length === 0) return null;
-                const bd = c.snap.bd || {};
-                const breakdown = (key) => {
-                  const arr = bd[key] || [];
-                  if (arr.length === 0) return '';
-                  return arr.map((r) => `${r.src}: +${r.val.toFixed(1)}`).join('\n');
-                };
-                // 시전 칸과 일치하도록 cast 시간 기준 + 다음 cast 까지 꽉 채움 (막대 형태)
-                const startT = c.t;
-                const endT = casts[i + 1] ? casts[i + 1].t : maxT;
-                const leftPct = (startT / maxT) * 100;
-                const widthPct = ((endT - startT) / maxT) * 100;
-                const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
-                return (
+              {visibleLabels.map((label) => (
+                <div
+                  key={label.key}
+                  className="relative mb-[2px]"
+                  style={{ height: '20px' }}
+                >
+                  {/* 셀 — cast 시간 기준으로 절대 위치 */}
+                  {casts.map((c, ci) => {
+                    if (!c.snap) return null;
+                    const v = c.snap[label.key];
+                    if (!v || Math.abs(v) < 0.01) return null;
+                    const startT = c.t;
+                    const endT = casts[ci + 1] ? casts[ci + 1].t : maxT;
+                    const leftPct = (startT / maxT) * 100;
+                    const widthPct = ((endT - startT) / maxT) * 100;
+                    const intensity = Math.abs(v) / (statMax[label.key] || 1);
+                    const opacity = 0.25 + intensity * 0.65;
+                    const bd = c.snap.bd?.[label.key] || [];
+                    const bdLines = bd.map((r) => `${r.src}: +${r.val.toFixed(1)}`).join('\n');
+                    const tipId = `${ci}-${label.key}`;
+                    return (
+                      <div
+                        key={ci}
+                        className="absolute top-0 bottom-0 rounded-sm flex items-center justify-center cursor-help font-mono text-[10px] text-white border border-slate-900/40 hover:ring-1 hover:ring-white/40"
+                        style={{
+                          left: `${leftPct}%`,
+                          width: `${widthPct}%`,
+                          backgroundColor: `rgba(${label.baseRgb}, ${opacity})`,
+                        }}
+                        onMouseEnter={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setSnapTip({
+                            id: tipId,
+                            label: label.label,
+                            value: v,
+                            bdLines,
+                            x: r.left + r.width / 2,
+                            y: r.top,
+                          });
+                        }}
+                        onMouseLeave={() => setSnapTip((t) => (t?.id === tipId ? null : t))}
+                      >
+                        {Math.round(v)}
+                      </div>
+                    );
+                  })}
+                  {/* Stat 라벨 — 좌측 overlay (어두운 반투명 배경으로 가독성 확보) */}
                   <div
-                    key={i}
-                    className="absolute flex flex-col gap-0.5 items-stretch"
-                    style={{
-                      left: `${leftPct}%`,
-                      width: `${widthPct}%`,
-                    }}
+                    className="absolute left-0 top-0 bottom-0 flex items-center text-[10px] text-slate-100 font-semibold pointer-events-none z-10 px-1.5"
+                    style={{ background: 'linear-gradient(to right, rgba(2,6,23,0.95) 70%, rgba(2,6,23,0))' }}
                   >
-                    {items.map((it) => {
-                      const bdLines = breakdown(it.key);
-                      const tipId = `${i}-${it.key}`;
-                      return (
-                        <span
-                          key={it.key}
-                          className={`text-[11px] px-1 py-0.5 rounded font-mono border leading-[14px] text-center break-keep flex items-center justify-center gap-1 cursor-help ${it.color}`}
-                          onMouseEnter={(e) => {
-                            const r = e.currentTarget.getBoundingClientRect();
-                            setSnapTip({
-                              id: tipId,
-                              label: it.label,
-                              value: it.value,
-                              bdLines,
-                              x: r.left + r.width / 2,
-                              y: r.top,
-                            });
-                          }}
-                          onMouseLeave={() => setSnapTip((t) => (t?.id === tipId ? null : t))}
-                        >
-                          <span className="break-words text-center">{it.label} +{it.value.toFixed(0)}</span>
-                          <span className="text-[10px] opacity-70 flex-shrink-0">?</span>
-                        </span>
-                      );
-                    })}
+                    {label.label}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           );
         })()}
