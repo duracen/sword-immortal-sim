@@ -202,17 +202,18 @@ function parseEvents(events) {
       let stack = 1;
       let delta = 1;  // 신규 (🔼버프) 기본 +1
       let stackCap = 1;
-      const capDef = ev.msg.match(/중첩최대\s*(\d+)/);
-      if (capDef) stackCap = parseInt(capDef[1], 10);
-      const stkM = ev.msg.match(/(\d+)→(\d+)/);
+      const capDef = ev.msg.match(/중첩최대\s*(\d+(?:\.\d+)?)/);
+      if (capDef) stackCap = parseFloat(capDef[1]);
+      // 정수/소수 모두 매칭 (주술 fractional 격발 buff 대응)
+      const stkM = ev.msg.match(/(\d+(?:\.\d+)?)→(\d+(?:\.\d+)?)/);
       if (stkM) {
-        const before = parseInt(stkM[1], 10);
-        stack = parseInt(stkM[2], 10);
+        const before = parseFloat(stkM[1]);
+        stack = parseFloat(stkM[2]);
         delta = stack - before;
-        stackCap = Math.max(stackCap, stack);  // 적어도 stack 수만큼은 cap
+        stackCap = Math.max(stackCap, stack);
       } else {
-        const cap = ev.msg.match(/중첩\s*(\d+)\/(\d+)/);
-        if (cap) { stack = parseInt(cap[1], 10); delta = 0; stackCap = Math.max(stackCap, parseInt(cap[2], 10)); }
+        const cap = ev.msg.match(/중첩\s*(\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)/);
+        if (cap) { stack = parseFloat(cap[1]); delta = 0; stackCap = Math.max(stackCap, parseFloat(cap[2])); }
       }
       if (!buffMap.has(displayKey)) buffMap.set(displayKey, []);
       const spans = buffMap.get(displayKey);
@@ -745,9 +746,11 @@ export default function CastTimelineSummary({ events }) {
               : b.key;
             // 본 span 의 폭파 발동 횟수 (BUF event 수). cap 도달 후 ↻갱신 도 폭파 1회로 카운트
             const fires = b.fires || 1;
-            // 누적 stack 은 실제 stack 이 2 이상일 때만 의미 있음
+            // 누적 stack 은 실제 stack 이 2 이상일 때만 의미 있음 (fractional 도 표시)
             const firesPart = fires > 1 ? ` ×${fires}회 발동` : '';
-            const stackPart = (b.maxStack || 1) > 1 ? ` (누적 ${b.maxStack})` : '';
+            const stackVal = b.maxStack || 1;
+            const stackStr = stackVal % 1 === 0 ? stackVal.toString() : stackVal.toFixed(2);
+            const stackPart = stackVal > 1 ? ` (누적 ${stackStr})` : '';
             const header = `${baseHeader}${firesPart}${stackPart}`;
             const leftPct = (b.start / maxT) * 100;
             // tooltip 위치: 바 왼쪽이 화면 중앙 넘어가면 오른쪽에서 띄움
