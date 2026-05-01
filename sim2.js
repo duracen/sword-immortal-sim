@@ -2223,9 +2223,13 @@ SK['옥추·청사'] = {
     }
     // [운청] 옥추 2중첩당 본 신통 피해 +6% (max tier) — localInc 로 신통피해 버킷에 추가
     const uc = 옥추Stack >= 2 ? Math.floor(옥추Stack / 2) * 6 : 0;
-    if (uc) TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 운청] 발동: 옥추 ${옥추Stack}중첩 → 본 신통 피해 +${uc}%`);
+    if (uc) {
+      TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 운청] 옥추 ${옥추Stack}중첩 → 본 신통 피해 +${uc}% (이번 cast 한정)`);
+      applyBuff(s, '옥추청사_운청', {}, 1); // 타임라인 시각화용 1초 marker
+    }
     // [명뢰] 본 신통 최종 cr +30% (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 명뢰] 본 신통 최종 cr +30% (이번 cast 한정)`);
+    applyBuff(s, '옥추청사_명뢰', {}, 1); // 타임라인 시각화용 1초 marker
     // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스)
     record(s, dealDamage(s, 170 * MH[4] * 옥추유파Mult(s, slots), {
       localInc: uc,
