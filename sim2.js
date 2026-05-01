@@ -231,6 +231,14 @@ function 불씨검증(state) {
 function hpLowFactor(state) { return 1 - hpRatio(state); }
 // HP가 threshold 이하인지 (예: 0.60 = HP 60% 이하)
 function hpBelow(state, threshold) { return hpRatio(state) <= threshold; }
+// 호신강기 + HP 합산 ratio (천검 등 "총 체력 풀" 기준 스케일용)
+// 0: 풀 (호신강기+HP 모두 만피), 1: 모두 0
+function targetLowFactor(state) {
+  const totalCap = (CFG.baseHP || 0) + (CFG.baseShield || 0);
+  if (totalCap <= 0) return 0;
+  const totalRem = (state.hpRem || 0) + (state.shieldRem || 0);
+  return Math.max(0, Math.min(1, 1 - totalRem / totalCap));
+}
 
 // 유파 효과 활성 조건 — 해당 유파 신통 2개 이상 장착 시
 function famActive(state, fam) { return (state.famSlots[fam] || 0) >= 2; }
@@ -1367,8 +1375,9 @@ function 천검발동(s, slots, ampPct = 0, srcTag = '천검') {
   // 천검: 대상+주변 3명, 3회 공격, 총 60~120% 호무 피해 (저체력 선형 스케일)
   // 명세상 "총" 피해이므로 × 3 중복 없음. 중복명중 감쇠도 이미 합산값 기준.
   // 유파 효과: 장착 1개당 +10% → slots×10%
-  // HP 100%→60%, HP 0%→120%, 실시간 HP 기반 선형 보간
-  const base = 60 + 60 * hpLowFactor(s);
+  // 호신강기+HP 합산 ratio 기반 선형 보간 (totalRem 100%→60%, 0%→120%)
+  // — 호신강기 드레인부터 scale up (이전: HP만 보아 호신강기 드레인 동안 base=60 고정)
+  const base = 60 + 60 * targetLowFactor(s);
   const mult = 1 + slots * 10 / 100;
   let amp = 1 + ampPct / 100;
   // 관일·[검망]: 천검 발동 시 발동 (max tier: 3회 + [쇄일] +3회 = 6회)
