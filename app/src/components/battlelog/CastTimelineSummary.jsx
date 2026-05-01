@@ -270,9 +270,9 @@ function parseEvents(events) {
   // 시작 시간 오름차순
   buffs.sort((a, b) => a.start - b.start || a.key.localeCompare(b.key));
 
-  // 대상 디버프 막대 — 작열/화상/독고 등 적에게 부여하는 디버프만 (자원 스택 lane 대신)
-  // 자기 자원 (검세/검심/뇌인/옥추/신소) 은 제외 — 데미지 계산에 직간접 반영되지만 시각화 별도 lane 불필요
-  const DEBUFF_TARGET_KEYS = new Set(['작열', '화상', '독고']);
+  // 대상 디버프 / 자원 막대 — 작열/화상/독고 (적 디버프) + 계약 (자기 자원)
+  // 자기 자원 검세/검심/뇌인/옥추/신소 등은 제외 — 데미지 계산에 직간접 반영되어 시각화 별도 lane 불필요
+  const DEBUFF_TARGET_KEYS = new Set(['작열', '화상', '독고', '계약']);
   const stacks = [];
   for (const key in stackSpans) {
     // 독고·강령 / 독고·환체 등도 포함 (prefix 매칭)
@@ -312,6 +312,8 @@ const STACK_STYLE = {
   신소: 'bg-teal-600/70 border-teal-400/60 text-teal-100',
   작열: 'bg-orange-600/70 border-orange-400/60 text-orange-100',
   화상: 'bg-red-600/70 border-red-400/60 text-red-100',
+  독고: 'bg-emerald-600/70 border-emerald-400/60 text-emerald-100',
+  계약: 'bg-pink-600/70 border-pink-400/60 text-pink-100',
 };
 
 // 트리거 스타일

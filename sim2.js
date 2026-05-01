@@ -2725,6 +2725,8 @@ function 계약획득(s, ct, frac = 1) {
     const fmt = frac >= 1 ? frac.toFixed(0) : frac.toFixed(2);
     TRACE(s, 'BUF', `📜[계약·${ct}] +${fmt} → 계약합 ${계약합(s).toFixed(2)}/20 (20초)`);
   }
+  // 타임라인 자원 스택 lane 표시용 — 계약합 추적
+  TRACE(s, 'STK', `계약 +${frac.toFixed(2)} → 현재 ${계약합(s).toFixed(2)}/20`);
   // 제율 — 계약 획득할 때마다 15% 술법 (전투 최대 5회)
   if (typeof 제율트리거 === 'function') 제율트리거(s, frac);
 }
@@ -2804,18 +2806,19 @@ SK['주술·유식'] = {
     record(s, dealDamage(s, 300));
     const prev = s._currentSource;
     // [유식] 본 신통 시전 시 1독고 + 30% 추가 물리 (최대 3회 발동, max tier)
-    // "최대 3회 발동" = per cast 최대 3회 (4회 공격 중 3회 발동 상한)
     for (let i = 0; i < 3; i++) 독고부여(s, 1);
     s._currentSource = '유식(효과)';
     record(s, dealDamage(s, 30 * 3, { noSkillMult: true }), '유식');
-    // [심장] 1~3 독고 + 40% × 평균 2회 물리 (max tier)
+    // [심장] 1~3 독고 + 40% × 평균 2회 물리 (max tier) — 즉시 발동
     독고부여(s, 2);
     s._currentSource = '심장(평균2회)';
     record(s, dealDamage(s, 40 * 2, { noSkillMult: true }), '심장');
+    // 타임라인 버프 lane 표시용 — 즉시 발동되는 옵션도 시각화 (1초 짜리 marker)
+    applyBuff(s, '주술유식_심장', {}, 1);
     s._currentSource = prev;
     // [독주] 본 신통 시전 15초 후 발동 예약 (계약합 snapshot은 발동 시점 기준)
     s.독주FireT = s.t + 15;
-    // 타임라인 버프 lane 표시용 — 15초 지연 발동 대기 buff (효과 spec 없음, 시각화 전용)
+    // 타임라인 버프 lane 표시용 — 15초 지연 발동 대기 buff
     applyBuff(s, '주술유식_독주', {}, 15);
   }
 };
@@ -3180,6 +3183,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           state._currentSource = '고담(독주+3중첩)';
           TRACE(state, 'OPT', `🟠고담 발동: 독주+계약 ${합}중첩 → 180% 물리`);
           record(state, dealDamage(state, 180, { noSkillMult: true }), '고담');
+          // 타임라인 버프 lane 시각화 (1초 marker)
+          applyBuff(state, '주술유식_고담', {}, 1);
         }
         state._currentSource = prev;
       }
