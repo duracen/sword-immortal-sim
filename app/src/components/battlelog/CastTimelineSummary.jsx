@@ -269,10 +269,35 @@ function parseEvents(events) {
   // 시작 시간 오름차순
   buffs.sort((a, b) => a.start - b.start || a.key.localeCompare(b.key));
 
-  // 자원 막대 배열로 변환
+  // 대상 디버프 막대 — 작열/화상/독고 등 적에게 부여하는 디버프만 (자원 스택 lane 대신)
+  // 자기 자원 (검세/검심/뇌인/옥추/신소) 은 제외 — 데미지 계산에 직간접 반영되지만 시각화 별도 lane 불필요
+  const DEBUFF_TARGET_KEYS = new Set(['작열', '화상', '독고']);
   const stacks = [];
   for (const key in stackSpans) {
+    // 독고·강령 / 독고·환체 등도 포함 (prefix 매칭)
+    const baseKey = key.split('·')[0];
+    if (!DEBUFF_TARGET_KEYS.has(baseKey)) continue;
     for (const s of stackSpans[key]) stacks.push({ key, start: s.start, end: s.end, peak: s.peak, counts: s.counts });
+  }
+  // defDebuff / crRes spec 가진 buff 도 대상 디버프로 포함 (예: 둔검, 파세, 검흔, 저주)
+  for (const [key, spans] of buffMap) {
+    for (const s of spans) {
+      // rawKey 가 없거나 buff 정보 부족하면 skip
+      if (!s.rawKey) continue;
+      // buff spec 은 raw spans 에 직접 들어가지 않음 — buffMap.get(displayKey) 의 span 에는 spec 정보 없음
+      // 하지만 키 명에 흔히 'defDebuff' 단서가 안 보이므로, 단순히 옵션명 키워드 매칭으로 필터
+      const debuffKeywords = ['둔검', '파세', '검흔', '저주', '약화', '붕연', '봉예'];
+      if (debuffKeywords.some((kw) => s.rawKey.includes(kw) || key.includes(kw))) {
+        stacks.push({
+          key,
+          start: s.start,
+          end: s.end,
+          peak: s.maxStack || 1,
+          counts: [{ t: s.start, n: s.maxStack || 1 }],
+          isBuffDebuff: true,
+        });
+      }
+    }
   }
   stacks.sort((a, b) => a.key.localeCompare(b.key) || a.start - b.start);
 
@@ -595,7 +620,7 @@ export default function CastTimelineSummary({ events }) {
             style={{ height: `${Math.max(1, stackLaneCount) * 20 + 8}px` }}
           >
             <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
-              자원 스택
+              대상 디버프
             </div>
             {stacks.map((s, i) => {
               const width = ((s.end - s.start) / maxT) * 100;
