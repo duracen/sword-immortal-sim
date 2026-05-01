@@ -131,10 +131,12 @@ function getMaxTime(markerIdx) { return MARKER_TIME[markerIdx]; }
 
 let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
 let G_BULSSI = null;     // 불씨 세트 (start 시 세팅)
+let G_BISUL = null;      // 비술 (start 시 세팅)
 function simOptsFor(markerIdx) {
   const o = { maxTime: getMaxTime(markerIdx) };
   if (G_TARGET_LAW) o.targetLawBody = G_TARGET_LAW;
   if (G_BULSSI) o.불씨 = G_BULSSI;
+  if (G_BISUL) o.bisul = G_BISUL;
   return o;
 }
 
@@ -591,9 +593,11 @@ async function handleMessage(e) {
     pass2TopK = 50,
     orderTopK: userOrderTopK,
     불씨 = null,
+    bisul = null,
   } = msg.config || {};
   G_TARGET_LAW = targetLawBody;
   G_BULSSI = 불씨;
+  G_BISUL = (bisul && (bisul.self?.length || bisul.enemy?.length)) ? bisul : null;
   if (fixedTreasures && Array.isArray(fixedTreasureList) && fixedTreasureList.length === 3) {
     FIXED_TREASURES = fixedTreasureList.slice();
   }

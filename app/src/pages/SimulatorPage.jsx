@@ -4,6 +4,7 @@ import SkillPoolPicker from '../components/simulator/SkillPoolPicker.jsx';
 import TreasurePicker from '../components/simulator/TreasurePicker.jsx';
 import OrderEditor from '../components/simulator/OrderEditor.jsx';
 import BulssiPicker from '../components/simulator/BulssiPicker.jsx';
+import BisulPicker from '../components/simulator/BisulPicker.jsx';
 import ResultSummary from '../components/simulator/ResultSummary.jsx';
 import RankingTable from '../components/ranking/RankingTable.jsx';
 import WinnerPodium from '../components/ranking/WinnerPodium.jsx';
@@ -105,6 +106,8 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   const [불씨, set불씨] = useState({
     통명묘화: 0, 진무절화: 0, 태현잔화: 0, 유리현화: 0, 진마성화: 0,
   });
+  // 비술 — { self: [...], enemy: [...] } (각 max 3개)
+  const [bisul, setBisul] = useState({ self: [], enemy: [] });
   const [selected, setSelected] = useState(null); // 로그 보기용
   const battleLogRef = useRef(null);
   // selected 변경 → BattleLogPanel 영역으로 스크롤
@@ -134,6 +137,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       targetLawBody,
       searchMode,
       불씨,
+      bisul,
     });
   }
 
@@ -207,7 +211,12 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       </section>
 
       <section>
-        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 탐색 설정</h2>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(자기/상대 각 최대 3개, 각 마주 무·허·진 1갈래)</span></h2>
+        <BisulPicker value={bisul} onChange={setBisul} />
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">5. 탐색 설정</h2>
         <div className="flex flex-wrap items-end gap-6 mb-4">
           <div>
             <label className="block text-xs text-slate-400 mb-1">기준 시간</label>
@@ -570,6 +579,8 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
     통명묘화: 0, 진무절화: 0, 태현잔화: 0, 유리현화: 0, 진마성화: 0,
   });
   const 불씨_총합 = (불씨.통명묘화||0)+(불씨.진무절화||0)+(불씨.태현잔화||0)+(불씨.유리현화||0)+(불씨.진마성화||0);
+  // 비술
+  const [bisul, setBisul] = useState({ self: [], enemy: [] });
 
   // skillSel 에서 slotMap 자동 유도 (유파별 신통 수)
   const slotMap = useMemo(() => {
@@ -640,6 +651,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       markerIdx,
       targetLawBody,
       불씨: { ...불씨 },
+      bisul: { self: [...(bisul.self||[])], enemy: [...(bisul.enemy||[])] },
       randomCrit,
       slotMap: { ...slotMap },
     };
@@ -653,6 +665,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       maxTime: snapshot.maxTime,
       targetLawBody: snapshot.targetLawBody,
       불씨: snapshot.불씨,
+      bisul: snapshot.bisul,
       randomCrit: snapshot.randomCrit,
     });
   }
@@ -682,6 +695,11 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">3. 불씨 선택</h2>
         <BulssiPicker value={불씨} onChange={set불씨} />
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(자기/상대 각 최대 3개)</span></h2>
+        <BisulPicker value={bisul} onChange={setBisul} />
       </section>
 
       {canEditOrder && order && (

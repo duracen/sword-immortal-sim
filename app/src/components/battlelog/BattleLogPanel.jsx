@@ -7,7 +7,7 @@ import DamageBreakdown from '../simulator/DamageBreakdown.jsx';
 
 // 빌드/스킬/순서/법보 조합으로 trace 실행 → 로그 렌더
 // props: { build, skills, treasures, order, onClose, randomCrit }
-export default function BattleLogPanel({ build, skills, treasures, order, title, onClose, targetLawBody, maxTime, 불씨, randomCrit = false }) {
+export default function BattleLogPanel({ build, skills, treasures, order, title, onClose, targetLawBody, maxTime, 불씨, bisul, randomCrit = false }) {
   const [events, setEvents] = useState([]);
   const [dmgEvents, setDmgEvents] = useState([]);
   const [filter, setFilter] = useState({ CST: true, BUF: true, STK: true, DMG: true, OPT: true });
@@ -24,6 +24,7 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
       if (targetLawBody) simOpts.targetLawBody = targetLawBody;
       if (maxTime) simOpts.maxTime = maxTime;
       if (불씨) simOpts.불씨 = 불씨;
+      if (bisul && (bisul.self?.length || bisul.enemy?.length)) simOpts.bisul = bisul;
       const r = simulateBuild(build, treasures, order, skills, simOpts);
       setEvents(collected);
       setDmgEvents(r.dmgEvents || []);
@@ -49,6 +50,7 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
     JSON.stringify(treasures),
     JSON.stringify(order),
     JSON.stringify(불씨),
+    JSON.stringify(bisul),
     targetLawBody,
     maxTime,
     randomCrit,
