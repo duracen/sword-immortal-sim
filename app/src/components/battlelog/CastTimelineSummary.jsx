@@ -283,14 +283,12 @@ function parseEvents(events) {
   // defDebuff / crRes spec 가진 buff 도 대상 디버프로 포함 (예: 둔검, 파세, 검흔, 저주)
   for (const [key, spans] of buffMap) {
     for (const s of spans) {
-      // rawKey 가 없거나 buff 정보 부족하면 skip
       if (!s.rawKey) continue;
-      // buff spec 은 raw spans 에 직접 들어가지 않음 — buffMap.get(displayKey) 의 span 에는 spec 정보 없음
-      // 하지만 키 명에 흔히 'defDebuff' 단서가 안 보이므로, 단순히 옵션명 키워드 매칭으로 필터
       const debuffKeywords = ['둔검', '파세', '검흔', '저주', '약화', '붕연', '봉예'];
       if (debuffKeywords.some((kw) => s.rawKey.includes(kw) || key.includes(kw))) {
         stacks.push({
           key,
+          rawKey: s.rawKey,  // tooltip 에서 lookupOption 으로 옵션 설명 조회
           start: s.start,
           end: s.end,
           peak: s.maxStack || 1,
@@ -626,11 +624,15 @@ export default function CastTimelineSummary({ events }) {
             {stacks.map((s, i) => {
               const width = ((s.end - s.start) / maxT) * 100;
               const style = STACK_STYLE[s.key] || 'bg-slate-600/70 border-slate-500 text-slate-100';
-              const desc = STACK_DESCS[s.key] || '';
+              // buff 유래 디버프는 lookupOption 으로 옵션 설명 조회 (저주/둔검 등)
+              // 일반 stack 디버프는 STACK_DESCS 에서 (작열/화상/독고)
+              const lookup = s.rawKey ? lookupOption(s.rawKey) : null;
+              const baseHeader = lookup?.skill ? `${lookup.skill} [${lookup.option}]` : s.key;
+              const desc = lookup?.desc || STACK_DESCS[s.key] || '';
               const leftPct = (s.start / maxT) * 100;
               const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
               const trajectory = (s.counts || [])
-                .map((c) => `${c.t.toFixed(1)}s: ${c.n}`)
+                .map((c) => `${c.t.toFixed(1)}s: ${typeof c.n === 'number' && c.n % 1 !== 0 ? c.n.toFixed(2) : c.n}`)
                 .join(' → ');
               return (
                 <div
@@ -650,7 +652,7 @@ export default function CastTimelineSummary({ events }) {
                     className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-80 p-3 bg-slate-950 border border-sky-600 rounded-lg shadow-xl pointer-events-none`}
                   >
                     <div className="text-xs font-bold text-sky-300 mb-1">
-                      🔷 {s.key} (최대 {s.peak}중첩)
+                      🔷 {baseHeader} (최대 {typeof s.peak === 'number' && s.peak % 1 !== 0 ? s.peak.toFixed(2) : s.peak}중첩)
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono mb-2">
                       ⏱ {s.start.toFixed(1)}s ~ {s.end.toFixed(1)}s · {(s.end - s.start).toFixed(1)}초
