@@ -1,13 +1,14 @@
 // 비술 (秘術) 선택 — 6 마주 중 정확히 3개 선택, 각 마주 무/허/진 1개 갈래 선택
 // value: { self: [{master, branch}, ...max 3], enemy: [...max 3] }
+import HoverTooltip from '../common/HoverTooltip';
 
 const MASTERS = [
-  { key: '탁천', name: '탁천마주', desc: '치명일격 (HP 0 도달) 시 발동' },
-  { key: '분혼', name: '분혼마주', desc: '신통/법보 첫 cast 시 발동' },
-  { key: '식혼', name: '식혼마주', desc: '공격 후 사망 시 발동' },
-  { key: '악신', name: '악신마주', desc: '방어법보 파괴 시 (또는 4회 공격)' },
-  { key: '혼원', name: '혼원마주', desc: '방어법보 파괴 시 (호신강기 1/3)' },
-  { key: '업화', name: '업화마주', desc: '신통/법보 5회 공격마다' },
+  { key: '탁천', name: '탁천마주', trigger: '치명일격 (HP 0 도달) 시 발동, CD 170초', cd: 170 },
+  { key: '분혼', name: '분혼마주', trigger: '신통/법보 첫 cast 시 발동, CD 170초', cd: 170 },
+  { key: '식혼', name: '식혼마주', trigger: '공격 후 사망 시 발동, CD 160초', cd: 160 },
+  { key: '악신', name: '악신마주', trigger: '방어법보 파괴 시 (또는 4회 공격), CD 170초', cd: 170 },
+  { key: '혼원', name: '혼원마주', trigger: '방어법보 파괴 시 (호신강기 1/3 마다), CD 160초', cd: 160 },
+  { key: '업화', name: '업화마주', trigger: '신통/법보 5회 공격마다, CD 160초', cd: 160 },
 ];
 
 const BRANCHES = ['무', '허', '진'];
@@ -73,24 +74,57 @@ function BisulSlot({ side, value, onChange, label }) {
           const tooBig = !isSelected && list.length >= 3;
           return (
             <div key={m.key} className={`flex items-center gap-2 p-1.5 rounded ${isSelected ? 'bg-slate-800/60' : tooBig ? 'opacity-40' : ''}`}>
-              <span className="text-xs w-20 shrink-0 text-slate-200" title={m.desc}>{m.name}</span>
+              <HoverTooltip
+                className={side === 'self' ? 'border-amber-600' : 'border-purple-600'}
+                maxWidth={360}
+                content={
+                  <>
+                    <div className={`text-xs font-bold mb-1 ${side === 'self' ? 'text-amber-300' : 'text-purple-300'}`}>
+                      🔮 {m.name}
+                    </div>
+                    <div className="text-[11px] text-slate-400 mb-2">{m.trigger}</div>
+                    <div className="text-[12px] text-slate-200 leading-relaxed space-y-1">
+                      <div><span className="font-bold text-yellow-300">[무]</span> {MASTER_BRANCH_DESC[m.key].무}</div>
+                      <div><span className="font-bold text-yellow-300">[허]</span> {MASTER_BRANCH_DESC[m.key].허}</div>
+                      <div><span className="font-bold text-yellow-300">[진]</span> {MASTER_BRANCH_DESC[m.key].진}</div>
+                    </div>
+                  </>
+                }
+              >
+                <span className="text-xs w-20 shrink-0 text-slate-200 cursor-help border-b border-dotted border-slate-500">{m.name}</span>
+              </HoverTooltip>
               <div className="flex gap-1 flex-1">
                 {BRANCHES.map((b) => {
                   const active = sel && sel.branch === b;
                   return (
-                    <button
+                    <HoverTooltip
                       key={b}
-                      onClick={() => toggle(m.key, b)}
-                      disabled={tooBig}
-                      title={MASTER_BRANCH_DESC[m.key][b]}
-                      className={`px-2 py-1 text-[11px] rounded transition ${
-                        active
-                          ? (side === 'self' ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-purple-500 text-white font-bold')
-                          : 'bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:hover:bg-slate-700'
-                      }`}
+                      className={side === 'self' ? 'border-amber-600' : 'border-purple-600'}
+                      maxWidth={360}
+                      content={
+                        <>
+                          <div className={`text-xs font-bold mb-1 ${side === 'self' ? 'text-amber-300' : 'text-purple-300'}`}>
+                            🔮 {m.name} <span className="text-yellow-300">[{b}]</span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mb-2">{m.trigger}</div>
+                          <div className="text-[12px] text-slate-200 leading-relaxed">
+                            {MASTER_BRANCH_DESC[m.key][b]}
+                          </div>
+                        </>
+                      }
                     >
-                      {b}
-                    </button>
+                      <button
+                        onClick={() => toggle(m.key, b)}
+                        disabled={tooBig}
+                        className={`px-2 py-1 text-[11px] rounded transition cursor-help ${
+                          active
+                            ? (side === 'self' ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-purple-500 text-white font-bold')
+                            : 'bg-slate-700 text-slate-300 hover:bg-slate-600 disabled:hover:bg-slate-700'
+                        }`}
+                      >
+                        {b}
+                      </button>
+                    </HoverTooltip>
                   );
                 })}
               </div>
