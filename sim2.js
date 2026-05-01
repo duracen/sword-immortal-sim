@@ -1137,20 +1137,29 @@ function record(state, amount, source) {
   const activeCast = state._activeCast || null;
   state.dmgEvents.push({ t: state.t, amt: amount, src, activeCast });
   // === 호신강기/HP 풀 적용 ===
+  // 호신강기는 방어력이 없음 → defMult 미적용 (full 데미지)
+  // HP 는 defMult (방어 + defDebuff) 적용
+  // 입력 amount 는 dealDamage 가 defMult 까지 곱한 값 → shield 적용 시 nudge 해서 raw 로 환산
   const bd = state._lastBreakdown;
   const bypassShield = isBypassShield(state, bd);
+  // bd.defMult 가 0 이면 defMult 미적용 → fallback 1
+  const dmlt = (bd && bd.defMult > 0) ? bd.defMult : 1;
+  // raw = amount / defMult (defMult 적용 전 데미지 = 호신강기에 들어가는 full 값)
+  const rawDmg = amount / dmlt;
   let shieldHit = 0, hpHit = 0;
   if (bypassShield) {
     hpHit = amount;
     state.hpRem = Math.max(0, (state.hpRem || 0) - amount);
   } else {
-    const absorbed = Math.min(state.shieldRem || 0, amount);
+    // 호신강기 흡수: full raw 데미지 (방어 무시)
+    const absorbed = Math.min(state.shieldRem || 0, rawDmg);
     shieldHit = absorbed;
     state.shieldRem = (state.shieldRem || 0) - absorbed;
-    const overflow = amount - absorbed;
-    if (overflow > 0) {
-      hpHit = overflow;
-      state.hpRem = Math.max(0, (state.hpRem || 0) - overflow);
+    // 호신강기 흘러넘친 raw 잉여 → HP 에 들어갈 때 defMult 재적용
+    const rawOverflow = rawDmg - absorbed;
+    if (rawOverflow > 0) {
+      hpHit = rawOverflow * dmlt;
+      state.hpRem = Math.max(0, (state.hpRem || 0) - hpHit);
     }
   }
   // 히트 카운터 tick (기본 1히트, 멀티히트 스킬은 _recordHits에 설정)
