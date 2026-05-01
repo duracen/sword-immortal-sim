@@ -2445,10 +2445,9 @@ function expectedFiresFromPool(N) {
 }
 
 // fractional 중첩 지원 — applyBuff와 같지만 stack 증가량을 frac 으로 받음
-function applyBuffFrac(state, key, spec, dur, maxStack, frac) {
+function applyBuffFrac(state, key, spec, dur, maxStack, frac, silent = false) {
   const isWeak = !!(spec.defDebuff || spec.crRes);
   const postTag = state._snapBuffsCaptured ? ' [post]' : '';
-  // 키 라벨: "주술제율_고식" → "[주술·제율 → 고식]"
   const m = key.match(/^(..)(..)_(.+)$/);
   const keyLabel = m ? `[${m[1]}·${m[2]} → ${m[3]}]` : `[${key}]`;
   const ex = state.buffs.find(b => b.key === key && b.endT > state.t);
@@ -2456,7 +2455,7 @@ function applyBuffFrac(state, key, spec, dur, maxStack, frac) {
     ex.endT = state.t + dur + 0.001;
     const prev = ex.stackCount || 1;
     ex.stackCount = Math.min(prev + frac, maxStack);
-    // 갱신 로그
+    if (silent) return;
     if (ex.stackCount > prev + 0.01) {
       TRACE(state, 'BUF', `↑중첩 ${keyLabel} ${prev.toFixed(2)}→${ex.stackCount.toFixed(2)} (${dur}초 재갱신, 중첩최대 ${maxStack})${postTag}`);
     } else {
@@ -2465,6 +2464,7 @@ function applyBuffFrac(state, key, spec, dur, maxStack, frac) {
     return;
   }
   state.buffs.push({ key, endT: state.t + dur + 0.001, stackCount: Math.min(frac, maxStack), maxStacks: maxStack, ...spec });
+  if (silent) return;
   const specStr = Object.entries(spec).map(([k,v])=>k+'+'+v).join(',') || '(효과표시없음)';
   const kindTag = isWeak ? '🔻디버프' : '🔼버프';
   TRACE(state, 'BUF', `${kindTag} ${keyLabel} ${specStr} (${dur}초, 중첩 ${frac.toFixed(2)}/${maxStack})${postTag}`);
@@ -2663,6 +2663,13 @@ function 격발체크(s) {
   for (let i = 0; i < 계약_TYPES.length; i++) {
     계약획득(s, 계약_TYPES[i], fires / 4);
   }
+  // 기댓값 모드 통합 trace — 4종 동시 부여를 한 buff bar 로 시각화
+  if (!CFG.randomCrit && fires > 0) {
+    const each = (fires / 4).toFixed(2);
+    const cr값 = (6 * fires / 4).toFixed(1);
+    const amp값 = (6 * fires / 4).toFixed(1);
+    TRACE(s, 'BUF', `📜[계약] 4종 동시 각 +${each} → 계약합 ${계약합(s).toFixed(2)}/20 (20초, cr+${cr값}%, amp+${amp값}%)`);
+  }
   // onGyeokbal × fires (원한 추가 독고는 다음 cast 시 격발체크에서 평가)
   onGyeokbal(s, fires);
 }
@@ -2703,16 +2710,21 @@ function onGyeokbal(s, frac = 1) {
 // 계약 획득 — frac=1 정수, frac<1 은 확률가중 격발용 fractional
 function 계약획득(s, ct, frac = 1) {
   if (frac <= 0) return;
+  // 기댓값 모드: 4종 동시 부여 → 개별 trace 억제 (caller 가 통합 trace emit)
+  // 랜덤 모드: 1 type만 발동 → 개별 trace 정상 표시
+  const silent = !CFG.randomCrit;
   if (ct === '실혼') {
-    applyBuffFrac(s, '계약·실혼', { cr: 6 }, 20, 5, frac);
+    applyBuffFrac(s, '계약·실혼', { cr: 6 }, 20, 5, frac, silent);
   } else if (ct === '매혹') {
-    applyBuffFrac(s, '계약·매혹', { cat: 'amp', dmgMult: 6 }, 20, 5, frac);
+    applyBuffFrac(s, '계약·매혹', { cat: 'amp', dmgMult: 6 }, 20, 5, frac, silent);
   } else {
     // 강령/환생: 자기 방어 버프, 공격엔 영향 X. 카운터만 유지 (계약합 계산용)
-    applyBuffFrac(s, '계약·' + ct, {}, 20, 5, frac);
+    applyBuffFrac(s, '계약·' + ct, {}, 20, 5, frac, silent);
   }
-  const fmt = frac >= 1 ? frac.toFixed(0) : frac.toFixed(2);
-  TRACE(s, 'BUF', `📜[계약·${ct}] +${fmt} → 계약합 ${계약합(s).toFixed(2)}/20 (20초)`);
+  if (CFG.randomCrit) {
+    const fmt = frac >= 1 ? frac.toFixed(0) : frac.toFixed(2);
+    TRACE(s, 'BUF', `📜[계약·${ct}] +${fmt} → 계약합 ${계약합(s).toFixed(2)}/20 (20초)`);
+  }
   // 제율 — 계약 획득할 때마다 15% 술법 (전투 최대 5회)
   if (typeof 제율트리거 === 'function') 제율트리거(s, frac);
 }
