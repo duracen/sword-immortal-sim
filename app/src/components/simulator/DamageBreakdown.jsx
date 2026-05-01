@@ -201,7 +201,15 @@ export default function DamageBreakdown({ dmgEvents }) {
       } else if (is천검Skill) {
         parent = 천검부모신통;
       } else if (isFamilyEffect) {
-        parent = '유파 효과';
+        // 유파/법체 효과를 유파별로 분리
+        if (s === '천검' || s.includes('천검')) parent = '천검 (균천 유파)';
+        else if (s.includes('천벌')) parent = '천벌 (청명 유파)';
+        else if (s === '살혼' || s.includes('살혼')) parent = '살혼 (사해 유파)';
+        else if (s.includes('염양')) parent = '염양 (열산 유파)';
+        else if (s === '만고귀종') parent = '만고귀종 (백족법체)';
+        else if (s === '도천지세') parent = '도천지세 (백족법체)';
+        else if (s.includes('폭파') && yupaMatch) parent = '작열 폭파 (형혹 유파)';
+        else parent = '유파 효과 (기타)';
       } else if (arrowMatch) {
         const reason = arrowMatch[2];
         const parsed = parseReason(reason);
