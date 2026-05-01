@@ -218,9 +218,9 @@ function parseEvents(events) {
       if (!buffMap.has(displayKey)) buffMap.set(displayKey, []);
       const spans = buffMap.get(displayKey);
       const last = spans[spans.length - 1];
-      // 같은 timestamp 의 동일 buff 만 병합 (같은 cast 내 중복 이벤트 정리)
-      // 다른 timestamp 의 재갱신/재발동은 별도 block 으로 분리 (영염처럼 각 발동 시각화)
-      if (last && Math.abs(last.start - start) < 0.05) {
+      // 같은 timestamp + 같은 rawKey 만 병합 (다른 rawKey 가 displayKey 만 같다면 별도)
+      // 예: '옥추소명_소명' / '옥추소명_cd' → 둘 다 display '소명' 이지만 rawKey 다르면 분리
+      if (last && last.rawKey === rawKey && Math.abs(last.start - start) < 0.05) {
         last.end = Math.max(last.end, end);
         last.maxStack = Math.max(last.maxStack || 1, stack);
         last.stackCap = Math.max(last.stackCap || 1, stackCap);
