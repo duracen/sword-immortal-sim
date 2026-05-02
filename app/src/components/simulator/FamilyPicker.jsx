@@ -30,7 +30,7 @@ export default function FamilyPicker({ slotMap, onChange }) {
                 >
                   <div className="text-sm">
                     <span className="font-medium">{fam}</span>
-                    <span className="text-slate-300 text-xs ml-2">
+                    <span className="text-slate-500 text-xs ml-2">
                       {FAMILIES[fam].skills.length}개 스킬
                     </span>
                   </div>

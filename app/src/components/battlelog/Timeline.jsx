@@ -14,7 +14,7 @@ function Row({ ev }) {
   const tagCls = TAG_COLORS[ev.tag] || 'text-slate-300 bg-slate-800';
   return (
     <div className="flex items-start gap-2 px-3 py-1 border-b border-slate-800/70 font-mono text-xs">
-      <span className="text-slate-300 w-16 shrink-0 leading-5">{(ev.t ?? 0).toFixed(2)}s</span>
+      <span className="text-slate-500 w-16 shrink-0 leading-5">{(ev.t ?? 0).toFixed(2)}s</span>
       <span className={`px-1.5 rounded shrink-0 w-12 text-center leading-5 ${tagCls}`}>
         {ev.tag}
       </span>
@@ -31,7 +31,7 @@ export default function Timeline({ events, filter }) {
     [events, filter]
   );
   if (filtered.length === 0) {
-    return <div className="text-slate-300 text-sm p-4">표시할 이벤트가 없습니다.</div>;
+    return <div className="text-slate-500 text-sm p-4">표시할 이벤트가 없습니다.</div>;
   }
   return (
     <div className="max-h-[600px] overflow-y-auto">

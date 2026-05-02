@@ -5,6 +5,7 @@ import TreasurePicker from '../components/simulator/TreasurePicker.jsx';
 import OrderEditor from '../components/simulator/OrderEditor.jsx';
 import BulssiPicker from '../components/simulator/BulssiPicker.jsx';
 import BisulPicker from '../components/simulator/BisulPicker.jsx';
+import BeopsangPicker from '../components/simulator/BeopsangPicker.jsx';
 import ResultSummary from '../components/simulator/ResultSummary.jsx';
 import RankingTable from '../components/ranking/RankingTable.jsx';
 import WinnerPodium from '../components/ranking/WinnerPodium.jsx';
@@ -100,6 +101,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   // requiredLawBody: null (무필터) | 'any' (아무거나 4+) | '영검'/'화염'/'뇌전'/'백족' (특정)
   const [requiredLawBody, setRequiredLawBody] = useState('any');
   const [fixedTreasures, setFixedTreasures] = useState(false);
+  const [fixedTreasureOrder, setFixedTreasureOrder] = useState(false);
   const [treasures, setTreasures] = useState([]);
   const [searchMode, setSearchMode] = useState('fast');  // 'fast' | 'exhaustive'
   // 자동 탐색 전체에 동일 불씨 세트 적용 — 실 인게임에서 불씨는 고정됨
@@ -108,6 +110,8 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   });
   // 비술 — { self: [...], enemy: [...] } (각 max 3개)
   const [bisul, setBisul] = useState({ self: [], enemy: [] });
+  // 법상 — { name: string|null, tiers: { 실체, 의념, 진령 } }
+  const [법상, set법상] = useState({ name: null, tiers: { 실체: true, 의념: true, 진령: true } });
   const [selected, setSelected] = useState(null); // 로그 보기용
   const battleLogRef = useRef(null);
   // selected 변경 → BattleLogPanel 영역으로 스크롤
@@ -131,6 +135,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       skillPool: Array.from(pool),
       requiredLawBody,
       fixedTreasures,
+      fixedTreasureOrder,
       // 선택된 법보 풀 — 고정 시 여기서만 C(N,3) 조합 탐색
       // 사용자가 선택한 법보 풀 — 고정 시 C(N,3) 조합 / 미고정 시도 동일하게 선택된 풀 내에서만 탐색
       treasurePool: treasures.length >= 3 ? treasures : null,
@@ -138,6 +143,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       searchMode,
       불씨,
       bisul,
+      법상,
     });
   }
 
@@ -200,9 +206,24 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
               (체크 시 법보는 7/8/9번 위치만 사용 · 법보 순서는 전수탐색 → 신통 6! × 법보 3! = 4,320 / 미고정 9!=362,880 대비 84배 빠름)
             </span>
           </label>
-          <div className="text-xs text-slate-400">※ 법보끼리의 시전 순서는 알고리즘이 자동 결정합니다</div>
+          <label
+            className={`flex items-center gap-2 text-xs select-none ${fixedTreasures ? 'text-slate-300 cursor-pointer' : 'text-slate-500 cursor-not-allowed'}`}
+            title={fixedTreasures ? '체크 시: 법보를 사용자가 선택한 순서 그대로 시전. 법보 순서 탐색 X → 신통 6! = 720회 (법보 위치 고정 + 순서 고정 시).' : '법보 위치 고정 활성 시에만 사용 가능'}
+          >
+            <input
+              type="checkbox"
+              checked={fixedTreasureOrder}
+              disabled={!fixedTreasures}
+              onChange={(e) => setFixedTreasureOrder(e.target.checked)}
+            />
+            <span className="font-semibold">법보 순서 고정</span>
+            <span className="text-[11px] text-slate-300">
+              (체크 시 법보는 사용자 선택 순서 그대로 → 신통 6! × 법보 1 = 720, 법보 위치 고정 대비 6배 빠름)
+            </span>
+          </label>
+          <div className="text-xs text-slate-400">※ 법보 순서 미고정 시 알고리즘이 법보끼리 순서를 자동 결정합니다</div>
         </div>
-        <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={false} maxSelect={4} minSelect={3} />
+        <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={fixedTreasureOrder} maxSelect={4} minSelect={3} />
       </section>
 
       <section>
@@ -213,6 +234,11 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(자기/상대 각 최대 3개, 각 마주 무·허·진 1갈래)</span></h2>
         <BisulPicker value={bisul} onChange={setBisul} />
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">5. 법상 선택 <span className="text-xs text-slate-400 font-normal">(8개 중 1개 선택 — 빙의 시 추가 데미지, 재능 3종 자동 활성화)</span></h2>
+        <BeopsangPicker value={법상} onChange={set법상} />
       </section>
 
       <section>
@@ -488,6 +514,9 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                 order={selected.orderArr}
                 targetLawBody={targetLawBody}
                 maxTime={MARKER_TIMES[markerIdx]}
+                불씨={불씨}
+                bisul={bisul}
+                법상={법상}
                 onClose={() => setSelected(null)}
               />
             </div>
@@ -581,6 +610,8 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   const 불씨_총합 = (불씨.통명묘화||0)+(불씨.진무절화||0)+(불씨.태현잔화||0)+(불씨.유리현화||0)+(불씨.진마성화||0);
   // 비술
   const [bisul, setBisul] = useState({ self: [], enemy: [] });
+  // 법상
+  const [법상, set법상] = useState({ name: null, tiers: { 실체: true, 의념: true, 진령: true } });
 
   // skillSel 에서 slotMap 자동 유도 (유파별 신통 수)
   const slotMap = useMemo(() => {
@@ -652,6 +683,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       targetLawBody,
       불씨: { ...불씨 },
       bisul: { self: [...(bisul.self||[])], enemy: [...(bisul.enemy||[])] },
+      법상: { name: 법상.name, tiers: { ...법상.tiers } },
       randomCrit,
       slotMap: { ...slotMap },
     };
@@ -666,6 +698,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       targetLawBody: snapshot.targetLawBody,
       불씨: snapshot.불씨,
       bisul: snapshot.bisul,
+      법상: snapshot.법상,
       randomCrit: snapshot.randomCrit,
     });
   }
@@ -700,6 +733,11 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(자기/상대 각 최대 3개)</span></h2>
         <BisulPicker value={bisul} onChange={setBisul} />
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">5. 법상 선택 <span className="text-xs text-slate-400 font-normal">(8개 중 1개 선택 — 빙의 시 추가 데미지, 재능 3종 자동 활성화)</span></h2>
+        <BeopsangPicker value={법상} onChange={set법상} />
       </section>
 
       {canEditOrder && order && (
@@ -806,6 +844,8 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
             targetLawBody={simSnap.targetLawBody}
             maxTime={simSnap.maxTime}
             불씨={simSnap.불씨}
+            bisul={simSnap.bisul}
+            법상={simSnap.법상}
             randomCrit={simSnap.randomCrit}
           />
         </>

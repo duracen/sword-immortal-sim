@@ -187,8 +187,14 @@ export default function DamageBreakdown({ dmgEvents }) {
       const 천검OptMatch = s.match(/^천검\(([가-힣]+)\)$/);
       const is천검Skill = !!(천검OptMatch && 천검옵션부모맵[천검OptMatch[1]]);
       const 천검부모신통 = is천검Skill ? 천검옵션부모맵[천검OptMatch[1]] : null;
+      // 비술 (자기 발동: 분혼/악신/업화 — 데미지 발생) — 마주별로 분리
+      // 적 비술 (탁천/식혼/혼원) 은 자기 데미지 X (적 회복) 이라 dmgEvents 에 안 나옴
+      // 악신마주·{branch}·분신 도 매칭 (분신 별도 데미지)
+      const 비술Match = s.match(/^(분혼|식혼|탁천|악신|혼원|업화)마주·([무허진])(?:·(분신))?/);
+      // 법상 매칭 — "법상·{name}(...)" 형식
+      const 법상Match = s.match(/^법상·([가-힣]+)\((.+)\)$/);
       // 유파/법체 효과 — 신통 옵션이 아닌 패시브·트리거 (cast 무관 항상 동일 그룹)
-      const isFamilyEffect = !is천검Skill && (
+      const isFamilyEffect = !is천검Skill && !비술Match && (
         s === '천검' || s.includes('천검') ||
         s.includes('천벌') ||
         s === '살혼' || s.includes('살혼') ||
@@ -198,6 +204,14 @@ export default function DamageBreakdown({ dmgEvents }) {
       );
       if (s === '평타') {
         parent = '평타';
+      } else if (비술Match) {
+        // 비술별로 분리 (분혼/악신/업화) + 갈래 표시
+        parent = `🔮 비술·${비술Match[1]}마주(${비술Match[2]})`;
+      } else if (법상Match) {
+        // 법상별로 통합 (8개 법상 — 용/새 아이콘 자동)
+        const lawName = 법상Match[1];
+        const isYong = ['청교룡', '청반룡', '청룡', '진룡'].includes(lawName);
+        parent = `${isYong ? '🐉' : '🦅'} 법상·${lawName}`;
       } else if (is천검Skill) {
         parent = 천검부모신통;
       } else if (isFamilyEffect) {
@@ -232,7 +246,17 @@ export default function DamageBreakdown({ dmgEvents }) {
         parent = p.parent;
       }
       // child 라벨은 단일 함수로 통일 포맷
-      child = formatChild(s, parent);
+      // 비술 분신: src='악신마주·무·분신(옥추·소명)' → child='[옥추·소명]' (trigger 신통명)
+      if (비술Match) {
+        const triggerMatch = s.match(/·분신\(([^)]+)\)$/);
+        if (triggerMatch) child = `[${triggerMatch[1]}]`;
+        else child = formatChild(s, parent);
+      } else if (법상Match) {
+        // 법상: src='법상·청룡(실체)' → child='[실체]' (tier)
+        child = `[${법상Match[2]}]`;
+      } else {
+        child = formatChild(s, parent);
+      }
       if (!groups[parent]) groups[parent] = { total: 0, segs: {} };
       groups[parent].total += ev.amt;
       if (!groups[parent].segs[child]) groups[parent].segs[child] = { value: 0, count: 0 };

@@ -6,7 +6,7 @@ export function useSimulation() {
   const [result, setResult] = useState(null);
   const [running, setRunning] = useState(false);
 
-  const run = useCallback(({ build, treasures, order, skills: skillsOverride, trials = 1, maxTime, targetLawBody, 불씨, bisul, randomCrit }) => {
+  const run = useCallback(({ build, treasures, order, skills: skillsOverride, trials = 1, maxTime, targetLawBody, 불씨, bisul, 법상, randomCrit }) => {
     setRunning(true);
     setTimeout(() => {
       const prevRandom = CFG.randomCrit;
@@ -18,6 +18,7 @@ export function useSimulation() {
         if (targetLawBody) simOpts.targetLawBody = targetLawBody;
         if (불씨) simOpts.불씨 = 불씨;
         if (bisul && (bisul.self?.length || bisul.enemy?.length)) simOpts.bisul = bisul;
+        if (법상 && 법상.name) simOpts.법상 = 법상;
         let sumCum = [0, 0, 0, 0];
         let lastEvents = null;
         let castCounts = {};

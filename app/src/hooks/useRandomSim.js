@@ -8,19 +8,27 @@ export function useRandomSim() {
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const cancelRef = useRef(false);
 
-  const run = useCallback(async ({ build, treasures, order, trials }) => {
+  const run = useCallback(async ({
+    build, treasures, order, trials,
+    skills = null, maxTime = null, targetLawBody = null, 불씨 = null,
+    randomCrit = true,
+  }) => {
     cancelRef.current = false;
     setRunning(true);
     setResults([]);
     setProgress({ current: 0, total: trials });
     const prev = CFG.randomCrit;
-    CFG.randomCrit = true;
+    CFG.randomCrit = randomCrit;
+    const simOpts = {};
+    if (maxTime) simOpts.maxTime = maxTime;
+    if (targetLawBody) simOpts.targetLawBody = targetLawBody;
+    if (불씨) simOpts.불씨 = 불씨;
     const collected = [];
     const BATCH = 20;
     try {
       for (let i = 0; i < trials; i++) {
         if (cancelRef.current) break;
-        const r = simulateBuild(build, treasures, order);
+        const r = simulateBuild(build, treasures, order, skills, simOpts);
         collected.push({
           c60: r.cumByMarker[0],
           c120: r.cumByMarker[1],

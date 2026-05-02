@@ -132,11 +132,14 @@ function getMaxTime(markerIdx) { return MARKER_TIME[markerIdx]; }
 let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
 let G_BULSSI = null;     // 불씨 세트 (start 시 세팅)
 let G_BISUL = null;      // 비술 (start 시 세팅)
+let G_BEOPSANG = null;   // 법상 (start 시 세팅)
+let G_FIXED_TR_ORDER = false;  // 법보 순서 고정 (체크 시 user 입력 순서 그대로)
 function simOptsFor(markerIdx) {
   const o = { maxTime: getMaxTime(markerIdx) };
   if (G_TARGET_LAW) o.targetLawBody = G_TARGET_LAW;
   if (G_BULSSI) o.불씨 = G_BULSSI;
   if (G_BISUL) o.bisul = G_BISUL;
+  if (G_BEOPSANG) o.법상 = G_BEOPSANG;
   return o;
 }
 
@@ -160,14 +163,18 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
   let counter = 0;
   const YIELD_EVERY = onOrderProgress ? 100 : 2000;
   // 법보 고정: 위치만 고정 (7/8/9). 법보 순서는 permute → 6! × 3! = 4,320
+  // 법보 위치+순서 모두 고정: 6! × 1 = 720
   // 법보 미고정: 모든 위치 interleave → 9! = 362,880
-  const PERM_TOTAL = fixedTreasures ? 4320 : 362880;
+  const fixedTreasureOrder = !!G_FIXED_TR_ORDER;
+  const PERM_TOTAL = fixedTreasures ? (fixedTreasureOrder ? 720 : 4320) : 362880;
 
   if (fixedTreasures) {
     const skillSlots = [0, 1, 2, 3, 4, 5].map((i) => ({ kind: 'skill', idx: i }));
     const treasureSlots = [0, 1, 2].map((i) => ({ kind: 'treasure', idx: i }));
+    // 법보 순서 고정 시: 사용자 입력 순서 그대로 사용 (단일 perm)
+    const trPermList = fixedTreasureOrder ? [treasureSlots] : Array.from(permutations(treasureSlots));
     for (const skPerm of permutations(skillSlots)) {
-      for (const trPerm of permutations(treasureSlots)) {
+      for (const trPerm of trPermList) {
         if (isCancelled()) return { topResults, cancelled: true };
         const full = skPerm.concat(trPerm);
         const sc = simulateBuild(build, treasures, full, skillsOverride, simOpts).cumByMarker[markerIdx];
@@ -594,10 +601,14 @@ async function handleMessage(e) {
     orderTopK: userOrderTopK,
     불씨 = null,
     bisul = null,
+    법상 = null,
+    fixedTreasureOrder = false,
   } = msg.config || {};
   G_TARGET_LAW = targetLawBody;
   G_BULSSI = 불씨;
   G_BISUL = (bisul && (bisul.self?.length || bisul.enemy?.length)) ? bisul : null;
+  G_BEOPSANG = (법상 && 법상.name) ? 법상 : null;
+  G_FIXED_TR_ORDER = !!fixedTreasureOrder;
   if (fixedTreasures && Array.isArray(fixedTreasureList) && fixedTreasureList.length === 3) {
     FIXED_TREASURES = fixedTreasureList.slice();
   }

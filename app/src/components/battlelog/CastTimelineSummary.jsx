@@ -69,7 +69,13 @@ function parseEvents(events) {
   const castRaws = [];
   const triggers = [];  // 천벌/천검/염양 등 특별 트리거
   // 각 트리거의 지속 시간 (초) — 0 이면 순간 발동
-  const TRIG_DUR = { 천벌: 10, 염양: 10, 천검: 0, 열산: 10 };
+  // 비술: 분혼(15초 봉인+심화), 악신(15초 분신), 업화(10초 DoT)
+  // 법상: 모두 20초 빙의
+  const TRIG_DUR = { 천벌: 10, 염양: 10, 천검: 0, 열산: 10,
+    분혼마주: 15, 악신마주: 15, 업화마주: 10,
+    탁천마주: 1, 식혼마주: 1, 혼원마주: 1,
+    청교룡: 20, 적난새: 20, 청반룡: 20, 금오: 20,
+    청룡: 20, 주작: 20, 진룡: 20, 봉황: 20 };
   // 같은 시각/종류 트리거는 합쳐서 count 누적 (×N 표시용)
   function pushTrigger(tg) {
     const last = triggers[triggers.length - 1];
@@ -110,6 +116,24 @@ function parseEvents(events) {
       // 염양은 본 신통 DMG 후에 발동 → 시각상 cast 라인보다 살짝 뒤에 표시
       // (이번 신통에는 buff 미적용 의미)
       pushTrigger({ t: ev.t + 0.4, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
+    } else if (ev.tag === 'OPT' && /(?:🐉|🦅)법상·/.test(ev.msg) && ev.msg.includes('빙의 시작')) {
+      // 법상 빙의 시작 — "🐉법상·{name} 빙의 시작 @29.0s (지속 20초)" 형식
+      // 메시지에 @t 가 있으면 정확한 시작 시각 사용 (cast 이벤트 단위 sim 의 보정)
+      const m = ev.msg.match(/(🐉|🦅)법상·([가-힣]+) 빙의 시작/);
+      const tMatch = ev.msg.match(/@([\d.]+)s/);
+      if (m) {
+        const name = m[2];
+        const startT = tMatch ? parseFloat(tMatch[1]) : ev.t;
+        pushTrigger({ t: startT, kind: name, label: `${m[1]}법상·${name} 20s`, dur: TRIG_DUR[name] || 20 });
+      }
+    } else if (ev.tag === 'OPT' && ev.msg.includes('🔮')) {
+      // 비술 발동 — "🔮{master}마주·{branch} 발동:..." 형식
+      const m = ev.msg.match(/🔮(분혼|식혼|탁천|악신|혼원|업화)마주·([무허진])/);
+      if (m) {
+        const masterKey = `${m[1]}마주`;
+        const dur = TRIG_DUR[masterKey] || 1;
+        pushTrigger({ t: ev.t, kind: masterKey, label: `${masterKey}·${m[2]} ${dur}s`, dur, branch: m[2] });
+      }
     }
     // 열산상태 / 검심통명 등 유파 효과 buff 는 BUF 이벤트에서 처리
   }
@@ -323,6 +347,22 @@ const TRIGGER_STYLE = {
   염양: { bg: 'bg-red-500', icon: '🔥', ring: 'ring-red-300' },
   열산상태: { bg: 'bg-orange-500', icon: '🔥', ring: 'ring-orange-300' },
   검심통명: { bg: 'bg-cyan-500', icon: '🗡', ring: 'ring-cyan-300' },
+  // 비술 — 마주별 색 구분 + 🔮 아이콘
+  분혼마주: { bg: 'bg-fuchsia-600', icon: '🔮', ring: 'ring-fuchsia-300' },
+  악신마주: { bg: 'bg-rose-600', icon: '🔮', ring: 'ring-rose-300' },
+  업화마주: { bg: 'bg-amber-600', icon: '🔮', ring: 'ring-amber-300' },
+  탁천마주: { bg: 'bg-violet-600', icon: '🔮', ring: 'ring-violet-300' },
+  식혼마주: { bg: 'bg-pink-600', icon: '🔮', ring: 'ring-pink-300' },
+  혼원마주: { bg: 'bg-indigo-600', icon: '🔮', ring: 'ring-indigo-300' },
+  // 법상 — 용 (cyan), 새 (rose/amber)
+  청교룡: { bg: 'bg-cyan-700', icon: '🐉', ring: 'ring-cyan-300' },
+  적난새: { bg: 'bg-rose-700', icon: '🦅', ring: 'ring-rose-300' },
+  청반룡: { bg: 'bg-cyan-600', icon: '🐉', ring: 'ring-cyan-300' },
+  금오:   { bg: 'bg-amber-700', icon: '🦅', ring: 'ring-amber-300' },
+  청룡:   { bg: 'bg-cyan-500', icon: '🐉', ring: 'ring-cyan-300' },
+  주작:   { bg: 'bg-rose-600', icon: '🦅', ring: 'ring-rose-300' },
+  진룡:   { bg: 'bg-cyan-400', icon: '🐉', ring: 'ring-cyan-300' },
+  봉황:   { bg: 'bg-rose-500', icon: '🦅', ring: 'ring-rose-300' },
 };
 const DEFAULT_TRIGGER_STYLE = { bg: 'bg-slate-500', icon: '✨', ring: 'ring-slate-300' };
 
@@ -525,14 +565,14 @@ export default function CastTimelineSummary({ events }) {
         </div>
 
 
-        {/* 유파 효과 (천검=균천, 천벌=청명, 염양/열산상태=열산 등) — 종류별 lane 분리 */}
+        {/* 효과 (유파 트리거 + 비술 발동 등) — 종류별 lane 분리 */}
         {triggers.length > 0 && (
           <div
             className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
             style={{ height: `${Math.max(1, triggerLaneCount) * 22 + 8}px` }}
           >
             <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
-              유파 효과
+              효과
             </div>
             {triggers.map((tg, i) => {
               const style = TRIGGER_STYLE[tg.kind] || DEFAULT_TRIGGER_STYLE;
@@ -557,13 +597,13 @@ export default function CastTimelineSummary({ events }) {
                     }}
                   >
                     <span className="text-[11px] text-white font-semibold truncate">
-                      {style.icon} {tg.kind}{countLabel} ·{dur}s
+                      {style.icon} {tg.kind}{tg.branch ? `·${tg.branch}` : ''}{countLabel} ·{dur}s
                     </span>
                     <div
                       className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
                     >
                       <div className="text-xs font-bold text-orange-300 mb-1">
-                        {style.icon} {tg.kind}{count > 1 ? ` ×${count}회 발동` : ''}
+                        {style.icon} {tg.kind}{tg.branch ? `·${tg.branch}` : ''}{count > 1 ? ` ×${count}회 발동` : ''}
                       </div>
                       <div className="text-[11px] text-slate-400 font-mono mb-2">
                         ⏱ {tg.t.toFixed(1)}s 발동 · 지속 {dur}초
