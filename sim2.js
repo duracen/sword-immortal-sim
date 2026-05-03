@@ -46,6 +46,9 @@ const CFG = {
   // 신통 본 피해 계수 보너스 (+X percentage points) — 모든 신통 기본 피해에 덧셈
   // 예: baseCoef 135%에 +200 보너스 → 335% × ATK
   신통계수보너스: 200,
+  // 합체기 유파 (균천/열산/청명/주술) 신통 추가 보너스 (+X percentage points)
+  // 본 신통 기본 피해에 신통계수보너스 위에 추가로 덧셈됨
+  합체기보너스: 100,
   // === 불씨 (운명의 궁궐 상) 세트 효과 ===
   // 총 9슬롯. 개수별 최대 급수 효과 적용 (성급 조건 생략).
   // 자동 탐색은 계산 생략, 수동 시뮬에서만 opts.불씨 전달.
@@ -741,8 +744,13 @@ function dealDamage(state, base, opts = {}) {
   // 신통 본 피해 계수 보너스 (CFG.신통계수보너스) — 본 신통 기본 피해에만 덧셈 적용
   // 분신 (_isClone) 은 base 가 raw 로 들어옴 → 보너스 적용 (본체와 동일 계수)
   // _skipShintongBonus: 멀티히트 decay emit 의 hit 2+ 에서 보너스 중복 방지
-  if (isShintong && CFG.신통계수보너스 && !opts._skipShintongBonus) {
-    base = base + CFG.신통계수보너스;
+  if (isShintong && !opts._skipShintongBonus) {
+    if (CFG.신통계수보너스) base = base + CFG.신통계수보너스;
+    // 합체기 유파 추가 보너스 (CFG.합체기보너스) — 균천/열산/청명/주술 의 본 신통만
+    if (CFG.합체기보너스 && state._activeCast) {
+      const _activeFam = SK[state._activeCast] && SK[state._activeCast].fam;
+      if (_activeFam && 합체기_유파.has(_activeFam)) base = base + CFG.합체기보너스;
+    }
   }
 
   // === 분신 (_isClone): 본체의 N% stat 모델 — baseATK/baseCR/baseCD 만 N% 로 스케일 ===
@@ -1455,7 +1463,15 @@ function recordMultiHit(state, basePct, hits, opts) {
   const _opts = opts || {};
   // type 미지정 + non-absolute → '신통' (dealDamage 와 동일 로직). 신통일 때만 보너스 합산.
   const _isShintong = !_opts.type && !_opts.absolute && !_opts.noSkillMult;
-  const fullBase = (_isShintong && CFG.신통계수보너스) ? basePct + CFG.신통계수보너스 : basePct;
+  let fullBase = basePct;
+  if (_isShintong) {
+    if (CFG.신통계수보너스) fullBase += CFG.신통계수보너스;
+    // 합체기 유파 추가 보너스
+    if (CFG.합체기보너스 && state._activeCast) {
+      const _activeFam = SK[state._activeCast] && SK[state._activeCast].fam;
+      if (_activeFam && 합체기_유파.has(_activeFam)) fullBase += CFG.합체기보너스;
+    }
+  }
   const prevSrc = state._currentSource;
   for (let i = 0; i < hits; i++) {
     const factor = Math.pow(DECAY_RATE, i);
@@ -3685,6 +3701,9 @@ const FAMILIES = {
   주술: { cat: '백족', skills: ['주술·제율','주술·태사','주술·경선','주술·유식'] },
   사해: { cat: '백족', skills: ['사해·열천','사해·폭우','사해·업련','사해·명화'] },
 };
+
+// 합체기 유파 — 본 신통 데미지에 CFG.합체기보너스 추가 적용 (균천/열산/청명/주술)
+const 합체기_유파 = new Set(['균천', '열산', '청명', '주술']);
 
 // ======================== 빌드 시뮬 ========================
 function selectSkillsForBuild(build) {
