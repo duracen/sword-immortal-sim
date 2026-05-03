@@ -156,11 +156,13 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                       {pool.map((name) => {
                         const on = chosen.includes(name);
                         const raw = SK[name]?.main ?? 0;
-                        // 합체기 유파 (균천/열산/청명/주술) 는 추가 보너스 (CFG.합체기보너스)
+                        // 합체기 (균천/열산/청명/주술) +CFG.합체기보너스
+                        // 반허기 (참허/형혹/옥추/사해) +CFG.반허기보너스
                         const _skFam = SK[name]?.fam;
-                        const _합체기보너스 = (['균천', '열산', '청명', '주술'].includes(_skFam))
-                          ? (CFG?.합체기보너스 || 0) : 0;
-                        const withBonus = raw + (CFG?.신통계수보너스 || 0) + _합체기보너스;
+                        const _tierBonus =
+                          ['균천','열산','청명','주술'].includes(_skFam) ? (CFG?.합체기보너스 || 0) :
+                          ['참허','형혹','옥추','사해'].includes(_skFam) ? (CFG?.반허기보너스 || 0) : 0;
+                        const withBonus = raw + (CFG?.신통계수보너스 || 0) + _tierBonus;
                         const order = on ? Object.values(skillSel).flat().indexOf(name) : -1;
                         const opts = SKILL_OPTIONS[name] || null;
                         const hasOpts = opts && Object.keys(opts).length > 0;
