@@ -137,7 +137,11 @@ export default function SkillPoolPicker({ pool, onChange }) {
                       {skills.map((name) => {
                         const on = pool.has(name);
                         const raw = SK[name]?.main ?? 0;
-                        const withBonus = raw + (CFG?.신통계수보너스 || 0);
+                        // 합체기 유파 (균천/열산/청명/주술) 는 추가 보너스
+                        const _skFam = SK[name]?.fam;
+                        const _합체기보너스 = (['균천', '열산', '청명', '주술'].includes(_skFam))
+                          ? (CFG?.합체기보너스 || 0) : 0;
+                        const withBonus = raw + (CFG?.신통계수보너스 || 0) + _합체기보너스;
                         const opts = SKILL_OPTIONS[name] || null;
                         const hasOpts = opts && Object.keys(opts).length > 0;
                         const castDesc = SKILL_CAST_DESC[name] || null;
