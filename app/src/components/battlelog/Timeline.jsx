@@ -26,9 +26,21 @@ function Row({ ev }) {
 }
 
 export default function Timeline({ events, filter }) {
+  // 시간순 정렬 + 같은 t 면 emit 순서 유지 (stable sort).
+  // catch-up (경정/천벌/봉황/주작 등) 이 state.t 임시 변경하여 trace emit 하므로
+  // emit 순서가 시간 순서와 어긋남 → 정렬해서 일관된 시간 흐름으로 표시.
+  const sorted = useMemo(() => {
+    const indexed = events.map((e, i) => ({ ...e, _idx: i }));
+    indexed.sort((a, b) => {
+      const dt = (a.t ?? 0) - (b.t ?? 0);
+      if (Math.abs(dt) > 1e-6) return dt;
+      return a._idx - b._idx;  // 같은 t 면 emit 순서 유지
+    });
+    return indexed;
+  }, [events]);
   const filtered = useMemo(
-    () => (filter ? events.filter((e) => filter[e.tag]) : events),
-    [events, filter]
+    () => (filter ? sorted.filter((e) => filter[e.tag]) : sorted),
+    [sorted, filter]
   );
   if (filtered.length === 0) {
     return <div className="text-slate-500 text-sm p-4">표시할 이벤트가 없습니다.</div>;
