@@ -247,11 +247,21 @@ export function useRanking() {
       const fam = SK[n].fam;
       poolPerFam[fam] = (poolPerFam[fam] || 0) + 1;
     }
-    // 구조(= fam 분포)의 총 신통 조합 수 = ∏ C(poolPerFam[fam], slots)
+    // 구조(= fam 분포)의 총 신통 조합 수 = ∏ C(가용 skill 수, slots)
+    // strictSkillMin 적용 — worker.js 의 skillCombosForStructure 와 동일한 filter 사용해야
+    // subProgress 의 subTotal 이 worker 가 실제 yield 하는 수와 일치 (끝까지 진행되어 보임).
     function totalCombosForStructure(build) {
       if (!build) return 1;
       let total = 1;
-      for (const [fam, slots] of build) total *= C(poolPerFam[fam] || 0, slots);
+      for (const [fam, slots] of build) {
+        if (strictSkillMin) {
+          const famSkills = (FAMILIES[fam]?.skills || []).filter((n) => config.skillPool.includes(n));
+          const avail = famSkills.filter((n) => !strictSkillMin[n] || strictSkillMin[n] <= slots).length;
+          total *= C(avail, slots);
+        } else {
+          total *= C(poolPerFam[fam] || 0, slots);
+        }
+      }
       return total;
     }
 
