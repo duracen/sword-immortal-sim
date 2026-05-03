@@ -564,23 +564,18 @@ function prune작열(s) {
   s.작열Arr = s.작열Arr.filter(st => st.endT > s.t);
   s.stacks.작열 = s.작열Arr.length;
 }
-// 작열 DoT 전용 피해 계산 — 부여 시점에 스냅샷. (3 layer 모델 적용)
-// 적용 계층: 공격력 → 피해 증가(통합) → 최종 피해 → 방어 감면.
-// 피해 증가 = 입히는피해 + 유형별(작열DoT) — 같은 layer 에서 덧셈 합산.
-// 제외: 피해 심화(신통 전용 ampM), 크리(DoT 는 크리 X).
-function dealDotDamage(s, basePct) {
+// 작열 DoT 1tick 데미지 — 매 tick 호출 시점의 현재 buff/debuff 상태로 계산.
+// 자기 buff (atk, dealt, type, final) + 적 상태 (defDebuff, 화상, 염양방감) 모두 시점별 재계산.
+// 제외: 피해 심화 (신통 전용 ampM), 크리 (DoT 는 크리 X).
+function _작열tickDmg(s, basePct) {
   const atkBuff = sumBuffAtk(s);
   const typePct = sumTypeDmg(s, '작열DoT');            // 이화 slot×10 + [열염] 50 등
   const dealtPct = sumBuffDealt(s, false);             // 입히는 피해 (신통 아님)
-  const finalPct = (s.nextCast && s.nextCast.finalDmg) || 0;  // 최종 피해 (nextCast 버프)
+  const finalPct = (s.nextCast && s.nextCast.finalDmg) || 0;
   const rawBase = basePct * CFG.baseATK / 100;
-  // 통합 피해 증가 — dealt + type (DoT 는 신통 아님)
   const totalDmgPct = dealtPct + typePct;
-  let dmg = rawBase
-    * (1 + atkBuff / 100)
-    * (1 + totalDmgPct / 100)
-    * (1 + finalPct / 100);
-  // 방어 감소 디버프 합산: 화상 + 염양방감 + 스킬별 defDebuff 버프
+  let dmg = rawBase * (1 + atkBuff / 100) * (1 + totalDmgPct / 100) * (1 + finalPct / 100);
+  // 방어 감면 (적 상태)
   let defMult = CFG.defReduction;
   let 감소 = 0;
   if ((s.catSlots.화염 || 0) >= 2) {
@@ -591,24 +586,26 @@ function dealDotDamage(s, basePct) {
   감소 += (s.염양방감 || 0) * 10;
   감소 += sumBuffDefDebuff(s);
   감소 = Math.min(감소, 100);
-  if (감소 > 0) {
-    defMult = CFG.defReduction + (1 - CFG.defReduction) * (감소 / 100);
-  }
+  if (감소 > 0) defMult = CFG.defReduction + (1 - CFG.defReduction) * (감소 / 100);
   return dmg * defMult;
 }
-// 작열 스택 추가 — 부여 시점에 1틱 피해를 스냅샷 계산하여 저장
+// (legacy 외부 호출자 호환용)
+function dealDotDamage(s, basePct) {
+  return _작열tickDmg(s, basePct);
+}
+// 작열 스택 추가 — basePct/dur 만 저장. tick 시점에 buff/debuff 재계산.
 function add작열(s, basePct, dur = 20, source) {
   // [열염]·[이화 유파 slot] 은 sumTypeDmg('작열DoT') 에서 자동 합산됨 — 중복 방지 위해 여기선 안 곱함
-  const tickDmg = dealDotDamage(s, basePct / dur); // 1초분 피해 스냅샷 (atk + type + dealt + final + def)
+  const tickBasePct = basePct / dur; // 1초분 base % (실제 데미지는 tick 시 재계산)
   const src = source || s._currentSource || '?';
-  s.작열Arr.push({ tickDmg, startT: s.t, endT: s.t + dur, source: src });
+  s.작열Arr.push({ tickBasePct, startT: s.t, endT: s.t + dur, source: src });
   s.stacks.작열 = s.작열Arr.length;
   // 약화 중첩 증가 → 마상 트리거
   if (typeof 마상트리거 === 'function') 마상트리거(s);
   // 작열 중첩 증가 → 현화 트리거
   if (typeof 현화트리거 === 'function') 현화트리거(s);
 }
-// 작열 틱 처리 — 매 초 호출, 살아있는 스택마다 스냅샷된 1틱 피해 적용
+// 작열 틱 처리 — 매 초 호출. 매 tick 시점의 모든 buff/debuff 재계산하여 1tick 피해 emit.
 function tick작열(s) {
   prune작열(s);
   if (s.작열Arr.length === 0) return;
@@ -619,11 +616,12 @@ function tick작열(s) {
     s._lastIsCrit = null; // DoT는 크리 없음
     s._lastCR = undefined;
     s._lastCD = undefined;
-    record(s, st.tickDmg);
+    // 매 tick 마다 현재 buff/debuff 로 재계산
+    record(s, _작열tickDmg(s, st.tickBasePct));
   }
   s._currentSource = prevSrc;
 }
-// 작열 스택 FIFO 소모 — 폭파용. 잔여 틱 피해(남은 초 × 스냅샷 tickDmg) 합산 반환
+// 작열 스택 FIFO 소모 — 폭파용. 잔여 틱 피해 (폭파 시점 buff/debuff 로 재계산) 합산 반환
 function consume작열(s, n) {
   prune작열(s);
   let remainingDot = 0;
@@ -631,7 +629,8 @@ function consume작열(s, n) {
   for (let i = 0; i < toConsume; i++) {
     const st = s.작열Arr.shift();
     const remainSec = Math.max(0, st.endT - s.t);
-    remainingDot += st.tickDmg * remainSec;
+    // 폭파 시점의 현재 buff/debuff 로 잔여 tick 데미지 재계산
+    remainingDot += _작열tickDmg(s, st.tickBasePct) * remainSec;
   }
   s.stacks.작열 = s.작열Arr.length;
   return remainingDot;
@@ -4270,10 +4269,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // [청명·투진 → 경정] 지속 트리거: 투진 buff 동안 (20s) 2초마다 천뢰 15% — 최대 10회
         // 봉황/주작 패턴 — 정확한 fire 시각마다 state.t 임시 변경하여 emit (시점별 buff snapshot 적용)
         // 발동 시각: 경정시작+2, +4, ..., +20
+        // ⚠️ while 조건은 savedT (cast 시각) 기준 — state.t 는 iter 안에서 변경되므로 사용 X
         if (state.경정End > 0 && (state.경정누적 || 0) < 10) {
-          const 경정마지막발사T = state.경정시작 + (state.경정누적 || 0) * 2;
           const savedT_경정 = state.t;
-          while ((state.t - 경정마지막발사T) >= 2 && state.경정누적 < 10
+          while (state.경정누적 < 10
+                 && (state.경정시작 + (state.경정누적 + 1) * 2) <= savedT_경정
                  && (state.경정시작 + (state.경정누적 + 1) * 2) <= state.경정End) {
             state.경정누적 = (state.경정누적 || 0) + 1;
             state.t = state.경정시작 + state.경정누적 * 2;  // 정확한 fire 시각
@@ -4281,17 +4281,15 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             천뢰발동(state, state.famSlots, 15, '투진·경정');
           }
           state.t = savedT_경정;  // 원래 cast 시각 복원
-          // 만료 도달 + 10회 모두 발동 시 비활성화
-          if (state.경정누적 >= 10 || state.t >= state.경정End) {
+          if (state.경정누적 >= 10 || savedT_경정 >= state.경정End) {
             state.경정End = 0;
           }
         }
         // [천벌] (청명 유파 — 뇌인 4중첩 획득 시): 10초간 초당 천뢰 30% × 10회
-        // 봉황/주작/경정 패턴 — 정확한 fire 시각 (시작+1, +2, ..., +10) 마다 emit
         if (state.천벌End > 0 && (state.천벌누적 || 0) < 10) {
-          const 천벌마지막발사T = state.천벌시작 + (state.천벌누적 || 0);
           const savedT_천벌 = state.t;
-          while ((state.t - 천벌마지막발사T) >= 1 && state.천벌누적 < 10
+          while (state.천벌누적 < 10
+                 && (state.천벌시작 + (state.천벌누적 + 1)) <= savedT_천벌
                  && (state.천벌시작 + (state.천벌누적 + 1)) <= state.천벌End) {
             state.천벌누적 = (state.천벌누적 || 0) + 1;
             state.t = state.천벌시작 + state.천벌누적;
@@ -4302,11 +4300,10 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (state.천벌누적 >= 10) state.천벌End = 0;
         }
         // [업화 비술 무/허] 10초간 초당 1tick × 10회 — DoT 분산 emit
-        // 무: 32.4%/tick (총 324%) / 허: 16.2%/tick (총 162%)
         if (state.업화DoTEnd > 0 && (state.업화DoT누적 || 0) < 10) {
-          const 업화마지막발사T = state.업화DoT시작 + (state.업화DoT누적 || 0);
           const savedT_업화 = state.t;
-          while ((state.t - 업화마지막발사T) >= 1 && state.업화DoT누적 < 10
+          while (state.업화DoT누적 < 10
+                 && (state.업화DoT시작 + (state.업화DoT누적 + 1)) <= savedT_업화
                  && (state.업화DoT시작 + (state.업화DoT누적 + 1)) <= state.업화DoTEnd) {
             state.업화DoT누적 = (state.업화DoT누적 || 0) + 1;
             state.t = state.업화DoT시작 + state.업화DoT누적;
