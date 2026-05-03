@@ -51,6 +51,8 @@ const CFG = {
   합체기보너스: 100,
   // 반허기 유파 (참허/형혹/옥추/사해) 신통 추가 보너스
   반허기보너스: 50,
+  // 인간계 유파 (복룡/중광/이화/천로/오뢰/신소) 신통 추가 보너스
+  인간계보너스: 30,
   // === 불씨 (운명의 궁궐 상) 세트 효과 ===
   // 총 9슬롯. 개수별 최대 급수 효과 적용 (성급 조건 생략).
   // 자동 탐색은 계산 생략, 수동 시뮬에서만 opts.불씨 전달.
@@ -748,12 +750,13 @@ function dealDamage(state, base, opts = {}) {
   // _skipShintongBonus: 멀티히트 decay emit 의 hit 2+ 에서 보너스 중복 방지
   if (isShintong && !opts._skipShintongBonus) {
     if (CFG.신통계수보너스) base = base + CFG.신통계수보너스;
-    // 합체기/반허기 유파 추가 보너스 — 본 신통의 fam 에 따라 자동 적용
+    // 합체기/반허기/인간계 유파 추가 보너스 — 본 신통의 fam 에 따라 자동 적용
     if (state._activeCast) {
       const _activeFam = SK[state._activeCast] && SK[state._activeCast].fam;
       if (_activeFam) {
         if (CFG.합체기보너스 && 합체기_유파.has(_activeFam)) base = base + CFG.합체기보너스;
         else if (CFG.반허기보너스 && 반허기_유파.has(_activeFam)) base = base + CFG.반허기보너스;
+        else if (CFG.인간계보너스 && 인간계_유파.has(_activeFam)) base = base + CFG.인간계보너스;
       }
     }
   }
@@ -1471,12 +1474,13 @@ function recordMultiHit(state, basePct, hits, opts) {
   let fullBase = basePct;
   if (_isShintong) {
     if (CFG.신통계수보너스) fullBase += CFG.신통계수보너스;
-    // 합체기/반허기 유파 추가 보너스
+    // 합체기/반허기/인간계 유파 추가 보너스
     if (state._activeCast) {
       const _activeFam = SK[state._activeCast] && SK[state._activeCast].fam;
       if (_activeFam) {
         if (CFG.합체기보너스 && 합체기_유파.has(_activeFam)) fullBase += CFG.합체기보너스;
         else if (CFG.반허기보너스 && 반허기_유파.has(_activeFam)) fullBase += CFG.반허기보너스;
+        else if (CFG.인간계보너스 && 인간계_유파.has(_activeFam)) fullBase += CFG.인간계보너스;
       }
     }
   }
@@ -3714,6 +3718,8 @@ const FAMILIES = {
 const 합체기_유파 = new Set(['균천', '열산', '청명', '주술']);
 // 반허기 유파 — 본 신통 데미지에 CFG.반허기보너스 추가 적용 (참허/형혹/옥추/사해)
 const 반허기_유파 = new Set(['참허', '형혹', '옥추', '사해']);
+// 인간계 유파 — 본 신통 데미지에 CFG.인간계보너스 추가 적용 (복룡/중광/이화/천로/오뢰/신소)
+const 인간계_유파 = new Set(['복룡', '중광', '이화', '천로', '오뢰', '신소']);
 
 // ======================== 빌드 시뮬 ========================
 function selectSkillsForBuild(build) {

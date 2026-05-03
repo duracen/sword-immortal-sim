@@ -175,7 +175,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">1. 신통 풀 선택</h2>
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
-          ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 균천/열산/청명/주술 +{CFG.합체기보너스 || 0} · 반허기 참허/형혹/옥추/사해 +{CFG.반허기보너스 || 0}).
+          ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 +{CFG.합체기보너스 || 0} · 반허기 +{CFG.반허기보너스 || 0} · 인간계 +{CFG.인간계보너스 || 0}).
           <br />
           ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억.
         </div>
@@ -713,7 +713,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
           )}
         </div>
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
-          ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 균천/열산/청명/주술 +{CFG.합체기보너스 || 0} · 반허기 참허/형혹/옥추/사해 +{CFG.반허기보너스 || 0}).
+          ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 +{CFG.합체기보너스 || 0} · 반허기 +{CFG.반허기보너스 || 0} · 인간계 +{CFG.인간계보너스 || 0}).
           <br />
           ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억.
         </div>

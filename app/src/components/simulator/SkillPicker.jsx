@@ -158,10 +158,12 @@ export default function SkillPicker({ skillSel, onChange, maxTotal = 6 }) {
                         const raw = SK[name]?.main ?? 0;
                         // 합체기 (균천/열산/청명/주술) +CFG.합체기보너스
                         // 반허기 (참허/형혹/옥추/사해) +CFG.반허기보너스
+                        // 인간계 (복룡/중광/이화/천로/오뢰/신소) +CFG.인간계보너스
                         const _skFam = SK[name]?.fam;
                         const _tierBonus =
                           ['균천','열산','청명','주술'].includes(_skFam) ? (CFG?.합체기보너스 || 0) :
-                          ['참허','형혹','옥추','사해'].includes(_skFam) ? (CFG?.반허기보너스 || 0) : 0;
+                          ['참허','형혹','옥추','사해'].includes(_skFam) ? (CFG?.반허기보너스 || 0) :
+                          ['복룡','중광','이화','천로','오뢰','신소'].includes(_skFam) ? (CFG?.인간계보너스 || 0) : 0;
                         const withBonus = raw + (CFG?.신통계수보너스 || 0) + _tierBonus;
                         const order = on ? Object.values(skillSel).flat().indexOf(name) : -1;
                         const opts = SKILL_OPTIONS[name] || null;
