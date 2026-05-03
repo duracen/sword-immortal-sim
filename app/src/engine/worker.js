@@ -161,7 +161,11 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
     }
   }
   let counter = 0;
-  const YIELD_EVERY = onOrderProgress ? 100 : 2000;
+  // 시간 기반 emit — sim 속도와 무관하게 일정 간격으로 진행 갱신
+  // 50ms 마다 (≈20fps) emit. 너무 자주 (예: 10ms) 하면 postMessage overhead 증가.
+  const EMIT_INTERVAL_MS = onOrderProgress ? 50 : 200;
+  let lastEmitT = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const _now = () => ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
   // 법보 고정: 위치만 고정 (7/8/9). 법보 순서는 permute → 6! × 3! = 4,320
   // 법보 위치+순서 모두 고정: 6! × 1 = 720
   // 법보 미고정: 모든 위치 interleave → 9! = 362,880
@@ -180,11 +184,12 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
         const sc = simulateBuild(build, treasures, full, skillsOverride, simOpts).cumByMarker[markerIdx];
         consider(sc, full);
         counter++;
-        if (counter % YIELD_EVERY === 0) {
+        if (_now() - lastEmitT >= EMIT_INTERVAL_MS) {
           if (onOrderProgress) onOrderProgress(counter, PERM_TOTAL, topResults[0]?.score ?? -1);
           if (onTopUpdate && topChanged) { onTopUpdate(topResults); topChanged = false; }
           await new Promise((r) => setTimeout(r, 0));
           if (isCancelled()) return { topResults, cancelled: true };
+          lastEmitT = _now();
         }
       }
     }
@@ -196,11 +201,12 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
       const sc = simulateBuild(build, treasures, perm, skillsOverride, simOpts).cumByMarker[markerIdx];
       consider(sc, perm);
       counter++;
-      if (counter % YIELD_EVERY === 0) {
+      if (_now() - lastEmitT >= EMIT_INTERVAL_MS) {
         if (onOrderProgress) onOrderProgress(counter, PERM_TOTAL, topResults[0]?.score ?? -1);
         if (onTopUpdate && topChanged) { onTopUpdate(topResults); topChanged = false; }
         await new Promise((r) => setTimeout(r, 0));
         if (isCancelled()) return { topResults, cancelled: true };
+        lastEmitT = _now();
       }
     }
   }
@@ -429,7 +435,8 @@ async function optimizeBuild(build, skillsOverride, markerIdx, fixedTreasures, i
   const treasureCombos = fixedTreasures
     ? (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : [FIXED_TREASURES])
     : (G_TREASURE_POOL && G_TREASURE_POOL.length >= 3 ? enumerateTreasures(G_TREASURE_POOL) : enumerateTreasures());
-  const PERM_PER_TREASURE = fixedTreasures ? 4320 : 362880;
+  // 법보 위치 고정 + 순서 고정: 6! = 720 / 법보 위치 고정 + 순서 미고정: 6!×3! = 4320 / 법보 미고정: 9! = 362880
+  const PERM_PER_TREASURE = fixedTreasures ? (G_FIXED_TR_ORDER ? 720 : 4320) : 362880;
   const GRAND_TOTAL = treasureCombos.length * PERM_PER_TREASURE;
   let treasureIdx = 0;
   // 전체 top K across treasure combos: { score, ord, bestTr }[]
@@ -523,7 +530,6 @@ self.onmessage = async (e) => {
   try {
     await handleMessage(e);
   } catch (err) {
-    console.error('[worker] unhandled error:', err);
     self.postMessage({ type: 'workerError', error: String(err?.stack || err), workerId: (e.data?.config?.workerId ?? -1) });
   }
 };
@@ -745,17 +751,14 @@ async function handleMessage(e) {
       };
 
       let evalRes;
-      const _evalT0 = Date.now();
-      // 진행 중 빌드 main thread 로 알림 (디버그 — 어디서 멈추는지 확인용)
-      self.postMessage({ type: 'workerDebug', workerId, msg: `START: ${bd.label} (${bd.skills.map(s=>s.name).join('+')})` });
       try {
         evalRes = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass1Optimize, orderTopK, onOrderProgress, onPartialTop);
-        self.postMessage({ type: 'workerDebug', workerId, msg: `END: ${bd.label} (${Date.now() - _evalT0}ms, results=${(evalRes.results||[]).length})` });
+        // 빌드 평가 종료 후 macrotask yield — main thread 가 마지막 emit 을 별도 frame
+        // 에서 처리한 후 다음 빌드 시작 메시지를 받도록. setTimeout(0) ≈ 1ms 라 worker
+        // 진행 속도엔 거의 영향 없음.
+        await new Promise((r) => setTimeout(r, 0));
       } catch (err) {
         // 단일 빌드 평가 중 에러 (예: simulateBuild 내부 안전장치 throw) — 빌드 skip 후 다음 진행
-        const skipMsg = `[worker] build evaluation skipped: ${bd.label} (${bd.skills.map(s=>s.name).join('+')}) — ${err.message}`;
-        console.warn(skipMsg);
-        self.postMessage({ type: 'workerDebug', workerId, msg: skipMsg });
         validProcessed++;
         // skip 시에도 subProgress 진행바를 4320/4320 으로 마무리해서 멈춰 보이는 것 방지
         const _PERM = fixedTreasures ? 4320 : 362880;
@@ -877,13 +880,9 @@ async function handleMessage(e) {
         });
       };
       let refined;
-      const _p2T0 = Date.now();
-      self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 START: ${bd.label} (${i+1}/${topK.length})` });
       try {
         refined = await evaluateSkillCombo(bd, markerIdx, fixedTreasures, () => cancelled, pass2Optimize, 1, onPass2OrderProgress);
-        self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 END: ${bd.label} (${Date.now()-_p2T0}ms)` });
       } catch (err) {
-        self.postMessage({ type: 'workerDebug', workerId, msg: `PASS2 SKIP: ${bd.label} — ${err.message}` });
         continue;
       }
       if (refined.cancelled) { self.postMessage({ type: 'cancelled' }); return; }

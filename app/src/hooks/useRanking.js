@@ -361,14 +361,12 @@ export function useRanking() {
       workersRef.current.push(w);
       // 워커 내부 예외 (OOM 등) 를 메인 쓰레드로 올림 — 흰화면 대신 에러 메시지를 표시.
       w.onerror = (err) => {
-        console.error('ranking worker error:', err);
         setError(`탐색 중 오류: ${err.message || err.filename || '알 수 없는 오류'} — 신통 풀을 줄여 주세요.`);
         setRunning(false);
         workersRef.current.forEach((ww) => ww.terminate());
         workersRef.current = [];
       };
       w.onmessageerror = (err) => {
-        console.error('ranking worker message error:', err);
         setError('워커 메시지 디코딩 실패 — 브라우저 콘솔을 확인해 주세요.');
         setRunning(false);
       };
@@ -408,8 +406,14 @@ export function useRanking() {
           const structTotal = totalCombosForStructure(msg.buildStructure);
           setSubProgress((prev) => {
             const prevRow = prev[idx] || {};
-            // 신통조합 바뀌면 orderDone 0 리셋 (새 빌드의 onOrderProgress 도착 전까지 멈춰 보이는 문제 해결)
-            // msg.orderDone 명시적으로 오면 그 값 사용, 아니면 — skillChanged 시 0, 그렇지 않으면 이전값 유지
+            // 직전 빌드가 100% 미만 (예: 200/4320) 인 채 다음 빌드 진입 시:
+            //   진행바가 끝까지 안 가고 점프하는 인상 → 새 빌드 첫 메시지에서 이전 row 의 orderDone
+            //   이 orderTotal 미만이면 100% 로 채워서 보여준 뒤 다음 빌드로 넘어가도록 처리.
+            //   (실제 sim 은 4320 회 다 돌지만, 마지막 emit 후 다음 빌드 첫 emit 까지 시간이 짧아
+            //    시각적으로 4320 도달이 안 보이던 문제 — 시각 hold)
+            // setTimeout hold 제거 — ETA 계산 진동 + sim 표시 timing 부정확 우려
+            // 대신 worker 측에서 빌드 사이 macrotask yield 로 처리 (main thread 가 4320 메시지를
+            // 별도 frame 에서 처리할 시간 확보). useRanking 측에선 단순 갱신만.
             const orderDone = (msg.orderDone != null)
               ? msg.orderDone
               : (skillChanged ? 0 : (prevRow.orderDone ?? null));
@@ -456,9 +460,8 @@ export function useRanking() {
             setRunning(false);
           }
         } else if (msg.type === 'workerDebug') {
-          console.log(`[worker ${msg.workerId}] ${msg.msg}`);
+          // 디버그 메시지 — 콘솔 출력 안 함 (메모리 절약)
         } else if (msg.type === 'workerError') {
-          console.error('[useRanking] worker reported error:', msg.error);
           setError(`워커 ${idx + 1} 내부 에러: ${msg.error}`);
           setRunning(false);
           workersRef.current.forEach((ww) => ww.terminate());
