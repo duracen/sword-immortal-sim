@@ -102,6 +102,10 @@ function newState() {
     응현발동: 0,
     // 청명·투진 [경정] 지속 트리거: 투진 buff 동안 2초마다 천뢰 15% × 최대 10회
     경정End: 0, 경정시작: 0, 경정누적: 0,
+    // 청명 유파 [천벌] (뇌인 4중첩 트리거): 10초간 초당 천뢰 30% × 10회
+    천벌End: 0, 천벌시작: 0, 천벌누적: 0,
+    // 업화 비술 무/허: 10초간 초당 DoT × 10회
+    업화DoTEnd: 0, 업화DoT시작: 0, 업화DoT누적: 0, 업화DoT단위: 0, 업화DoT브랜치: '',
     // 중광·육요 [검광] 지속 트리거 (30s, 시전 시마다 23% 호무)
     검광End: 0,
     명화End: 0,
@@ -2333,12 +2337,15 @@ function 뇌인획득(s) {
   if (!famActive(s, '청명')) return;
   // 원문: "임의의 신통으로 적을 명중 시 뇌인 1중첩 획득" — 매 신통 cast 마다 +1
   addStackTTL(s, '뇌인', 1, 4, 20);
-  // 누적 카운터 — 4회 획득마다 천벌 상태 돌입 (10s간 초당 천뢰 30% 물리 × 10회)
+  // 누적 카운터 — 4회 획득마다 천벌 상태 돌입 (10s간 초당 천뢰 30% 물리 × 10회) — 시간 분산
   s.뇌인획득카운터 = (s.뇌인획득카운터 || 0) + 1;
   while (s.뇌인획득카운터 >= 4) {
     s.뇌인획득카운터 -= 4;
-    TRACE(s, 'OPT', `⚡천벌 상태 돌입 (뇌인 4중첩 획득): 10초 동안 초당 천뢰 30% × 10회`);
-    for (let i = 0; i < 10; i++) 천뢰발동(s, s.famSlots.청명, 30, '천벌(뇌인4)');
+    TRACE(s, 'OPT', `⚡천벌 상태 돌입 (뇌인 4중첩 획득): 10초 동안 초당 천뢰 30% × 10회 (시간 분산 emit)`);
+    // 한 번에 10발 emit X — main loop 의 catch-up 에서 1초 단위로 분산 emit
+    s.천벌End = s.t + 10;
+    s.천벌시작 = s.t;
+    s.천벌누적 = 0;
   }
 }
 SK['청명·투진'] = {
@@ -3245,19 +3252,21 @@ function 비술_발동_자기(state, master, branch) {
     if (branch === '진') state.악신_호신심화 = 33; // 호신강기 피해 심화 +33%
     TRACE(state, 'OPT', `🔮악신마주·${branch} 발동: 15초간 분신 추가 데미지 (본체 ${pct}% 속성, 스택 미공유)${branch === '진' ? ' + 호신강기 심화 +33%' : ''}`);
   } else if (master === '업화') {
-    // 5회 공격마다 10초 DoT — sim 단순화: cast 5회마다 즉시 데미지 추가
-    // 무: 1.5%/s × 10s = 15% max HP (or 자기 공격력 324%)
-    // 허: 0.75%/s × 10s = 7.5% max HP (162%) + 적 피해심화/감면 -11%
-    // 진: 자기 업화 멸신 (15회 피해마다 1.5% × 최대 10회 = 15% × 3명)
+    // 5회 공격마다 10초 DoT — 시간 분산 emit (매 초 1tick × 10초)
+    // 무: 1.5%/s × 10s = 15% max HP (or 자기 공격력 324% 합 → 32.4%/tick)
+    // 허: 0.75%/s × 10s = 7.5% max HP (162% 합 → 16.2%/tick) + 적 피해심화/감면 -11%
+    // 진: 자기 업화 멸신 (15회 피해마다 1.5% × 최대 10회 = 15% × 3명) — 카운터 기반, 별도 처리
     state.업화_누적공격 = (state.업화_누적공격 || 0) + 1;
     if (state.업화_누적공격 >= 5) {
       state.업화_누적공격 = 0;
-      const pct = branch === '무' ? 324 : (branch === '허' ? 162 : 324);
-      TRACE(state, 'OPT', `🔮업화마주·${branch} 발동: 10초 DoT ${pct}% 공격력`);
-      const prev = state._currentSource;
-      state._currentSource = `업화마주·${branch}`;
-      record(state, dealDamage(state, pct, { noSkillMult: true }));
-      state._currentSource = prev;
+      const totalPct = branch === '무' ? 324 : (branch === '허' ? 162 : 324);
+      TRACE(state, 'OPT', `🔮업화마주·${branch} 발동: 10초 DoT 총 ${totalPct}% 공격력 (1초 1tick × 10회 분산 emit)`);
+      // 한 번에 emit X — main loop catch-up 에서 매 초 tick 분산
+      state.업화DoTEnd = state.t + 10;
+      state.업화DoT시작 = state.t;
+      state.업화DoT누적 = 0;
+      state.업화DoT단위 = totalPct / 10;
+      state.업화DoT브랜치 = branch;
       if (branch === '허') {
         // 적 피해 심화/감면 -11% (10초)
         applyBuff(state, '업화허_적약화', { defDebuff: 11 }, 10);
@@ -4276,6 +4285,36 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (state.경정누적 >= 10 || state.t >= state.경정End) {
             state.경정End = 0;
           }
+        }
+        // [천벌] (청명 유파 — 뇌인 4중첩 획득 시): 10초간 초당 천뢰 30% × 10회
+        // 봉황/주작/경정 패턴 — 정확한 fire 시각 (시작+1, +2, ..., +10) 마다 emit
+        if (state.천벌End > 0 && (state.천벌누적 || 0) < 10) {
+          const 천벌마지막발사T = state.천벌시작 + (state.천벌누적 || 0);
+          const savedT_천벌 = state.t;
+          while ((state.t - 천벌마지막발사T) >= 1 && state.천벌누적 < 10
+                 && (state.천벌시작 + (state.천벌누적 + 1)) <= state.천벌End) {
+            state.천벌누적 = (state.천벌누적 || 0) + 1;
+            state.t = state.천벌시작 + state.천벌누적;
+            state._currentSource = '천벌(뇌인4)';
+            천뢰발동(state, state.famSlots.청명 || 0, 30, '천벌(뇌인4)');
+          }
+          state.t = savedT_천벌;
+          if (state.천벌누적 >= 10) state.천벌End = 0;
+        }
+        // [업화 비술 무/허] 10초간 초당 1tick × 10회 — DoT 분산 emit
+        // 무: 32.4%/tick (총 324%) / 허: 16.2%/tick (총 162%)
+        if (state.업화DoTEnd > 0 && (state.업화DoT누적 || 0) < 10) {
+          const 업화마지막발사T = state.업화DoT시작 + (state.업화DoT누적 || 0);
+          const savedT_업화 = state.t;
+          while ((state.t - 업화마지막발사T) >= 1 && state.업화DoT누적 < 10
+                 && (state.업화DoT시작 + (state.업화DoT누적 + 1)) <= state.업화DoTEnd) {
+            state.업화DoT누적 = (state.업화DoT누적 || 0) + 1;
+            state.t = state.업화DoT시작 + state.업화DoT누적;
+            state._currentSource = `업화마주·${state.업화DoT브랜치}(DoT)`;
+            record(state, dealDamage(state, state.업화DoT단위, { noSkillMult: true }), `업화마주·${state.업화DoT브랜치}(DoT tick ${state.업화DoT누적}/10)`);
+          }
+          state.t = savedT_업화;
+          if (state.업화DoT누적 >= 10) state.업화DoTEnd = 0;
         }
         // [분광] 지속 트리거: 30s간 신통 시전마다 검심 +1 + 24% 호무 (max tier)
         if (state.famSlots.참허 && state.분광End > 0 && state.t < state.분광End - 0.1) {
