@@ -757,6 +757,17 @@ async function handleMessage(e) {
         console.warn(skipMsg);
         self.postMessage({ type: 'workerDebug', workerId, msg: skipMsg });
         validProcessed++;
+        // skip 시에도 subProgress 진행바를 4320/4320 으로 마무리해서 멈춰 보이는 것 방지
+        const _PERM = fixedTreasures ? 4320 : 362880;
+        self.postMessage({
+          type: 'subProgress', workerId,
+          buildIdx: validProcessed - 1,
+          buildLabel: bd.label + ' (오류 skip)',
+          buildStructure: bd.build, skillLabel,
+          subDone: structIdx, subTotal: structTotal,
+          orderDone: _PERM, orderTotal: _PERM,
+          bestSoFar: -1,
+        });
         self.postMessage({
           type: 'progress', current: validProcessed, total: totalCombos, validProcessed,
           buildLabel: bd.label + ' (오류 skip)', buildStructure: bd.build, skillLabel,

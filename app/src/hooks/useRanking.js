@@ -394,29 +394,43 @@ export function useRanking() {
         } else if (msg.type === 'subProgress') {
           // 구조(label) 가 바뀌면 카운터 리셋 + 새 구조 시작; 같은 구조 내 같은 skillLabel은 중복 카운트하지 않음.
           const cur = perWorkerStructureRef.current[idx];
+          let skillChanged = false;
           if (cur.label !== msg.buildLabel) {
             cur.label = msg.buildLabel;
             cur.count = 1;
             cur.curSkill = msg.skillLabel;
+            skillChanged = true;
           } else if (cur.curSkill !== msg.skillLabel) {
             cur.count += 1;
             cur.curSkill = msg.skillLabel;
+            skillChanged = true;
           }
           const structTotal = totalCombosForStructure(msg.buildStructure);
-          setSubProgress((prev) => ({
-            ...prev,
-            [idx]: {
-              buildLabel: msg.buildLabel,
-              skillLabel: msg.skillLabel,
-              subDone: msg.subDone,
-              subTotal: msg.subTotal,
-              bestSoFar: msg.bestSoFar,
-              structIdx: cur.count,
-              structTotal,
-              orderDone: msg.orderDone ?? null,
-              orderTotal: msg.orderTotal ?? null,
-            },
-          }));
+          setSubProgress((prev) => {
+            const prevRow = prev[idx] || {};
+            // 신통조합 바뀌면 orderDone 0 리셋 (새 빌드의 onOrderProgress 도착 전까지 멈춰 보이는 문제 해결)
+            // msg.orderDone 명시적으로 오면 그 값 사용, 아니면 — skillChanged 시 0, 그렇지 않으면 이전값 유지
+            const orderDone = (msg.orderDone != null)
+              ? msg.orderDone
+              : (skillChanged ? 0 : (prevRow.orderDone ?? null));
+            const orderTotal = (msg.orderTotal != null)
+              ? msg.orderTotal
+              : (skillChanged ? null : (prevRow.orderTotal ?? null));
+            return {
+              ...prev,
+              [idx]: {
+                buildLabel: msg.buildLabel,
+                skillLabel: msg.skillLabel,
+                subDone: msg.subDone,
+                subTotal: msg.subTotal,
+                bestSoFar: msg.bestSoFar,
+                structIdx: cur.count,
+                structTotal,
+                orderDone,
+                orderTotal,
+              },
+            };
+          });
         } else if (msg.type === 'done') {
           perWorkerProgressRef.current[idx] = msg.consumed ?? 0;
           perWorkerValidRef.current[idx] = msg.validProcessed ?? 0;
