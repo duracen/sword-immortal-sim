@@ -1,5 +1,5 @@
 import { FAMILIES, FAMILIES_BY_CAT, CATEGORIES, SK, CFG } from '../../engine';
-import { SKILL_OPTIONS, FAMILY_EFFECTS, CAT_LAW_BODY, FAMILY_TIER, sortFamsByTier } from '../../utils/skillOptions';
+import { SKILL_OPTIONS, SKILL_CAST_DESC, FAMILY_EFFECTS, CAT_LAW_BODY, FAMILY_TIER, sortFamsByTier } from '../../utils/skillOptions';
 import HoverTooltip from '../common/HoverTooltip';
 
 // pool: Set<string> of skill names
@@ -140,25 +140,35 @@ export default function SkillPoolPicker({ pool, onChange }) {
                         const withBonus = raw + (CFG?.신통계수보너스 || 0);
                         const opts = SKILL_OPTIONS[name] || null;
                         const hasOpts = opts && Object.keys(opts).length > 0;
+                        const castDesc = SKILL_CAST_DESC[name] || null;
                         const shortName = name.includes('·') ? name.split('·')[1] : name;
                         return (
                           <HoverTooltip
                             key={name}
                             className="border-yellow-600"
                             maxWidth={384}
-                            content={hasOpts ? (
+                            content={(hasOpts || castDesc) ? (
                               <>
                                 <div className="text-xs font-bold text-yellow-300 mb-2">
                                   ▶ {name} <span className="text-slate-400 font-normal">· 공격력 {withBonus}%</span>
                                 </div>
-                                <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
-                                  {Object.entries(opts).map(([opt, d]) => (
-                                    <div key={opt}>
-                                      <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
-                                      <span className="text-slate-300">{d}</span>
-                                    </div>
-                                  ))}
-                                </div>
+                                {castDesc && (
+                                  <div className="mb-2 pb-2 border-b border-slate-700">
+                                    <div className="text-[10px] text-slate-400 mb-0.5">신통 효과 (재사용 32초 / 공통 5초)</div>
+                                    <div className="text-[12px] text-slate-200 leading-relaxed">{castDesc}</div>
+                                  </div>
+                                )}
+                                {hasOpts && (
+                                  <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
+                                    <div className="text-[10px] text-slate-400 mb-0.5">연공 효과 (max tier 수치 적용)</div>
+                                    {Object.entries(opts).map(([opt, d]) => (
+                                      <div key={opt}>
+                                        <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
+                                        <span className="text-slate-300">{d}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </>
                             ) : null}
                           >

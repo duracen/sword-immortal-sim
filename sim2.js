@@ -87,8 +87,6 @@ function newState() {
     buffs: [],            // {key, atk, cr, cd, dmgMult, endT, maxStacks, stackCount}
     // 다음 캐스트 한정 강화
     nextCast: { cr: 0, cd: 0, inc: 0, finalDmg: 0, finalCR: 0, finalCD: 0 },
-    // 분신용 별도 nextCast 큐 — 분신도 자기 옵션 발동 (현미/풍세/파정/성류) 받음
-    cloneNextCast: { cr: 0, cd: 0, inc: 0, finalDmg: 0, finalCR: 0, finalCD: 0 },
     // 장착 컨텍스트 (법체/유파 효과 참조용)
     build: null,          // [[famKey, slots], ...]
     famSlots: {},         // 유파별 슬롯
@@ -223,22 +221,14 @@ function newState() {
 }
 
 // ======================== 유틸 ========================
-// nextCast 헬퍼: 본체 + (악신 active 시) 분신 양쪽 큐에 동시 적용
+// nextCast 헬퍼: 본체 큐에 적용 (분신은 본체 데미지 × N% 이므로 자체 큐 X)
 // 옵션 발동 시 (현미/풍세/파정/성류 등) cast() 함수에서 사용
 function addNextCast(state, field, delta) {
   state.nextCast[field] = (state.nextCast[field] || 0) + delta;
-  // 악신 active 일 때만 분신도 받음 (분신이 존재해야 의미 있음)
-  if (state.악신EndT > state.t && state.악신Pct > 0) {
-    state.cloneNextCast[field] = (state.cloneNextCast[field] || 0) + delta;
-  }
 }
 function pushNextCastSource(state, src) {
   state._nextCastSources = state._nextCastSources || [];
   state._nextCastSources.push(src);
-  if (state.악신EndT > state.t && state.악신Pct > 0) {
-    state._cloneNextCastSources = state._cloneNextCastSources || [];
-    state._cloneNextCastSources.push(src);
-  }
 }
 
 // 대상의 현재 HP 비율 (호신강기 제외한 본체 HP 풀 기준)
@@ -568,19 +558,21 @@ function prune작열(s) {
   s.작열Arr = s.작열Arr.filter(st => st.endT > s.t);
   s.stacks.작열 = s.작열Arr.length;
 }
-// 작열 DoT 전용 피해 계산 — 부여 시점에 스냅샷.
-// 적용 계층: 공격력, 유형별(작열DoT), 입히는피해, 최종피해, 방어감면.
-// 제외: 신통 피해 심화(신통 전용), 크리(DoT는 크리 X).
+// 작열 DoT 전용 피해 계산 — 부여 시점에 스냅샷. (3 layer 모델 적용)
+// 적용 계층: 공격력 → 피해 증가(통합) → 최종 피해 → 방어 감면.
+// 피해 증가 = 입히는피해 + 유형별(작열DoT) — 같은 layer 에서 덧셈 합산.
+// 제외: 피해 심화(신통 전용 ampM), 크리(DoT 는 크리 X).
 function dealDotDamage(s, basePct) {
   const atkBuff = sumBuffAtk(s);
   const typePct = sumTypeDmg(s, '작열DoT');            // 이화 slot×10 + [열염] 50 등
   const dealtPct = sumBuffDealt(s, false);             // 입히는 피해 (신통 아님)
   const finalPct = (s.nextCast && s.nextCast.finalDmg) || 0;  // 최종 피해 (nextCast 버프)
   const rawBase = basePct * CFG.baseATK / 100;
+  // 통합 피해 증가 — dealt + type (DoT 는 신통 아님)
+  const totalDmgPct = dealtPct + typePct;
   let dmg = rawBase
     * (1 + atkBuff / 100)
-    * (1 + typePct / 100)
-    * (1 + dealtPct / 100)
+    * (1 + totalDmgPct / 100)
     * (1 + finalPct / 100);
   // 방어 감소 디버프 합산: 화상 + 염양방감 + 스킬별 defDebuff 버프
   let defMult = CFG.defReduction;
@@ -728,31 +720,18 @@ function dealDamage(state, base, opts = {}) {
   const type = opts.type || (opts.absolute ? '법보절대' : (opts.noSkillMult ? '기타' : '신통'));
   const isShintong = (type === '신통');
   // 신통 본 피해 계수 보너스 (CFG.신통계수보너스) — 본 신통 기본 피해에만 덧셈 적용
-  // _isClone 호출은 이미 보정된 base 를 받으므로 중복 적용 방지
-  if (isShintong && CFG.신통계수보너스 && !opts._isClone) {
+  // 분신 (_isClone) 은 base 가 raw 로 들어옴 → 보너스 적용 (본체와 동일 계수)
+  if (isShintong && CFG.신통계수보너스) {
     base = base + CFG.신통계수보너스;
   }
 
-  // === 분신 (_isClone): 본체와 별개이지만 적의 상태 (defDebuff/crRes) 는 영향 받음 ===
-  // 분신이 받는 것: 현재 cast 의 self-buff (능허/통찰 등) + 자기 cloneNextCast + 적의 defDebuff/crRes
-  // 분신이 안 받는 것: 본체의 stack (옥추/뇌인/검심), 본체 nextCast, 이전 cast self-buff
-  // (디버프는 동일 옵션이 갱신만 되어 누적되지 않음. 적에게 걸린 -30% 는 본체/분신 모두 동일하게 영향)
-  let _swappedBuffs = null, _swappedStacks = null, _swappedJin = null;
-  let _cloneFullDefDebuff = 0, _cloneFullCrRes = 0;
-  if (opts._isClone) {
-    // swap 전 — 적의 현재 상태 (모든 활성 buff 의 defDebuff/crRes 합) 미리 저장
-    _cloneFullDefDebuff = sumBuffDefDebuff(state);
-    _cloneFullCrRes = sumBuffCritRes(state);
-    const castStartKeys = state._castStartBuffKeys || new Set();
-    // 현재 cast 가 추가한 buff 만 유지 (cast 시작 전 부터 있던 buff 는 제외)
-    _swappedBuffs = state.buffs;
-    state.buffs = state.buffs.filter(b => !castStartKeys.has(b.key));
-    // stack 미공유 — 모두 0 으로
-    _swappedStacks = { ...state.stacks };
-    Object.keys(state.stacks).forEach(k => { state.stacks[k] = 0; });
-    _swappedJin = state.진마성화스택;
-    state.진마성화스택 = 0;
-  }
+  // === 분신 (_isClone): 본체의 N% stat 모델 — baseATK/baseCR/baseCD 만 N% 로 스케일 ===
+  // buff 들 (atkM, shintongM, cr buffs, cd buffs) 은 본체와 동일하게 적용
+  // 결과: 분신 데미지 = base × (baseATK × N%) × atkM × ... × cMult(cr×N%, cd×N%) × defMult
+  const _clonePct = opts._isClone ? (state.악신Pct || 0) : 0;
+  const _baseATK = opts._isClone ? (CFG.baseATK * _clonePct / 100) : CFG.baseATK;
+  const _baseCR = opts._isClone ? (CFG.baseCR * _clonePct / 100) : CFG.baseCR;
+  const _baseCD = opts._isClone ? (CFG.baseCD * _clonePct / 100) : CFG.baseCD;
 
   // === 공격력 (scope: 모든 피해) ===
   const atkBuff = sumBuffAtk(state, opts) + (opts.localAtk || 0);
@@ -762,9 +741,7 @@ function dealDamage(state, base, opts = {}) {
 
   // === 신통 피해 증가 (scope: 신통만) ===
   // nextCast.inc: "다음번에 입히는 신통 피해 +N%" (e.g., 옥추·소명 [성류] 옥추4+ 시 15%)
-  // 분신 (_isClone) 은 자기 cloneNextCast 큐 사용 (본체 nextCast 와 별개)
-  const ncSource = opts._isClone ? state.cloneNextCast : state.nextCast;
-  const ncInc = ncSource.inc || 0;
+  const ncInc = state.nextCast.inc || 0;
   const shintongPct = isShintong ? (sumShintongInc(state) + (opts.localInc || 0) + ncInc) : 0;
 
   // === 심화 피해 증가 (scope: 신통만) ===
@@ -773,36 +750,31 @@ function dealDamage(state, base, opts = {}) {
   // === 입히는 피해 증가 (scope: 모든 유형) ===
   let dealtPct = sumBuffDealt(state, isShintong, opts) + (opts.localDealt || 0);
   // 불씨 진무절화: 직전 2회 신통 시전 후 저장된 증가치 — 신통 본 피해만 소비
-  // 분신 (_isClone) 은 진무절화 미공유 — 소비 skip + dealtPct 미적용
-  if (isShintong && state.진무절화스택 > 0 && !opts._isClone) {
+  if (isShintong && state.진무절화스택 > 0) {
     dealtPct += state.진무절화스택;
     if (!state._진무절화소비) {
-      // 최초 소비 시점에 TRACE (사용되는 신통 시점에 바가 생기도록)
       TRACE(state, 'BUF', `🔼버프 [불씨 진무절화] 본 신통 입히는피해 +${state.진무절화스택}%`);
     }
     state._진무절화소비 = true;
   }
 
   // === nextCast (소비) ===
-  // 분신 (_isClone) 은 자기 cloneNextCast 큐 사용 — 분신 자신의 옵션 발동 (현미/풍세/성류/파정 등) 받음
   // 법상 damage (_noNextCast): 본체 nextCast 가로채지 않음 — 본체 다음 신통 전용
   const ncSkip = !!opts._noNextCast;
-  const ncCR = ncSkip ? 0 : (ncSource.cr || 0);
-  const ncFinalCR = ncSkip ? 0 : (ncSource.finalCR || 0);
-  const ncCD = ncSkip ? 0 : (ncSource.cd || 0);
-  const ncFinalCD = ncSkip ? 0 : (ncSource.finalCD || 0);
-  const ncFinalDmg = ncSkip ? 0 : (ncSource.finalDmg || 0);
+  const ncCR = ncSkip ? 0 : (state.nextCast.cr || 0);
+  const ncFinalCR = ncSkip ? 0 : (state.nextCast.finalCR || 0);
+  const ncCD = ncSkip ? 0 : (state.nextCast.cd || 0);
+  const ncFinalCD = ncSkip ? 0 : (state.nextCast.finalCD || 0);
+  const ncFinalDmg = ncSkip ? 0 : (state.nextCast.finalDmg || 0);
 
   // === 크리티컬 ===
-  // 분신은 cast self-buff (통찰 등) 의 cr/cd 는 받음. 본체 stack (뇌인) / nextCast 미공유
-  // crRes (치명타 저항 감소) 는 적의 상태 — 본체/분신 모두 영향 받음 (swap 전 합산값 사용)
   const ncApply = isShintong ? 1 : 0;
   const crIncPct = sumBuffCR(state, isShintong, opts) + (opts.localCR || 0) + ncCR * ncApply;
   const finalCRPct = (opts.localFinalCR || 0) + ncFinalCR * ncApply;
-  const crResPct = opts._isClone ? _cloneFullCrRes : sumBuffCritRes(state);
-  let cr = CFG.baseCR * (1 + crIncPct / 100) * (1 + finalCRPct / 100) * (1 + crResPct / 100);
+  const crResPct = sumBuffCritRes(state);
+  let cr = _baseCR * (1 + crIncPct / 100) * (1 + finalCRPct / 100) * (1 + crResPct / 100);
   const finalCDPct = (opts.localFinalCD || 0) + ncFinalCD * ncApply;
-  let cd = CFG.baseCD + sumBuffCD(state, isShintong, opts) + (opts.localCD || 0) + ncCD * ncApply + finalCDPct;
+  let cd = _baseCD + sumBuffCD(state, isShintong, opts) + (opts.localCD || 0) + ncCD * ncApply + finalCDPct;
   if (opts.forceCrit) cr = 100;
   let cMult, isCrit = null;
   if (opts.noCrit) cMult = 1;
@@ -810,9 +782,7 @@ function dealDamage(state, base, opts = {}) {
     const roll = Math.random() * 100;
     isCrit = roll < cr;
     cMult = isCrit ? cd / 100 : 1;
-    // cast별 crit 누적 (유뢰법체/순요/풍뢰/뇌정 등 다운스트림 트리거용)
-    // 분신 (_isClone) 은 본체 cast crit 카운트에 영향 X — 옥추 stack 트리거 등 부정확 방지
-    if (isCrit && !opts._isClone) {
+    if (isCrit) {
       state._castAnyCrit = true;
       state._castCritCount = (state._castCritCount || 0) + 1;
     }
@@ -821,33 +791,17 @@ function dealDamage(state, base, opts = {}) {
   }
 
   // === CONSUME nextCast (신통 시전만) ===
-  // 본체 / 분신 각자 자기 큐 (state.nextCast / state.cloneNextCast) 소비
-  if (isShintong) {
-    if (opts._isClone) {
-      // 분신 큐 소비
-      if (state._cloneNextCastSources && state._cloneNextCastSources.length > 0) {
-        state._consumedCloneNextCastSources = state._cloneNextCastSources.slice();
-        state._cloneNextCastSources = [];
-      }
-      state.cloneNextCast.cr = 0;
-      state.cloneNextCast.finalCR = 0;
-      state.cloneNextCast.cd = 0;
-      state.cloneNextCast.finalCD = 0;
-      state.cloneNextCast.finalDmg = 0;
-      state.cloneNextCast.inc = 0;
-    } else {
-      // 본체 큐 소비
-      if (state._nextCastSources && state._nextCastSources.length > 0) {
-        state._consumedNextCastSources = state._nextCastSources.slice();
-        state._nextCastSources = [];
-      }
-      state.nextCast.cr = 0;
-      state.nextCast.finalCR = 0;
-      state.nextCast.cd = 0;
-      state.nextCast.finalCD = 0;
-      state.nextCast.finalDmg = 0;
-      state.nextCast.inc = 0;
+  if (isShintong && !ncSkip) {
+    if (state._nextCastSources && state._nextCastSources.length > 0) {
+      state._consumedNextCastSources = state._nextCastSources.slice();
+      state._nextCastSources = [];
     }
+    state.nextCast.cr = 0;
+    state.nextCast.finalCR = 0;
+    state.nextCast.cd = 0;
+    state.nextCast.finalCD = 0;
+    state.nextCast.finalDmg = 0;
+    state.nextCast.inc = 0;
   }
 
   // === 최종 피해 (scope: 신통만) ===
@@ -859,14 +813,14 @@ function dealDamage(state, base, opts = {}) {
   const localFinalDmg = opts.localFinalDmg || 0;
   if (isShintong) {
     finalPct += ncFinalDmg + localFinalDmg;
-    if (state.catSlots.뇌전 >= 4 && !opts._isClone) {
+    if (state.catSlots.뇌전 >= 4) {
       const crEff = Math.min(cr, 100) / 100;
       // 랜덤 모드: isCrit 확정 기반 (crit 나면 full 20%, 아니면 0)
       // 기댓값 모드: crit 확률 × 20% 스케일
       유뢰법체Final = (CFG.randomCrit ? (isCrit ? 1 : 0) : crEff) * CFG.유뢰법체_계열4개_최종피해;
       finalPct += 유뢰법체Final;
     }
-    if (state.catSlots.화염 >= 4 && !opts._isClone) {
+    if (state.catSlots.화염 >= 4) {
       const 작열중첩 = state.stacks.작열 || CFG.현염법체_평균작열중첩;
       const 작열보너스 = Math.min(작열중첩, 9) * CFG.현염법체_작열당;
       현염법체Final = CFG.현염법체_기본 + 작열보너스;
@@ -874,9 +828,6 @@ function dealDamage(state, base, opts = {}) {
     }
   }
   // === 방어 감면 (대상측) ===
-  // defDebuff (둔검/검흔/파군/화상/염양 등) 는 적에게 걸린 디버프 — 본체/분신 모두 동일 영향
-  // 동일 옵션은 갱신만 (중첩 X) 되므로 적 방어 -30% 는 한 번만, 누구의 데미지든 그 상태에서 계산
-  // 분신은 swap 전에 미리 계산한 _cloneFullDefDebuff 사용 (이전 cast 의 defDebuff 까지 모두 포함)
   let defMult = 1;
   if (!opts.absolute && !opts.bypassDef) {
     defMult = CFG.defReduction;
@@ -887,7 +838,7 @@ function dealDamage(state, base, opts = {}) {
     }
     prune염양방감(state);
     감소 += (state.염양방감 || 0) * 10;
-    감소 += opts._isClone ? _cloneFullDefDebuff : sumBuffDefDebuff(state);
+    감소 += sumBuffDefDebuff(state);
     감소 = Math.min(감소, 100);
     if (감소 > 0) defMult = CFG.defReduction + (1 - CFG.defReduction) * (감소 / 100);
   }
@@ -896,29 +847,37 @@ function dealDamage(state, base, opts = {}) {
   state._lastCD = cd;
   state._lastIsCrit = isCrit;
 
-  // === 공격자 피해 공식 ===
-  //   base_damage × (1+공격력%) × (1+유형피해%) × (1+신통피해%) × (1+심화피해%) × (1+입히는피해%) × cMult × (1+최종피해%)
-  //   최종피해는 크리까지 다 끝난 뒤 마지막 단일 덧셈 배율
+  // === 공격자 피해 공식 (3 layer 모델) ===
+  //   게임 원문 큰 구분: 피해 증가 / 피해 심화 / 최종 피해
+  //   "피해 증가" 카테고리는 입히는 피해 + 신통 피해 + 유형별 피해 (천뢰/낙뢰/...) 가 모두
+  //   같은 layer 에서 덧셈 합산되어 (1 + total/100) 한 번만 곱해진다.
+  //
+  //   base × (1+공격력%) × (1+피해증가합%) × (1+피해심화%) × cMult × (1+최종피해%)
+  //
+  //   최종피해는 크리까지 끝난 뒤 마지막 단일 배율.
   const atkM       = 1 + atkBuff / 100;
-  const typeM      = 1 + typePct / 100;
-  const shintongM  = 1 + shintongPct / 100;
+  // 통합 피해 증가 — dealt(공통) + shintongInc(신통만) + typePct(해당 type 만)
+  // shintongPct/typePct 는 호출 시점에 isShintong/type 으로 이미 게이팅됨 (조건 안 맞으면 0)
+  const totalDmgPct = dealtPct + shintongPct + typePct;
+  const dmgM       = 1 + totalDmgPct / 100;
   const ampM       = 1 + ampPct / 100;
-  const dealtM     = 1 + dealtPct / 100;
   const fmM        = 1 + finalPct / 100;
   let attackerDmg;
   if (opts.absolute) {
     // 법보 절대값: base는 이미 절대 데미지값
-    attackerDmg = base * typeM * shintongM * ampM * dealtM * cMult * fmM;
+    attackerDmg = base * dmgM * ampM * cMult * fmM;
   } else {
-    const rawBase = base * CFG.baseATK / 100;
+    const rawBase = base * _baseATK / 100;
     const L1 = rawBase * atkM;        // × 공격력
-    const L2 = L1 * typeM;            // × 유형 피해 (천뢰/낙뢰/…)
-    const L3 = L2 * shintongM;        // × 신통 피해 (신통만)
-    const L4 = L3 * ampM;             // × 심화 피해 (신통만)
-    const L5 = L4 * dealtM;           // × 입히는 피해 (공통)
-    const L6 = L5 * cMult;            // × 크리기대값
-    attackerDmg = L6 * fmM;           // × 최종 피해 (신통만) ← 마지막
+    const L2 = L1 * dmgM;             // × 피해 증가 (입히는+신통+유형 합산)
+    const L3 = L2 * ampM;             // × 피해 심화
+    const L4 = L3 * cMult;            // × 크리기대값
+    attackerDmg = L4 * fmM;           // × 최종 피해 ← 마지막
   }
+  // 호환용 — breakdown / 외부 참조에서 사용될 수 있는 변수 (3 layer 통합 후에도 노출)
+  const dealtM = dmgM;          // legacy alias (구 breakdown 표시 호환)
+  const shintongM = 1;          // 흡수됨
+  const typeM = 1;              // 흡수됨
   const finalResult = attackerDmg * defMult;
 
   // breakdown (record()가 DMG 이후 출력)
@@ -939,35 +898,24 @@ function dealDamage(state, base, opts = {}) {
     cr: Math.min(cr, 100), cd, cMult,
     atkM, typeM, shintongM, ampM, dealtM, fmM, defMult,
     final: finalResult,
-    isClone: !!opts._isClone,
     isLaw: !!opts._isLawDamage,
   };
 
-  // === 분신 swap 복원 ===
-  if (opts._isClone) {
-    if (_swappedBuffs !== null) state.buffs = _swappedBuffs;
-    if (_swappedStacks !== null) state.stacks = _swappedStacks;
-    if (_swappedJin !== null) state.진마성화스택 = _swappedJin;
-  }
-
-  // === 악신 분신: 본체와 완전 별개 (C1: stat만 N%) → 별도 데미지 계산 ===
-  // dealDamage 안에서 _isClone 일 때 모든 buff/stack/nextCast/defDebuff 0 처리됨.
-  // 결과는 state._cloneDmgPending + _cloneBdPending 에 저장 → record() 가 별도 DMG TRACE + dmgEvent 로 emit.
-  // 분신은 본체 "신통" 사용을 모방 — 천뢰/낙뢰/작열/평타/법보 등 cascade trigger 에선 발동 X
-  if (!opts._isClone && isShintong && state.악신EndT > state.t && state.악신Pct > 0) {
-    // Save main bd 보존
+  // === 악신 분신: 본체의 N% stat (atk/cr/cd 만 N% 스케일, buff 는 본체와 동일) ===
+  // 스펙: "분신의 속성은 본체의 N%" — baseATK/baseCR/baseCD 만 N% 로 스케일
+  // 분신은 본체 "신통" 사용을 모방 — 천뢰/낙뢰/작열/평타/cascade trigger 에선 발동 X
+  if (!opts._isClone && isShintong && state.악신EndT > state.t && state.악신Pct > 0 && !opts._isLawDamage) {
+    // _isClone 으로 dealDamage 재호출 → baseATK/baseCR/baseCD 가 N% 로 스케일된 값으로 재계산
     const mainBd = state._lastBreakdown;
-    // 재계산 — _isClone 플래그 로 모든 buff 0 처리됨
     const cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
-    // 분신 breakdown 보존 (record() 에서 detailed breakdown 표시용)
-    const cloneBd = state._lastBreakdown;
-    cloneBd.cloneAmt = cloneFinal * (state.악신Pct / 100);
-    cloneBd.clonePct = state.악신Pct;
-    state._cloneBdPending = cloneBd;
-    // Restore main breakdown
-    state._lastBreakdown = mainBd;
-    // Pending damage
-    state._cloneDmgPending = (state._cloneDmgPending || 0) + cloneFinal * (state.악신Pct / 100);
+    state._cloneBdPending = {
+      ...state._lastBreakdown,
+      clonePct: state.악신Pct,
+      mainAmount: finalResult,
+      cloneAmount: cloneFinal,
+    };
+    state._lastBreakdown = mainBd; // 본체 breakdown 복원
+    state._cloneDmgPending = (state._cloneDmgPending || 0) + cloneFinal;
   }
 
   return finalResult;
@@ -1362,11 +1310,10 @@ function record(state, amount, source) {
     }
   }
   // 히트 카운터 tick (기본 1히트, 멀티히트 스킬은 _recordHits에 설정)
-  // 분신 damage (_isClone) 는 hit counter 증가 시키지 않음 (본체 동허/검영/열천 등 트리거 미공유)
   // 법상 damage 는 noSkillMult=true 라 type='기타' → hit counter 는 동작 (신통 type 만 일부 트리거)
   const hits = state._recordHits || 1;
   state._recordHits = 1; // 1회용 → 자동 리셋
-  if (hits > 0 && bd && !bd.isClone) tickHitCounters(state, hits);
+  if (hits > 0) tickHitCounters(state, hits);
   let critStr;
   if (state._lastIsCrit === true) {
     critStr = ` 💥CRIT (cd=${state._lastCD.toFixed(0)}%)`;
@@ -1395,32 +1342,19 @@ function record(state, amount, source) {
   else if (hpHit > 0) poolStr = ` [HP -${(hpHit/1e8).toFixed(2)}억]`;
   const poolRemStr = ` (shield=${((state.shieldRem||0)/1e8).toFixed(2)}억, hp=${((state.hpRem||0)/1e8).toFixed(2)}억)`;
   TRACE(state, 'DMG', `[${src}] +${amount.toFixed(0)}${critStr}  (누적 ${state.totalDmg.toFixed(0)})${poolStr}${poolRemStr}${activeStr}${breakdownStr}`);
-  // === 악신 분신: 본체 데미지 + TRACE 직후에 emit ===
-  // 본체의 activeCast (trigger 신통) 를 src 에 포함 → DamageBreakdown 에서 신통별 segment 분리 가능
-  // 적의 디버프 상태 (defDebuff/crRes) 는 본체 데미지 들어가면서 갱신되므로, 분신은 그 직후 상태에서 계산됨
+  // === 악신 분신: 본체 데미지 × N% (모든 buff/stack 동일하게 받은 후 N% 비율) ===
   if (state._cloneDmgPending && state._cloneDmgPending > 0) {
     const cloneAmt = state._cloneDmgPending;
     const branch = state.악신_branch || '?';
     const trigger = activeCast || src || '?';
     state.totalDmg = (state.totalDmg || 0) + cloneAmt;
     state.dmgEvents.push({ t: state.t, amt: cloneAmt, src: `악신마주·${branch}·분신(${trigger})`, activeCast });
-    // 분신 breakdown TRACE — 식 + 적용된 buff 표시
     const cloneBd = state._cloneBdPending;
     let cloneBreakdownStr = '';
     if (cloneBd) {
       const pct = cloneBd.clonePct || state.악신Pct;
-      const 분신atk = CFG.baseATK * pct / 100;
-      const parts = [];
-      parts.push(`base ${cloneBd.base.toFixed(0)}%`);
-      parts.push(`분신공격력 ${(분신atk/1e8).toFixed(2)}억 (baseATK ${(CFG.baseATK/1e8).toFixed(1)}억 × ${pct}%)`);
-      if (cloneBd.atkM > 1.001) parts.push(`atkM ${cloneBd.atkM.toFixed(2)} (atk+${cloneBd.atkBuff.toFixed(0)}%)`);
-      if (cloneBd.shintongM > 1.001) parts.push(`shintongM ${cloneBd.shintongM.toFixed(2)}`);
-      if (cloneBd.ampM > 1.001) parts.push(`ampM ${cloneBd.ampM.toFixed(2)}`);
-      if (cloneBd.dealtM > 1.001) parts.push(`dealtM ${cloneBd.dealtM.toFixed(2)}`);
-      parts.push(`cMult ${cloneBd.cMult.toFixed(2)}`);
-      if (cloneBd.fmM > 1.001) parts.push(`fmM ${cloneBd.fmM.toFixed(2)}`);
-      parts.push(`defMult ${cloneBd.defMult.toFixed(2)}`);
-      cloneBreakdownStr = `\n           └ 분신 식: ${parts.join(' × ')} (현재 cast 의 self-buff 만 적용, 본체 stack/nextCast/이전 buff 미공유)`;
+      const 본체dmg = cloneBd.mainAmount || 0;
+      cloneBreakdownStr = `\n           └ 분신 식: 본체 데미지 ${(본체dmg/1e8).toFixed(2)}억 × ${pct}% (분신 = 본체 stat 의 ${pct}%) = ${(cloneAmt/1e8).toFixed(2)}억`;
     }
     TRACE(state, 'DMG', `[🔮악신마주·${branch}·분신←${trigger}] +${cloneAmt.toFixed(0)}  (누적 ${state.totalDmg.toFixed(0)})${cloneBreakdownStr}`);
     state._cloneDmgPending = 0;
@@ -1431,20 +1365,23 @@ function record(state, amount, source) {
   // 명중 시 트리거이므로 DMG trace 후 발동. 단, 법보 cast 의 record 는 dealDamage 가 type 기본값 '신통' 으로
   // 처리되지만 사양상 '신통으로 명중 시' 가 아니므로 제외 (activeCast 가 '법보:' 로 시작하면 skip).
   // 분신 damage 는 본체 신통이 아니므로 법체4 트리거 X. 법상 damage 는 type='기타' 라 자동 제외.
-  if (bd && bd.type === '신통' && !bd.isClone && (state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)
+  if (bd && bd.type === '신통' && (state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)
       && !(state._activeCast && state._activeCast.startsWith('법보:'))) {
     applyBuff(state, '영검법체4', { atk: 20 }, 5);
   }
 }
 
-// 중복 명중/반사 감쇠: 이전 타의 90% 배수
-// N회 히트 총 배수: (1 - 0.9^N) / 0.1
-const DECAY_RATE = 0.1; // 90% 감폭 = 매 추가 타격이 이전의 10%만 유지
+// 중복 명중/반사 감쇠: 매 hit 이 이전의 10% 만 유지 (90% 감폭)
+// 예: 100 → 10 → 1 → 0.1 → ... 식
+// N회 히트 총 배수: (1 - 0.1^N) / 0.9
+const DECAY_RATE = 0.1; // 매 hit = 이전의 10% (90% 감소)
 function multiHitMult(n) {
   if (n <= 1) return 1;
   return (1 - Math.pow(DECAY_RATE, n)) / (1 - DECAY_RATE);
 }
-// 사전 계산: N=2→1.9, 3→2.71, 4→3.439, 5→4.0951, 6→4.68559
+// 사전 계산값 (DECAY_RATE = 0.1):
+//   N=2 → 1.10, N=3 → 1.110, N=4 → 1.1110, N=5 → 1.11110, N=6 → 1.11111
+//   N≥2 부터 거의 1.111 로 saturate (등비급수 합 1/0.9 = 1.1111... 수렴)
 const MH = { 2: multiHitMult(2), 3: multiHitMult(3), 4: multiHitMult(4), 5: multiHitMult(5), 6: multiHitMult(6) };
 
 // 신통별 히트 수 (멀티히트 — 옥추 스택 획득 등 per-hit 트리거에 사용)
@@ -2477,8 +2414,8 @@ SK['옥추·청사'] = {
     // [명뢰] 본 신통 최종 cr +30% (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 명뢰] 발동: 본 신통 최종 cr +30% (이번 cast 한정)`);
     applyBuff(s, '옥추청사_명뢰', {}, 1); // 타임라인 시각화용 1초 marker
-    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스)
-    record(s, dealDamage(s, 170 * MH[4] * 옥추유파Mult(s, slots), {
+    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 6회 반사 (스펙)
+    record(s, dealDamage(s, 170 * MH[6] * 옥추유파Mult(s, slots), {
       localInc: uc,
       localFinalCR: 30,
     }));
@@ -4114,7 +4051,14 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // 본 cast 데미지에 실제로 영향을 준 buff 만 표시 — post-dmg buff 는 다음 cast 위치 막대에서 확인 가능
         {
           // 기여 소스별 분해 (툴팁 용)
-          const bd = { atk: [], inc: [], amp: [], dealt: [], cr: [], cd: [], crRes: [], defDebuff: [], finalCR: [], finalCD: [], finalDmg: [] };
+          // cr/cd/dealt 는 일반(공통) 과 신통전용(shintongOnly/inc) 을 별도 field 로 분리해서 관리.
+          // 활성 버프 히트맵 호버 툴팁에서 "치명타율(신통)" / "치명타 배율(신통)" / "피해 증가(신통)" 시 신통분 따로 표시.
+          //   bd.dealt        — 일반 입히는 피해 (모든 type 적용)
+          //   bd.dealtShintong— 신통 전용 피해 증가 (= 기존 bd.inc 와 동의어)
+          //   bd.inc          — legacy alias (dealtShintong 와 같은 배열)
+          const bd = { atk: [], inc: [], amp: [], dealt: [], dealtShintong: [], cr: [], crShintong: [], cd: [], cdShintong: [], crRes: [], defDebuff: [], finalCR: [], finalCD: [], finalDmg: [] };
+          // bd.inc 는 호환을 위해 dealtShintong 와 같은 배열 참조 — 어느 쪽에 push 해도 동기화됨
+          bd.inc = bd.dealtShintong;
           const pushBuff = (field, key, val) => { if (val) bd[field].push({ src: key, val }); };
           // SNAP 용 buff/stack: record() 첫 호출 시점 캡처본 사용 (post-DMG 폭파/트리거 buff 제외)
           const snapBuffs = state._snapBuffsAtDmg || state.buffs;
@@ -4125,9 +4069,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             const stack = b.stackCount || 1;
             const label = (b.key || '?') + (stack > 1 ? `×${stack}` : '');
             if (b.atk) pushBuff('atk', label, b.atk * stack);
+            // cr/cd: shintongOnly 여부에 따라 별도 field — 활성버프 히트맵에서 행 분리
             if (b.cr && !b.shintongOnly) pushBuff('cr', label, b.cr * stack);
-            if (b.cr && b.shintongOnly) pushBuff('cr', label + '(신통)', b.cr * stack);
-            if (b.cd) pushBuff('cd', label, b.cd * stack);
+            if (b.cr && b.shintongOnly)  pushBuff('crShintong', label, b.cr * stack);
+            if (b.cd && !b.shintongOnly) pushBuff('cd', label, b.cd * stack);
+            if (b.cd && b.shintongOnly)  pushBuff('cdShintong', label, b.cd * stack);
             if (b.crRes) pushBuff('crRes', label, b.crRes * stack);
             if (b.defDebuff) pushBuff('defDebuff', label, b.defDebuff * stack);
             if (b.cat === 'amp' && b.dmgMult) pushBuff('amp', label, b.dmgMult * stack);
@@ -4136,8 +4082,9 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             if (b.dealt) pushBuff('dealt', label, b.dealt * stack);  // legacy fallback
           }
           // 유파/공명/불씨 패시브 — 스택은 snapStacks 기준
-          if (famActive(state, '청명') && snapStacks.뇌인) pushBuff('cr', `뇌인×${snapStacks.뇌인}`, snapStacks.뇌인 * 5);
-          if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('cr', `뇌전공명(${state.catSlots.뇌전}슬롯)`, 11);
+          // 뇌인/뇌전공명: 신통 전용 cr 보너스 → crShintong 으로
+          if (famActive(state, '청명') && snapStacks.뇌인) pushBuff('crShintong', `뇌인×${snapStacks.뇌인}`, snapStacks.뇌인 * 5);
+          if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('crShintong', `뇌전공명(${state.catSlots.뇌전}슬롯)`, 11);
           if (famActive(state, '옥추') && snapStacks.옥추) pushBuff('inc', `옥추×${snapStacks.옥추}`, snapStacks.옥추);
           if (famActive(state, '옥추') && snapStacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
           if (famActive(state, '신소') && snapStacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
@@ -4161,22 +4108,25 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             // 본 cast dealDamage 가 nextCast 를 소비했으므로 _snapNextCastConsumed 사용.
             const nc = state.nextCast || {};
             const ncSnap = state._snapNextCastConsumed || {};
-            // 다음 cast 용 (미소비) — 'nextCast' 라벨
-            if (nc.cr) pushBuff('cr', 'nextCast (다음)', nc.cr);
-            if (nc.cd) pushBuff('cd', 'nextCast (다음)', nc.cd);
+            // 다음 cast 용 (미소비) — 'nextCast' 라벨 — nextCast 는 다음 신통에만 적용 → 신통 전용
+            if (nc.cr) pushBuff('crShintong', 'nextCast (다음)', nc.cr);
+            if (nc.cd) pushBuff('cdShintong', 'nextCast (다음)', nc.cd);
             if (nc.finalCR) pushBuff('finalCR', 'nextCast (다음)', nc.finalCR);
             if (nc.finalCD) pushBuff('finalCD', 'nextCast (다음)', nc.finalCD);
             if (nc.finalDmg) pushBuff('finalDmg', 'nextCast (다음)', nc.finalDmg);
             // 본 cast 가 소비한 nextCast 분 — source 라벨로 표시
             if (ncSnap.consumedSources && ncSnap.consumedSources.length > 0) {
               for (const src of ncSnap.consumedSources) {
-                const field = src.field || 'finalDmg';
+                let field = src.field || 'finalDmg';
+                // nextCast 는 신통 전용 — cr/cd 는 신통 전용 field 로 매핑
+                if (field === 'cr') field = 'crShintong';
+                else if (field === 'cd') field = 'cdShintong';
                 pushBuff(field, src.key, src.pct || 0);
               }
             } else {
-              // source 없으면 fallback (구버전 호환)
-              if (ncSnap.cr) pushBuff('cr', 'nextCast (소비)', ncSnap.cr);
-              if (ncSnap.cd) pushBuff('cd', 'nextCast (소비)', ncSnap.cd);
+              // source 없으면 fallback (구버전 호환) — 모두 신통 전용
+              if (ncSnap.cr) pushBuff('crShintong', 'nextCast (소비)', ncSnap.cr);
+              if (ncSnap.cd) pushBuff('cdShintong', 'nextCast (소비)', ncSnap.cd);
               if (ncSnap.finalCR) pushBuff('finalCR', 'nextCast (소비)', ncSnap.finalCR);
               if (ncSnap.finalCD) pushBuff('finalCD', 'nextCast (소비)', ncSnap.finalCD);
               if (ncSnap.finalDmg) pushBuff('finalDmg', 'nextCast (소비)', ncSnap.finalDmg);
@@ -4187,10 +4137,32 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             }
           }
           // 합계
+          // UI 표시 규약 (활성 버프 히트맵):
+          //   "피해 증가(신통)"  : dealt+inc 합 (괄호 안에 inc 만 따로) — 사실 곱연산 layer 가 다르나 시각적 합산 표시
+          //   "치명타율(신통)"   : cr+crShintong 합 (괄호 안에 crShintong 만)
+          //   "치명타 배율(신통)": cd+cdShintong 합 (괄호 안에 cdShintong 만)
+          // → snap 에는 합산값 (cr/cd/dealt) 과 신통 전용 분 (crShintong/cdShintong/incShintong) 을 따로 노출.
           const sum = (arr) => arr.reduce((a, b) => a + b.val, 0);
+          const _crGen   = sum(bd.cr);
+          const _crShin  = sum(bd.crShintong);
+          const _cdGen   = sum(bd.cd);
+          const _cdShin  = sum(bd.cdShintong);
+          const _dealtGen = sum(bd.dealt);
+          const _incShin  = sum(bd.inc);
           const snap = {
-            atk: sum(bd.atk), inc: sum(bd.inc), amp: sum(bd.amp), dealt: sum(bd.dealt),
-            cr: sum(bd.cr), cd: sum(bd.cd), crRes: sum(bd.crRes), defDebuff: sum(bd.defDebuff),
+            atk: sum(bd.atk),
+            // 피해 증가: dealt+inc 합 (UI 메인값) / 신통 전용분 (괄호값) = inc
+            dealt: _dealtGen + _incShin,
+            dealtShintong: _incShin,
+            inc: _incShin,           // legacy: 그대로 노출
+            amp: sum(bd.amp),
+            // 치명타율: cr 일반 + 신통 합
+            cr: _crGen + _crShin,
+            crShintong: _crShin,
+            // 치명타 배율: cd 일반 + 신통 합
+            cd: _cdGen + _cdShin,
+            cdShintong: _cdShin,
+            crRes: sum(bd.crRes), defDebuff: sum(bd.defDebuff),
             finalCR: sum(bd.finalCR), finalCD: sum(bd.finalCD), finalDmg: sum(bd.finalDmg),
             bd,
           };

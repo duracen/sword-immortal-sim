@@ -842,15 +842,17 @@ export default function CastTimelineSummary({ events }) {
 
         {/* 활성 버프 수치 히트맵 — stat 별 행, cast 시점 별 셀 (색 농도 = 수치 크기) */}
         {casts.some((c) => c.snap) && (() => {
+          // 표시 규약: shintongKey 가 있으면 "메인값(신통값)" 형식 — sim2.js snap 의 cr/cd/dealt 는 이미 합산값,
+          // crShintong/cdShintong/dealtShintong 은 신통 전용분만 따로 노출됨.
+          // 행 순서: 피해(공격력 → 피해 증가 → 심화 → 최종 피해) → 크리(치명타율 → 최종치명 → 배율 → 최종배율) → 적 디버프
           const labels = [
             { key: 'atk', label: '공격력', baseRgb: '245, 158, 11' },         // amber-500
-            { key: 'inc', label: '신통 피해 증가', baseRgb: '239, 68, 68' },   // red-500
+            { key: 'dealt', label: '피해 증가(신통)', shintongKey: 'dealtShintong', baseRgb: '249, 115, 22' },  // orange-500
             { key: 'amp', label: '신통 피해 심화', baseRgb: '217, 70, 239' }, // fuchsia-500
-            { key: 'dealt', label: '입히는 피해', baseRgb: '249, 115, 22' },  // orange-500
             { key: 'finalDmg', label: '최종 피해', baseRgb: '244, 63, 94' },  // rose-500
-            { key: 'cr', label: '치명타율', baseRgb: '6, 182, 212' },          // cyan-500
-            { key: 'cd', label: '치명타 배율', baseRgb: '99, 102, 241' },     // indigo-500
+            { key: 'cr', label: '치명타율(신통)', shintongKey: 'crShintong', baseRgb: '6, 182, 212' },          // cyan-500
             { key: 'finalCR', label: '최종 치명타율', baseRgb: '8, 145, 178' }, // cyan-700
+            { key: 'cd', label: '치명타 배율(신통)', shintongKey: 'cdShintong', baseRgb: '99, 102, 241' },     // indigo-500
             { key: 'finalCD', label: '최종 치명타 배율', baseRgb: '79, 70, 229' }, // indigo-600
             { key: 'defDebuff', label: '방어력 감소', baseRgb: '139, 92, 246' }, // violet-500
             { key: 'crRes', label: '치명타 저항 감소', baseRgb: '20, 184, 166' }, // teal-500
@@ -884,6 +886,7 @@ export default function CastTimelineSummary({ events }) {
                   {casts.map((c, ci) => {
                     if (!c.snap) return null;
                     const v = c.snap[label.key];
+                    const vShin = label.shintongKey ? (c.snap[label.shintongKey] || 0) : 0;
                     if (!v || Math.abs(v) < 0.01) return null;
                     const startT = c.t;
                     const endT = casts[ci + 1] ? casts[ci + 1].t : maxT;
@@ -891,8 +894,15 @@ export default function CastTimelineSummary({ events }) {
                     const widthPct = ((endT - startT) / maxT) * 100;
                     const intensity = Math.abs(v) / (statMax[label.key] || 1);
                     const opacity = 0.25 + intensity * 0.65;
-                    const bd = c.snap.bd?.[label.key] || [];
-                    const bdLines = bd.map((r) => `${r.src}: +${r.val.toFixed(1)}`).join('\n');
+                    // 분해 (툴팁): 일반 + 신통 전용 buff 모두 표시
+                    const bdGen = c.snap.bd?.[label.key] || [];
+                    const bdShin = label.shintongKey ? (c.snap.bd?.[label.shintongKey] || []) : [];
+                    // 합치면서 신통 전용은 (신통) 마커 추가
+                    const bdAll = [
+                      ...bdGen.map((r) => ({ ...r, _shin: false })),
+                      ...bdShin.map((r) => ({ ...r, _shin: true })),
+                    ];
+                    const bdLines = bdAll.map((r) => `${r._shin ? '🔮 ' : '   '}${r.src}: +${r.val.toFixed(1)}${r._shin ? ' (신통)' : ''}`).join('\n');
                     const tipId = `${ci}-${label.key}`;
                     return (
                       <div
@@ -909,6 +919,8 @@ export default function CastTimelineSummary({ events }) {
                             id: tipId,
                             label: label.label,
                             value: v,
+                            valueShintong: vShin,
+                            hasShintong: !!label.shintongKey,
                             bdLines,
                             x: r.left + r.width / 2,
                             y: r.top,
@@ -916,7 +928,7 @@ export default function CastTimelineSummary({ events }) {
                         }}
                         onMouseLeave={() => setSnapTip((t) => (t?.id === tipId ? null : t))}
                       >
-                        {Math.round(v)}
+                        {label.shintongKey && vShin > 0.01 ? `${Math.round(v)}(${Math.round(vShin)})` : Math.round(v)}
                       </div>
                     );
                   })}
@@ -963,7 +975,11 @@ export default function CastTimelineSummary({ events }) {
               }}
             >
               <div className="text-xs font-bold text-slate-100 mb-1">
-                {snapTip.label} <span className="text-amber-300">+{snapTip.value.toFixed(2)}%</span>
+                {snapTip.label}{' '}
+                <span className="text-amber-300">+{snapTip.value.toFixed(2)}%</span>
+                {snapTip.hasShintong && snapTip.valueShintong > 0.01 && (
+                  <span className="text-purple-300 ml-1">(신통 +{snapTip.valueShintong.toFixed(2)}%)</span>
+                )}
               </div>
               {snapTip.bdLines ? (
                 <div className="text-[12px] text-slate-200 font-mono whitespace-pre-wrap leading-relaxed">
