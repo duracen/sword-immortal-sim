@@ -153,8 +153,13 @@ export default function DamageBreakdown({ dmgEvents }) {
     function normalizeSrc(raw) {
       if (!raw) return '?';
       if (raw.startsWith('작열(DoT)') || raw.startsWith('작열DoT') || raw === '작열DoT') return '작열 DoT (합계)';
-      // 다회 발동 옵션의 회차 suffix 제거 — 예: "진악(호무) 3/5" → "진악(호무)" (DamageBreakdown 통합 표시용)
-      return raw.replace(/\s+\d+\/\d+$/, '');
+      // 멀티히트 decay emit / expected-mode trigger 의 hit 식별자 제거 — 데미지 소스에선 hit 합산
+      //   "옥추·소명 (hit 1/6, ×1.000)" → "옥추·소명"
+      //   "천뢰←풍뢰(hit 2/5)" → "천뢰←풍뢰"
+      //   "뇌격(hit 3/5 ×0.50)" → "뇌격"
+      let s = raw.replace(/\s*\(hit \d+\/\d+[^)]*\)/g, '');
+      // 다회 발동 옵션의 회차 suffix 제거 — 예: "진악(호무) 3/5" → "진악(호무)"
+      return s.replace(/\s+\d+\/\d+$/, '');
     }
     // 기존 평면 그룹화 (테이블용)
     const bySrc = {};

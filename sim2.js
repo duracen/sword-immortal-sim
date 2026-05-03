@@ -100,6 +100,8 @@ function newState() {
     분광End: 0,
     응현End: 0,
     응현발동: 0,
+    // 청명·투진 [경정] 지속 트리거: 투진 buff 동안 2초마다 천뢰 15% × 최대 10회
+    경정End: 0, 경정시작: 0, 경정누적: 0,
     // 중광·육요 [검광] 지속 트리거 (30s, 시전 시마다 23% 호무)
     검광End: 0,
     명화End: 0,
@@ -684,9 +686,17 @@ function tickCritTriggers(state) {
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      const expectedCrits = Math.min(_hits * crEff, state.풍뢰남은);
-      record(state, dealDamage(state, base * expectedCrits, { type: '천뢰' }), '천뢰←풍뢰(crit)');
-      state.풍뢰남은 = Math.max(0, state.풍뢰남은 - expectedCrits);
+      // expected 모드 — 본 cast _hits 회 동안 hit 별 trigger 확률 = crEff
+      // hit 별 분리 emit: 각 hit 마다 base × crEff 데미지 (남은 cap 고려)
+      const totalEff = Math.min(_hits * crEff, state.풍뢰남은);
+      let remaining = totalEff;
+      for (let i = 0; i < _hits && remaining > 1e-9; i++) {
+        const useEff = Math.min(crEff, remaining);
+        const label = `천뢰←풍뢰(hit ${i+1}/${_hits}${useEff < crEff ? ` ×${(useEff/crEff).toFixed(2)}` : ''})`;
+        record(state, dealDamage(state, base * useEff, { type: '천뢰' }), label);
+        remaining -= useEff;
+      }
+      state.풍뢰남은 = Math.max(0, state.풍뢰남은 - totalEff);
     }
   }
   // 오뢰·용음 [뇌정+어뢰 max]: crit 시 15% 술법 낙뢰, 최대 12회
@@ -701,9 +711,15 @@ function tickCritTriggers(state) {
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      const expectedCrits = Math.min(_hits * crEff, state.뇌정남은);
-      record(state, dealDamage(state, 15 * expectedCrits, { type: '낙뢰' }), '낙뢰←뇌정(crit)');
-      state.뇌정남은 = Math.max(0, state.뇌정남은 - expectedCrits);
+      const totalEff = Math.min(_hits * crEff, state.뇌정남은);
+      let remaining = totalEff;
+      for (let i = 0; i < _hits && remaining > 1e-9; i++) {
+        const useEff = Math.min(crEff, remaining);
+        const label = `낙뢰←뇌정(hit ${i+1}/${_hits}${useEff < crEff ? ` ×${(useEff/crEff).toFixed(2)}` : ''})`;
+        record(state, dealDamage(state, 15 * useEff, { type: '낙뢰' }), label);
+        remaining -= useEff;
+      }
+      state.뇌정남은 = Math.max(0, state.뇌정남은 - totalEff);
     }
   }
 }
@@ -721,7 +737,8 @@ function dealDamage(state, base, opts = {}) {
   const isShintong = (type === '신통');
   // 신통 본 피해 계수 보너스 (CFG.신통계수보너스) — 본 신통 기본 피해에만 덧셈 적용
   // 분신 (_isClone) 은 base 가 raw 로 들어옴 → 보너스 적용 (본체와 동일 계수)
-  if (isShintong && CFG.신통계수보너스) {
+  // _skipShintongBonus: 멀티히트 decay emit 의 hit 2+ 에서 보너스 중복 방지
+  if (isShintong && CFG.신통계수보너스 && !opts._skipShintongBonus) {
     base = base + CFG.신통계수보너스;
   }
 
@@ -907,6 +924,10 @@ function dealDamage(state, base, opts = {}) {
   if (!opts._isClone && isShintong && state.악신EndT > state.t && state.악신Pct > 0 && !opts._isLawDamage) {
     // _isClone 으로 dealDamage 재호출 → baseATK/baseCR/baseCD 가 N% 로 스케일된 값으로 재계산
     const mainBd = state._lastBreakdown;
+    // 본체 trace 용 cr/cd/isCrit 보존 — 재귀 호출이 분신 값으로 덮어쓰는 것을 막음
+    const savedLastCR = state._lastCR;
+    const savedLastCD = state._lastCD;
+    const savedLastIsCrit = state._lastIsCrit;
     const cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
     state._cloneBdPending = {
       ...state._lastBreakdown,
@@ -915,6 +936,10 @@ function dealDamage(state, base, opts = {}) {
       cloneAmount: cloneFinal,
     };
     state._lastBreakdown = mainBd; // 본체 breakdown 복원
+    // 본체 trace 값 복원 — 직후 record() 의 DMG 라인에 본체 cr/cd 가 표시되도록
+    state._lastCR = savedLastCR;
+    state._lastCD = savedLastCD;
+    state._lastIsCrit = savedLastIsCrit;
     state._cloneDmgPending = (state._cloneDmgPending || 0) + cloneFinal;
   }
 
@@ -1244,6 +1269,19 @@ function record(state, amount, source) {
   }
   // 법체 상성 보너스 일괄 반영
   amount = amount * lawCounterMult(state);
+  // === 법상 금오 실체: "피해 10회 입힐 때마다" 카운터 — record() 마다 +1 ===
+  // src 가 '법상·' 로 시작하지 않을 때만 (자기 자신 화염깃털 제외)
+  const _src금오 = source || state._currentSource || '?';
+  const _금오실체 = CFG.법상 && CFG.법상.name === '금오'
+                  && (!CFG.법상.tiers || CFG.법상.tiers.실체);  // tiers 없으면 fallback 모두 true
+  if (_금오실체 && 법상_빙의active(state) && !_src금오.startsWith('법상·')) {
+    state.법상_금오피해카운터 = (state.법상_금오피해카운터 || 0) + 1;
+    if (state.법상_금오피해카운터 >= 10 && (state.t - state.법상_금오마지막발사T) >= 5) {
+      state.법상_금오피해카운터 = 0;
+      state.법상_금오마지막발사T = state.t;
+      state._금오발사pending = true;
+    }
+  }
   // 시간별 누적 피해 트래킹
   state.totalDmg = (state.totalDmg || 0) + amount;
   state.dmgEvents = state.dmgEvents || [];
@@ -1369,6 +1407,24 @@ function record(state, amount, source) {
       && !(state._activeCast && state._activeCast.startsWith('법보:'))) {
     applyBuff(state, '영검법체4', { atk: 20 }, 5);
   }
+  // === 법상 금오 실체 발사 (record 안에서 카운터 10 도달 시 pending 설정 → 여기서 emit) ===
+  // 재귀 안전: 화염깃털 record() 호출 시 src 가 '법상·' 시작이라 카운터 ++ 안 됨
+  if (state._금오발사pending) {
+    state._금오발사pending = false;
+    TRACE(state, 'OPT', `🦅금오·실체 발동 @${state.t.toFixed(1)}s: 피해 10회 누적 → 화염깃털 6개 (총 240% 확정, 5초 CD)`);
+    const prev금오 = state._currentSource;
+    state._currentSource = `법상·금오·화염깃털`;
+    record(state, 법상Dmg(state, 240, { bypassDef: true }), `법상·금오(화염깃털)`);
+    state._currentSource = prev금오;
+    const _금오의념 = CFG.법상 && (!CFG.법상.tiers || CFG.법상.tiers.의념);
+    if (_금오의념) {
+      for (let i = 0; i < 6; i++) {
+        state.법상_염백 = Math.min((state.법상_염백 || 0) + 1, 20);
+        applyBuff(state, '법상금오_염백', { atk: 1 }, 20, 20);
+      }
+      TRACE(state, 'OPT', `🦅금오·의념: 화염깃털 6개 발사 → 염백 ${state.법상_염백}/20중첩`);
+    }
+  }
 }
 
 // 중복 명중/반사 감쇠: 매 hit 이 이전의 10% 만 유지 (90% 감폭)
@@ -1383,6 +1439,32 @@ function multiHitMult(n) {
 //   N=2 → 1.10, N=3 → 1.110, N=4 → 1.1110, N=5 → 1.11110, N=6 → 1.11111
 //   N≥2 부터 거의 1.111 로 saturate (등비급수 합 1/0.9 = 1.1111... 수렴)
 const MH = { 2: multiHitMult(2), 3: multiHitMult(3), 4: multiHitMult(4), 5: multiHitMult(5), 6: multiHitMult(6) };
+
+// 멀티히트 decay emit — "동일 대상 중복 명중" / "N갈래 반사" 신통에서 사용.
+// hit 별로 분리해서 record() 호출. 각 hit 데미지 = (base + 신통계수보너스) × DECAY_RATE^i
+//   1타 100% / 2타 10% / 3타 1% / 4타 0.1% ...  (정확히 10% 감쇠 비율 유지)
+// 화면에는 hit 별 감폭이 그대로 노출됨 (예: "(hit 1/4, ×1.000)" / "(hit 2/4, ×0.100)").
+// 합산값은 (base + 보너스) × MH[hits] 와 동일 — 기존 1회 합산 emit 과 합계 일치.
+//
+// 신통계수보너스 처리: 본 신통 1회 보너스를 hit 1 에만이 아니라 합산 base 에 미리 더한 후 decay 적용.
+// → hit 2+ 에는 _skipShintongBonus 로 dealDamage 안의 보너스 덧셈 차단 (중복 방지).
+function recordMultiHit(state, basePct, hits, opts) {
+  const _opts = opts || {};
+  // type 미지정 + non-absolute → '신통' (dealDamage 와 동일 로직). 신통일 때만 보너스 합산.
+  const _isShintong = !_opts.type && !_opts.absolute && !_opts.noSkillMult;
+  const fullBase = (_isShintong && CFG.신통계수보너스) ? basePct + CFG.신통계수보너스 : basePct;
+  const prevSrc = state._currentSource;
+  for (let i = 0; i < hits; i++) {
+    const factor = Math.pow(DECAY_RATE, i);
+    const hitBase = fullBase * factor;
+    const baseSrc = prevSrc || state._activeCast || '신통';
+    const hitSrc = `${baseSrc} (hit ${i + 1}/${hits}, ×${factor.toFixed(3)})`;
+    // 보너스를 미리 합산했으므로 dealDamage 내 보너스 덧셈 차단
+    const hitOpts = { ..._opts, _skipShintongBonus: true };
+    record(state, dealDamage(state, hitBase, hitOpts), hitSrc);
+  }
+  state._currentSource = prevSrc;
+}
 
 // 신통별 히트 수 (멀티히트 — 옥추 스택 획득 등 per-hit 트리거에 사용)
 // 미지정 시 1회 히트로 간주. md의 "신통 효과" 공격 횟수 기준.
@@ -1830,8 +1912,8 @@ SK['중광·환성'] = {
     s.검영발동 = 0;
     s.파천카운터 = 0;
     s._recordHits = 4;
-    // 본 신통 (4명 중복, MH[4])
-    record(s, dealDamage(s, 128 * MH[4]));
+    // 본 신통 (4명 중복, decay emit — hit 별 분리)
+    recordMultiHit(s, 128, 4);
     // [봉예] 32% 호무 1회
     record(s, dealDamage(s, 32, { noSkillMult: true, type: '호무' }), '봉예(호무)');
   }
@@ -1933,9 +2015,9 @@ SK['열산·염폭'] = {
     applyBuff(s, '열산염폭_염식', { crRes: 20 }, 10);
     // [염폭] spec: "열산 상태에서 본 신통 시전 시, 2중첩 추가 부여" — DMG 전
     if (startLaysan) 작열부여(s, 2, 44, '염폭·염폭(열산)');
-    // 본 신통 DMG (+ [진연] 즉발 추가 피해)
+    // 본 신통 DMG (+ [진연] 즉발 추가 피해) — 3명 중복 명중 decay emit
     const bonus = startLaysan ? 150 : 0;
-    record(s, dealDamage(s, 225 * MH[3]));
+    recordMultiHit(s, 225, 3);
     if (bonus) record(s, dealDamage(s, bonus, { noSkillMult: true }), '진연');
     // === DMG 후 작열 부여 (시전 시 명시 없는 옵션) ===
     // [염폭] 기본 작열 2중첩
@@ -1970,9 +2052,9 @@ SK['열산·성료'] = {
     applyBuff(s, '열산성료_은염', { defDebuff: 20 }, 10);
     // [성료] spec: "열산 상태에서 본 신통 시전 시, 작열 2중첩 부여" — 본 신통 dmg 전에 부여
     if (startLaysan) 작열부여(s, 2, 44, '성료·성료(열산)');
-    // 본 신통 DMG (+ [치운] 열산 시 150% 술법 추가)
+    // 본 신통 DMG (+ [치운] 열산 시 150% 술법 추가) — 4명 중복 명중 decay emit
     const extra = startLaysan ? 150 : 0;
-    record(s, dealDamage(s, 213 * MH[4]));
+    recordMultiHit(s, 213, 4);
     if (extra) record(s, dealDamage(s, extra, { noSkillMult: true }), '치운');
     // === DMG 후 작열 부여 ===
     // [분령] 작열 3중첩 (spec "시전 시" 없음 → dmg 후)
@@ -2031,8 +2113,8 @@ SK['형혹·업화'] = {
   cast(s, slots) {
     // [업화] 본 신통 cast 후부터 활성화 — main loop pre-cast 훅에서 처리
     s.업화활성 = true;
-    // 본 신통 DMG
-    record(s, dealDamage(s, 170 * MH[4]));
+    // 본 신통 DMG — 4명 중복 명중 decay emit
+    recordMultiHit(s, 170, 4);
     // === DMG 후 작열 부여 ===
     // [영염] 작열 3중첩
     작열부여_형혹(s, slots, 3, '업화·영염');
@@ -2068,8 +2150,8 @@ SK['형혹·함양'] = {
     // [함양] 30초 폭파 시 24% 술법 / [염화] 함양 발동 시 3명 20%
     s.함양End = s.t + 30;
     s.함양남은 = 10; s.함양max = 10;
-    // 본 신통 DMG
-    record(s, dealDamage(s, 170 * MH[4]));
+    // 본 신통 DMG — 4명 중복 명중 decay emit
+    recordMultiHit(s, 170, 4);
     // === DMG 후 작열 부여 ===
     // [천염] 작열 3중첩
     작열부여_형혹(s, slots, 3, '함양·천염');
@@ -2093,8 +2175,8 @@ SK['이화·풍권'] = {
     prune작열(s);
     const 멸신방감 = Math.min(30 + (s.stacks.작열 || 0) * 4, 50);
     applyBuff(s, '이화풍권_멸신', { defDebuff: 멸신방감 }, 10);
-    // 본 신통 DMG
-    record(s, dealDamage(s, 135 * MH[3]));
+    // 본 신통 DMG — 3명 중복 명중 decay emit
+    recordMultiHit(s, 135, 3);
     // 본 신통 cast 자체에 의한 [점화] 트리거는 main loop pre-cast 훅에서 처리됨 (점화 buff 활성 시)
   }
 };
@@ -2164,8 +2246,8 @@ SK['천로·단주'] = {
     // [파세] crRes-30% 15s, [신화] atk+20% 10s (즉발 buff)
     applyBuff(s, '천로단주_파세', { crRes: 30 }, 15);
     applyBuff(s, '천로단주_신화', { atk: 20 }, 10);
-    // 본 신통 DMG
-    record(s, dealDamage(s, 128 * MH[4]));
+    // 본 신통 DMG — 4명 중복 명중 decay emit
+    recordMultiHit(s, 128, 4);
   }
 };
 SK['천로·직염'] = {
@@ -2177,8 +2259,8 @@ SK['천로·직염'] = {
     applyBuff(s, '천로직염_통찰', { cr: 30 }, 15);
     // [여진] 폭발 1중첩마다 atk 12% max5 10s (max tier)
     for (let i = 0; i < pops; i++) applyBuff(s, '천로직염_여진', { atk: 12 }, 10, 5);
-    // 본 신통 (물리 4명 중복)
-    record(s, dealDamage(s, 128 * MH[4]));
+    // 본 신통 (물리 4명 중복) — decay emit
+    recordMultiHit(s, 128, 4);
     // [성화] 작열 최대 3중첩 폭발 + 폭발 최종피해 +30%
     // consume작열 반환값(= 남은 DoT 피해 합) × 1.3 증폭 + 천로 유파 slot×15% 자동 적용(type:'작열폭발')
     const remainingDot = consume작열(s, pops);
@@ -2200,8 +2282,8 @@ SK['천로·유형'] = {
   cast(s, slots) {
     // [파군] def-30% 10s (즉발 debuff)
     applyBuff(s, '천로유형_파군', { defDebuff: 30 }, 10);
-    // 본 신통 DMG (+ [잔염] 옵션 추가 피해)
-    record(s, dealDamage(s, 128 * MH[4]));
+    // 본 신통 DMG (+ [잔염] 옵션 추가 피해) — 4명 중복 decay emit
+    recordMultiHit(s, 128, 4);
     record(s, dealDamage(s, 40, { noSkillMult: true }), '잔염');
     // === DMG 후 작열 부여 ===
     // [점화] 3중첩 + [연소] +3중첩 = 6중첩 (36%)
@@ -2265,13 +2347,17 @@ SK['청명·투진'] = {
     applyBuff(s, '청명투진_투진', {}, 20);
     천뢰발동(s, slots, 60, '투진·명소'); // [명소] 천뢰 60% + 명중 시 5초 atk+20% (max tier)
     applyBuff(s, '청명투진_명소', { atk: 20 }, 5);
-    // [경정] 투진 효과 지속 중 2초마다 천뢰 15% × 10회 (max tier)
-    for (let i = 0; i < 10; i++) 천뢰발동(s, slots, 15, '투진·경정');
+    // [경정] 투진 효과 지속 중 2초마다 천뢰 15% × 최대 10회 (max tier) — 시간 분산
+    // cast 시점에 한 번에 10회 emit 하지 않고, main loop 의 지속 효과 처리에서 cast 간격마다
+    // 누적 발동 (state.경정누적 카운터로 관리). 창 = state.경정End — 20초 후 만료.
+    s.경정End = s.t + 20;
+    s.경정시작 = s.t;
+    s.경정누적 = 0;
     // [순요] 10초 창 오픈 — 이 창 안의 매 신통 cast에서 crit 시 5초 atk+25 부여
     // (event loop에서 per-cast 트리거 처리)
     s.순요End = s.t + 10;
-    // 6회 반사 → MH[6]
-    record(s, dealDamage(s, 213 * MH[6]));
+    // 6회 반사 — decay emit (hit 별 분리, 1타→2타 0.1배...)
+    recordMultiHit(s, 213, 6);
   }
 };
 SK['청명·천노'] = {
@@ -2364,7 +2450,8 @@ SK['옥추·소명'] = {
     if (s.stacks.옥추 >= 2) applyBuff(s, '옥추소명_cd', { cd: 20, shintongOnly: true }, 20); // "신통 치명타 배율"
     // [천칙] 옥추5+ 시 5초 inc +20% (max tier) — applyBuff 가 BUF trace 자동 emit
     if (s.stacks.옥추 >= 5) applyBuff(s, '옥추소명_천칙', { dmgMult: 20, cat: 'inc' }, 5);
-    record(s, dealDamage(s, 170 * MH[6]));
+    // 6회 반사 — decay emit
+    recordMultiHit(s, 170, 6);
     // [성류] 다음 신통 최종 cr +25. 옥추4+ 시 다음 신통 피해 +15% (max tier, inc — 신통피해 증가) — record 후 설정
     const 성류옥추4 = s.stacks.옥추 >= 4;
     TRACE(s, 'OPT', `🟠소명·성류 발동: 다음 신통 최종 치명타율 +25%${성류옥추4 ? ` · 옥추 ${s.stacks.옥추}중첩 ≥ 4 → 다음 신통 피해 +15%` : ''}`);
@@ -2414,11 +2501,12 @@ SK['옥추·청사'] = {
     // [명뢰] 본 신통 최종 cr +30% (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 명뢰] 발동: 본 신통 최종 cr +30% (이번 cast 한정)`);
     applyBuff(s, '옥추청사_명뢰', {}, 1); // 타임라인 시각화용 1초 marker
-    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 6회 반사 (스펙)
-    record(s, dealDamage(s, 170 * MH[6] * 옥추유파Mult(s, slots), {
+    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 6회 반사 decay emit
+    // 옥추유파Mult 는 보통 1 — 곱해도 영향 없음. localInc/localFinalCR 은 모든 hit 에 동일 적용.
+    recordMultiHit(s, 170 * 옥추유파Mult(s, slots), 6, {
       localInc: uc,
       localFinalCR: 30,
-    }));
+    });
     // [청사] 60% 술법 추가 + 옥추2+ 60% 추가 — 옵션 추가 피해 (신통 증가 X)
     record(s, dealDamage(s, 60 * 옥추유파Mult(s, slots), { noSkillMult: true }), '청사');
     if (옥추Stack >= 2) record(s, dealDamage(s, 60 * 옥추유파Mult(s, slots), { noSkillMult: true }), '청사(옥추2+)');
@@ -2442,7 +2530,8 @@ SK['오뢰·천강'] = {
     applyBuff(s, '오뢰천강_운소', { crRes: 40 }, 15);
     // [굉명] 방어력 20% max3 (max tier)
     applyBuff(s, '오뢰천강_굉명', { defDebuff: 20 }, 10, 3);
-    record(s, dealDamage(s, 128 * MH[6]));
+    // 6회 반사 decay emit
+    recordMultiHit(s, 128, 6);
   }
 };
 SK['오뢰·경칩'] = {
@@ -2502,7 +2591,8 @@ SK['오뢰·용음'] = {
     s.뇌정남은 = 12; // 뇌정 6 + 어뢰 6 (max tier)
     // [천뢰] 낙뢰 피해 +80% (max tier)
     applyBuff(s, '오뢰용음_낙뢰증폭', {}, 20);
-    record(s, dealDamage(s, 135 * MH[3]));
+    // 3명 중복 명중 decay emit
+    recordMultiHit(s, 135, 3);
   }
 };
 
@@ -2578,7 +2668,8 @@ SK['신소·환뢰'] = {
       호탕val = 50 * p호탕;
     }
     if (호탕val > 0) applyBuff(s, '신소환뢰_호탕', { defDebuff: 호탕val }, 10);
-    record(s, dealDamage(s, 128 * MH[4], { localCD: 35 }));
+    // 4회 반사 decay emit
+    recordMultiHit(s, 128, 4, { localCD: 35 });
     // [풍세] 다음 신통 최종 피해 +20% (max tier) — record 후 설정
     TRACE(s, 'OPT', `🟠환뢰·풍세 발동: 다음 신통 최종피해 +20%`);
     addNextCast(s, 'finalDmg', 20);
@@ -2617,8 +2708,8 @@ SK['신소·청삭'] = {
     const 천위 = 천위활성 ? 140 : 0;
     // [위능] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·청삭 → 위능] 본 신통 cd +35% (이번 cast 한정)`);
-    // 본 신통 (6회 반사) + 위능 cd+35 localCD
-    record(s, dealDamage(s, 128 * MH[6], { localCD: 35 }));
+    // 본 신통 (6회 반사) decay emit + 위능 cd+35 localCD
+    recordMultiHit(s, 128, 6, { localCD: 35 });
     // 추가 피해들 (모두 일반 물리, 유파 bonus는 신통피해 버킷)
     if (칙뢰) record(s, dealDamage(s, 칙뢰, { noSkillMult: true }), '칙뢰');
     if (풍뢰) record(s, dealDamage(s, 풍뢰, { noSkillMult: true }), '풍뢰');
@@ -3104,7 +3195,8 @@ SK['사해·명화'] = {
     s._currentSource = prevSrc;
     s._명화이미처리 = true;
     s._recordHits = 3;
-    record(s, dealDamage(s, 198 * MH[3]));
+    // 3명 중복 명중 decay emit
+    recordMultiHit(s, 198, 3);
   }
 };
 
@@ -3351,23 +3443,9 @@ function 법상_매cast(s, name, tiers) {
     s._currentSource = prev;
   }
   if (name === '금오' && tiers.실체) {
-    s.법상_금오피해카운터++;
-    // 금오는 "10회 피해 누적 시 발사 (5초 CD)" — 시간 기반이 아닌 카운터 기반이라 cast 이벤트마다 체크
-    if (s.법상_금오피해카운터 >= 10 && (s.t - s.법상_금오마지막발사T) >= 5) {
-      s.법상_금오피해카운터 = 0;
-      s.법상_금오마지막발사T = s.t;
-      TRACE(s, 'OPT', `🦅금오·실체 발동 @${s.t.toFixed(1)}s: 피해 10회 누적 → 화염깃털 6개 (총 240% 확정, 5초 CD)`);
-      const prev = s._currentSource; s._currentSource = `법상·${name}·화염깃털`;
-      record(s, 법상Dmg(s, 240, { bypassDef: true }), `법상·${name}(화염깃털)`);
-      if (tiers.의념) {
-        for (let i = 0; i < 6; i++) {
-          s.법상_염백 = Math.min(s.법상_염백 + 1, 20);
-          applyBuff(s, '법상금오_염백', { atk: 1 }, 20, 20);
-        }
-      }
-      s._currentSource = prev;
-      if (tiers.의념) TRACE(s, 'OPT', `🦅금오·의념: 염백 ${s.법상_염백}/20중첩 (자기 입히는 +${s.법상_염백}%, 받는 -${s.법상_염백}%)`);
-    }
+    // 금오 카운터/발사 처리는 record() 함수 안에서 (피해 발생 마다) 직접 처리됨.
+    // 여기선 stack 표시만.
+    if (s.법상_염백 > 0) TRACE(s, 'OPT', `🦅금오 염백 ${s.법상_염백}/20중첩 (자기 입히는 +${s.법상_염백}%, 받는 -${s.법상_염백}%)`);
   }
   if (name === '금오' && tiers.진령) {
     TRACE(s, 'OPT', `🦅금오·진령 발동: 신통 시전 → 추가 화염깃털 1개 (150% 확정)`);
@@ -4180,6 +4258,25 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           }
         }
         state._관일이미처리 = false;
+        // [청명·투진 → 경정] 지속 트리거: 투진 buff 동안 (20s) 2초마다 천뢰 15% — 최대 10회
+        // 봉황/주작 패턴 — 정확한 fire 시각마다 state.t 임시 변경하여 emit (시점별 buff snapshot 적용)
+        // 발동 시각: 경정시작+2, +4, ..., +20
+        if (state.경정End > 0 && (state.경정누적 || 0) < 10) {
+          const 경정마지막발사T = state.경정시작 + (state.경정누적 || 0) * 2;
+          const savedT_경정 = state.t;
+          while ((state.t - 경정마지막발사T) >= 2 && state.경정누적 < 10
+                 && (state.경정시작 + (state.경정누적 + 1) * 2) <= state.경정End) {
+            state.경정누적 = (state.경정누적 || 0) + 1;
+            state.t = state.경정시작 + state.경정누적 * 2;  // 정확한 fire 시각
+            state._currentSource = '투진·경정(지속)';
+            천뢰발동(state, state.famSlots, 15, '투진·경정');
+          }
+          state.t = savedT_경정;  // 원래 cast 시각 복원
+          // 만료 도달 + 10회 모두 발동 시 비활성화
+          if (state.경정누적 >= 10 || state.t >= state.경정End) {
+            state.경정End = 0;
+          }
+        }
         // [분광] 지속 트리거: 30s간 신통 시전마다 검심 +1 + 24% 호무 (max tier)
         if (state.famSlots.참허 && state.분광End > 0 && state.t < state.분광End - 0.1) {
           if (!state._분광이미처리) {
@@ -4236,10 +4333,16 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           } else {
             const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
             const _hits뇌격 = (sk && SKILL_HITS[sk.name]) || 1;
-            const expectedCrits = Math.min(_hits뇌격 * crEff, state.뇌격남은);
-            state.뇌격남은 -= expectedCrits;
-            state._currentSource = '뇌격(지속)';
-            record(state, dealDamage(state, 8 * expectedCrits, { noSkillMult: true }));
+            const totalEff = Math.min(_hits뇌격 * crEff, state.뇌격남은);
+            state.뇌격남은 -= totalEff;
+            // hit 별 분리 emit
+            let remaining = totalEff;
+            for (let i = 0; i < _hits뇌격 && remaining > 1e-9; i++) {
+              const useEff = Math.min(crEff, remaining);
+              state._currentSource = `뇌격(hit ${i+1}/${_hits뇌격}${useEff < crEff ? ` ×${(useEff/crEff).toFixed(2)}` : ''})`;
+              record(state, dealDamage(state, 8 * useEff, { noSkillMult: true }));
+              remaining -= useEff;
+            }
           }
         }
         // 백족 공통 트리거 (살혼은 사해 ≥2 시 모든 신통 명중에서 발동)
