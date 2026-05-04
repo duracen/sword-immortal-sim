@@ -947,7 +947,12 @@ function dealDamage(state, base, opts = {}) {
     const savedLastCR = state._lastCR;
     const savedLastCD = state._lastCD;
     const savedLastIsCrit = state._lastIsCrit;
-    const cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
+    let cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
+    // 악신·진 의 호신강기 피해 심화 +33% — 분신이 호신강기 hit 시 데미지 추가
+    // (sim 에선 호신강기 hit 여부 정확히 못 추적 → 호신강기 active 가정 시 ×1.33 적용)
+    if (state.악신_호신심화 > 0 && (state.shieldRem || 0) > 0 && !opts.bypassShield) {
+      cloneFinal = cloneFinal * (1 + state.악신_호신심화 / 100);
+    }
     state._cloneBdPending = {
       ...state._lastBreakdown,
       clonePct: state.악신Pct,
@@ -1314,6 +1319,17 @@ function record(state, amount, source) {
     amount = amount * 1.18;
   }
   state.dmgEvents.push({ t: state.t, amt: amount, src, activeCast });
+  // === 자기 비술: 업화 진 — 업화 멸신 active 동안 record 마다 카운터 +1, 15회마다 발동 (최대 10회) ===
+  // src 가 '업화멸신' 으로 시작하면 자기 자신 발동 — 카운터 X (무한 루프 방지)
+  if (state.업화멸신End > state.t && (state.업화멸신_발동수 || 0) < 10
+      && !src.startsWith('업화멸신')) {
+    state.업화멸신_피해카운터 = (state.업화멸신_피해카운터 || 0) + 1;
+    if (state.업화멸신_피해카운터 >= 15) {
+      state.업화멸신_피해카운터 = 0;
+      state.업화멸신_발동수 = (state.업화멸신_발동수 || 0) + 1;
+      state._업화멸신pending = true;  // record() 종료 후 emit
+    }
+  }
   // === 호신강기/HP 풀 적용 ===
   // 호신강기는 방어력이 없음 → defMult 미적용 (full 데미지)
   // HP 는 defMult (방어 + defDebuff) 적용
@@ -1340,6 +1356,12 @@ function record(state, amount, source) {
     if (rawOverflow > 0) {
       hpHit = rawOverflow * dmlt;
       state.hpRem = Math.max(0, (state.hpRem || 0) - hpHit);
+    }
+    // === 자기 비술: 분혼·진 — 호신강기 입힌 25% HP 추가 감소 (15초 active) ===
+    if (absorbed > 0 && state.분혼진_hp추가End > state.t) {
+      const extraHp = absorbed * 0.25;
+      state.hpRem = Math.max(0, (state.hpRem || 0) - extraHp);
+      hpHit += extraHp;
     }
   }
   // === 적 비술 발동 hook (호신강기 임계, HP 0 도달) ===
@@ -1443,6 +1465,19 @@ function record(state, amount, source) {
       }
       TRACE(state, 'OPT', `🦅금오·의념: 화염깃털 6개 발사 → 염백 ${state.법상_염백}/20중첩`);
     }
+  }
+  // === 자기 비술: 업화 진 — 멸신 active 동안 카운터 15 도달 시 발동 (최대 10회) ===
+  // 데미지 = min(maxHP × 1.5%, atk × 324%) — 절대값 (buff/defMult 미적용)
+  if (state._업화멸신pending) {
+    state._업화멸신pending = false;
+    const hpDmg = (CFG.baseHP || 0) * 0.015;
+    const atkCap = (CFG.baseATK || 0) * 3.24;
+    const dmg = Math.min(hpDmg, atkCap);
+    const prev업화 = state._currentSource;
+    state._currentSource = `업화멸신·진(${state.업화멸신_발동수}/10)`;
+    TRACE(state, 'OPT', `🔮업화멸신·진 발동 (${state.업화멸신_발동수}/10): min(maxHP×1.5%, atk×324%) = ${(dmg/1e8).toFixed(2)}억`);
+    record(state, dmg, `업화멸신(${state.업화멸신_발동수}/10)`);
+    state._currentSource = prev업화;
   }
 }
 
@@ -3253,7 +3288,15 @@ const BISUL_MASTERS = {
 // 분혼: 첫 cast 시 호신강기 봉인 + 추가 데미지
 // 악신: 적 호신강기 0 도달 시 (무) / 4번째 cast 시 (진) 분신 → 데미지 boost
 // 업화: 5회 공격마다 DoT
+// 자기 비술 발동 — return true (발동 됨) / false (CD 미경과로 skip)
 function 비술_발동_자기(state, master, branch) {
+  // 모든 비술 재사용 시간 160초 통일 (사용자 정책)
+  const BISUL_CD = 160;
+  state.bisul_lastFireT = state.bisul_lastFireT || {};
+  const lastT = state.bisul_lastFireT[master];
+  if (lastT !== undefined && state.t - lastT < BISUL_CD) return false;
+  state.bisul_lastFireT[master] = state.t;
+
   if (master === '분혼') {
     // 봉인 = 호신강기 무시 (state.봉인EndT)
     const dur = branch === '진' ? 0 : (branch === '허' ? 10 : 15);
@@ -3269,37 +3312,66 @@ function 비술_발동_자기(state, master, branch) {
       // 봉인 종료 후 10초간 호신강기 피해 심화 +18%
       state.분혼허_심화End = state.t + dur + 10;
     }
+    if (branch === '진') {
+      // 15초간 호신강기 입힌 피해의 25% 만큼 HP 추가 감소 — record() 안에서 처리
+      state.분혼진_hp추가End = state.t + 15;
+    }
   } else if (master === '악신') {
     // 분신 소환 — 본체 N% 속성 → 매 record() 때 별도 분신 데미지 추가 (15초간)
-    // 분신은 본체의 stack 효과를 공유 X — 옥추/뇌인/검심/검세/작열/진마성화/단진/파월 등 stack-기반 효과 제거 후 계산
     const pct = branch === '무' ? 39 : (branch === '허' ? 20 : 30);
     state.악신EndT = state.t + 15;
     state.악신Pct = pct;
     state.악신_branch = branch;
-    if (branch === '진') state.악신_호신심화 = 33; // 호신강기 피해 심화 +33%
-    TRACE(state, 'OPT', `🔮악신마주·${branch} 발동: 15초간 분신 추가 데미지 (본체 ${pct}% 속성, 스택 미공유)${branch === '진' ? ' + 호신강기 심화 +33%' : ''}`);
+    if (branch === '진') state.악신_호신심화 = 33; // 호신강기 피해 심화 +33% — record() 에서 적용
+    else state.악신_호신심화 = 0;
+    TRACE(state, 'OPT', `🔮악신마주·${branch} 발동: 15초간 분신 추가 데미지 (본체 ${pct}% 속성)${branch === '진' ? ' + 호신강기 심화 +33%' : ''}`);
+  } else if (master === '식혼') {
+    // sim 한계: 자기 사망 / 자기 호신강기 모델 X.
+    // 효과 구현 가능한 것만:
+    //   - 진: 자기 cr +9~19% (저체력) → 평균 14% buff 140초
+    //   - 허: 자기 피해 감면 — sim 미모델
+    //   - 무: 호신강기 회복 — sim 미모델 (state.shieldRem 은 적 호신강기라 건드리면 X)
+    if (branch === '진') {
+      applyBuff(state, '식혼진_cr', { cr: 14 }, 140);
+      TRACE(state, 'OPT', `🔮식혼마주·진 발동 (자기): cr +14% 140초`);
+    } else {
+      TRACE(state, 'OPT', `🔮식혼마주·${branch} 발동 (자기): 자기 호신강기/피해감면 — sim 미모델, 효과 없음`);
+    }
   } else if (master === '업화') {
-    // 5회 공격마다 10초 DoT — 시간 분산 emit (매 초 1tick × 10초)
-    // 무: 1.5%/s × 10s = 15% max HP (or 자기 공격력 324% 합 → 32.4%/tick)
-    // 허: 0.75%/s × 10s = 7.5% max HP (162% 합 → 16.2%/tick) + 적 피해심화/감면 -11%
-    // 진: 자기 업화 멸신 (15회 피해마다 1.5% × 최대 10회 = 15% × 3명) — 카운터 기반, 별도 처리
-    state.업화_누적공격 = (state.업화_누적공격 || 0) + 1;
-    if (state.업화_누적공격 >= 5) {
-      state.업화_누적공격 = 0;
-      const totalPct = branch === '무' ? 324 : (branch === '허' ? 162 : 324);
-      TRACE(state, 'OPT', `🔮업화마주·${branch} 발동: 10초 DoT 총 ${totalPct}% 공격력 (1초 1tick × 10회 분산 emit)`);
-      // 한 번에 emit X — main loop catch-up 에서 매 초 tick 분산
+    // 업화 데미지 공식: min(상대 max HP × hpPct, 자기 공격력 × atkCap)
+    //   무 1tick: min(maxHP × 1.5%, atk × 324%)
+    //   허 1tick: min(maxHP × 0.75%, atk × 162%)
+    //   진 1회 : min(maxHP × 1.5%, atk × 324%)
+    if (branch === '진') {
+      // 자기 업화 멸신 — 10초간 active. record() 마다 카운터 +1, 15회 도달 시 발동 (최대 10회)
+      state.업화멸신End = state.t + 10;
+      state.업화멸신_피해카운터 = 0;
+      state.업화멸신_발동수 = 0;
+      TRACE(state, 'OPT', `🔮업화마주·진 발동: 10초간 업화 멸신 (피해 15회마다 max HP 1.5% / atk 324% 상한, 최대 10회)`);
+    } else {
+      // 무/허: 10초 DoT — 매 tick 데미지 = min(maxHP × hpPct, atk × atkCap)
+      const hpPct = branch === '무' ? 0.015 : 0.0075;
+      const atkCapPct = branch === '무' ? 324 : 162;
+      const hpDmg = (CFG.baseHP || 0) * hpPct;
+      const atkCap = (CFG.baseATK || 0) * (atkCapPct / 100);
+      const tickDmg = Math.min(hpDmg, atkCap);
+      TRACE(state, 'OPT', `🔮업화마주·${branch} 발동: 10초 DoT (1tick = min(maxHP×${(hpPct*100).toFixed(2)}%, atk×${atkCapPct}%) = ${(tickDmg/1e8).toFixed(2)}억)`);
       state.업화DoTEnd = state.t + 10;
       state.업화DoT시작 = state.t;
       state.업화DoT누적 = 0;
-      state.업화DoT단위 = totalPct / 10;
+      state.업화DoT단위_절대 = tickDmg;  // 절대값 (buff/defMult 미적용)
       state.업화DoT브랜치 = branch;
       if (branch === '허') {
-        // 적 피해 심화/감면 -11% (10초)
         applyBuff(state, '업화허_적약화', { defDebuff: 11 }, 10);
       }
     }
+  } else if (master === '탁천') {
+    // 자기 탁천: 치명일격 받았을 때 발동 — sim 자기 받는 피해 모델 X
+    // 회복 효과 (자기 hp 회복 + 면역) 의미 없음. 진의 6초 피해 감면도 sim 의미 X.
+    // 단 분기 추가 — 사용자가 자기 비술로 선택해도 예외 없이.
+    TRACE(state, 'OPT', `🔮탁천마주·${branch} 발동 (자기): 자기 받는 피해 미모델 — 효과 없음`);
   }
+  return true;
 }
 
 // 적 비술 발동 (자기 데미지에 영향)
@@ -3754,10 +3826,16 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   state.봉인EndT = 0;
   state.악신EndT = 0;
   state.악신Pct = 0;
+  state.악신_호신심화 = 0;
   state.분혼허_심화End = 0;
+  state.분혼진_hp추가End = 0;
   state.업화_누적공격 = 0;
+  state.업화멸신End = 0;
+  state.업화멸신_피해카운터 = 0;
+  state.업화멸신_발동수 = 0;
+  state.bisul_lastFireT = {};  // 비술별 마지막 발동 시각 (CD 160s 검사용)
   state._castCountTotal = 0;
-  state._악신무발동 = false;
+  // _악신무발동 flag 제거 — CD 검사로 대체
   state._혼원_fired = [];
   state._혼원_lastT = undefined;
   state._탁천_fired = false;
@@ -4138,30 +4216,46 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // record() 가 _snapBuffsCaptured 를 set 하는 조건과 applyBuff [post] 태깅 조건의
         // 기준이 되는 플래그 — pre-cast hook 의 폭파 record / applyBuff 와 구분하기 위함.
         state._inMainCast = true;
-        // === 자기 비술 발동 (cast 카운터 기반) ===
+        // === 자기 비술 발동 (CD 160초 통일 — 비술_발동_자기 안에서 검사) ===
         state._castCountTotal = (state._castCountTotal || 0) + 1;
         const selfBisul = (CFG.bisul && CFG.bisul.self) || [];
         for (const b of selfBisul) {
           if (!b || !b.master || !b.branch) continue;
-          // 분혼: 첫 cast 시 1회만 (CD 170 → 60s/120s 내 1회)
-          if (b.master === '분혼' && state._castCountTotal === 1) {
+          // 분혼: 신통/법보 공격 시 (매 cast 시도, CD 160s 통과 시만 발동)
+          if (b.master === '분혼') {
             비술_발동_자기(state, b.master, b.branch);
           }
-          // 악신·진: 4번째 cast 시
-          if (b.master === '악신' && b.branch === '진' && state._castCountTotal === 4) {
+          // 악신·진: 신통/법보 4회 공격 후 (4의 배수마다 시도, CD 통과 시만 발동)
+          if (b.master === '악신' && b.branch === '진' && state._castCountTotal % 4 === 0) {
             비술_발동_자기(state, b.master, b.branch);
           }
-          // 업화: 매 5회 공격마다 (cast 마다 카운터 증가)
+          // 악신·허: "자기 호신강기 0" 사양 — sim 자기 받는 피해 미모델 → 가상 트리거 (5번째 cast 시도)
+          if (b.master === '악신' && b.branch === '허' && state._castCountTotal % 5 === 0) {
+            비술_발동_자기(state, b.master, b.branch);
+          }
+          // 업화: 진 = 매 cast 시도. 무/허 = 5회 누적마다 시도
           if (b.master === '업화') {
+            if (b.branch === '진') {
+              비술_발동_자기(state, b.master, b.branch);
+            } else {
+              state.업화_누적공격 = (state.업화_누적공격 || 0) + 1;
+              if (state.업화_누적공격 >= 5) {
+                const fired = 비술_발동_자기(state, b.master, b.branch);
+                if (fired) state.업화_누적공격 = 0;
+                // CD 미통과면 카운터 그대로 유지 — 다음 cast 시 재시도
+              }
+            }
+          }
+          // 식혼/탁천: 자기 사용 시 sim 한계로 효과 의미 없으나 분기 추가 (예외 없이)
+          if (b.master === '식혼' || b.master === '탁천') {
+            // 매 cast 시도 (CD 160 통과 시 발동, no-op 데미지)
             비술_발동_자기(state, b.master, b.branch);
           }
         }
         SK[sk.name].cast(state, slots);
-        // 악신·무: 적 호신강기 0 도달 시 (cast 후 체크)
+        // 악신·무: 적 호신강기 0 도달 시 (cast 후 체크) — _악신무발동 flag 대신 CD 160s 사용 (재발동 가능)
         for (const b of selfBisul) {
-          if (b && b.master === '악신' && b.branch === '무'
-              && (state.shieldRem || 0) <= 0 && !state._악신무발동) {
-            state._악신무발동 = true;
+          if (b && b.master === '악신' && b.branch === '무' && (state.shieldRem || 0) <= 0) {
             비술_발동_자기(state, b.master, b.branch);
           }
         }
@@ -4335,6 +4429,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (state.천벌누적 >= 10) state.천벌End = 0;
         }
         // [업화 비술 무/허] 10초간 초당 1tick × 10회 — DoT 분산 emit
+        // 데미지 = min(maxHP×hpPct, atk×atkCap) — 부여 시점에 절대값 스냅샷, buff/defMult 미적용
         if (state.업화DoTEnd > 0 && (state.업화DoT누적 || 0) < 10) {
           const savedT_업화 = state.t;
           while (state.업화DoT누적 < 10
@@ -4343,7 +4438,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             state.업화DoT누적 = (state.업화DoT누적 || 0) + 1;
             state.t = state.업화DoT시작 + state.업화DoT누적;
             state._currentSource = `업화마주·${state.업화DoT브랜치}(DoT)`;
-            record(state, dealDamage(state, state.업화DoT단위, { noSkillMult: true }), `업화마주·${state.업화DoT브랜치}(DoT tick ${state.업화DoT누적}/10)`);
+            // 절대값 직접 emit — dealDamage 거치지 않음
+            record(state, state.업화DoT단위_절대 || 0, `업화마주·${state.업화DoT브랜치}(DoT tick ${state.업화DoT누적}/10)`);
           }
           state.t = savedT_업화;
           if (state.업화DoT누적 >= 10) state.업화DoTEnd = 0;
