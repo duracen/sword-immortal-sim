@@ -701,6 +701,8 @@ function tickCritTriggers(state) {
   // 본 신통의 hit 수 (multi-hit 신통은 hit 별 crit roll → expected 모드에서도 hits × crEff)
   const _hits = (state._activeCast && SKILL_HITS[state._activeCast]) || 1;
   // 청명·풍뢰 [풍뢰+천적 max]: crit 시 16+12=28% 물리 천뢰, 최대 14회
+  // 랜덤 모드: 실제 crit 횟수만큼 풀발동
+  // 기댓값 모드: hits×cr 분수 누적 → floor 정수 만큼 풀발동 (잔여 분수 carryover)
   if (state.famSlots.청명 && activeKeys.has('청명풍뢰_풍뢰') && (state.풍뢰남은 || 0) > 0) {
     const base = 16 + 12;
     if (CFG.randomCrit) {
@@ -708,22 +710,21 @@ function tickCritTriggers(state) {
       if (trigCount > 0) {
         state.풍뢰남은 = Math.max(0, state.풍뢰남은 - trigCount);
         for (let i = 0; i < trigCount; i++) {
-          record(state, dealDamage(state, base, { type: '천뢰' }), '천뢰←풍뢰(crit)');
+          record(state, dealDamage(state, base, { type: '천뢰' }), `천뢰←풍뢰(crit ${i+1}/${trigCount})`);
         }
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      // expected 모드 — 본 cast _hits 회 동안 hit 별 trigger 확률 = crEff
-      // hit 별 분리 emit: 각 hit 마다 base × crEff 데미지 (남은 cap 고려)
-      const totalEff = Math.min(_hits * crEff, state.풍뢰남은);
-      let remaining = totalEff;
-      for (let i = 0; i < _hits && remaining > 1e-9; i++) {
-        const useEff = Math.min(crEff, remaining);
-        const label = `천뢰←풍뢰(hit ${i+1}/${_hits}${useEff < crEff ? ` ×${(useEff/crEff).toFixed(2)}` : ''})`;
-        record(state, dealDamage(state, base * useEff, { type: '천뢰' }), label);
-        remaining -= useEff;
+      state._풍뢰분수 = (state._풍뢰분수 || 0) + _hits * crEff;
+      const gained = Math.floor(state._풍뢰분수);
+      if (gained > 0) {
+        state._풍뢰분수 -= gained;  // 옥추 패턴: cap 무관 분수 차감
+        const fire = Math.min(gained, state.풍뢰남은);  // 실제 발동은 cap 까지만
+        state.풍뢰남은 -= fire;
+        for (let i = 0; i < fire; i++) {
+          record(state, dealDamage(state, base, { type: '천뢰' }), `천뢰←풍뢰(crit ${i+1}/${fire})`);
+        }
       }
-      state.풍뢰남은 = Math.max(0, state.풍뢰남은 - totalEff);
     }
   }
   // 오뢰·용음 [뇌정+어뢰 max]: crit 시 15% 술법 낙뢰, 최대 12회
@@ -733,20 +734,21 @@ function tickCritTriggers(state) {
       if (trigCount > 0) {
         state.뇌정남은 = Math.max(0, state.뇌정남은 - trigCount);
         for (let i = 0; i < trigCount; i++) {
-          record(state, dealDamage(state, 15, { type: '낙뢰' }), '낙뢰←뇌정(crit)');
+          record(state, dealDamage(state, 15, { type: '낙뢰' }), `낙뢰←뇌정(crit ${i+1}/${trigCount})`);
         }
       }
     } else {
       const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
-      const totalEff = Math.min(_hits * crEff, state.뇌정남은);
-      let remaining = totalEff;
-      for (let i = 0; i < _hits && remaining > 1e-9; i++) {
-        const useEff = Math.min(crEff, remaining);
-        const label = `낙뢰←뇌정(hit ${i+1}/${_hits}${useEff < crEff ? ` ×${(useEff/crEff).toFixed(2)}` : ''})`;
-        record(state, dealDamage(state, 15 * useEff, { type: '낙뢰' }), label);
-        remaining -= useEff;
+      state._뇌정분수 = (state._뇌정분수 || 0) + _hits * crEff;
+      const gained = Math.floor(state._뇌정분수);
+      if (gained > 0) {
+        state._뇌정분수 -= gained;  // 옥추 패턴: cap 무관 분수 차감
+        const fire = Math.min(gained, state.뇌정남은);
+        state.뇌정남은 -= fire;
+        for (let i = 0; i < fire; i++) {
+          record(state, dealDamage(state, 15, { type: '낙뢰' }), `낙뢰←뇌정(crit ${i+1}/${fire})`);
+        }
       }
-      state.뇌정남은 = Math.max(0, state.뇌정남은 - totalEff);
     }
   }
 }
@@ -2496,6 +2498,7 @@ SK['청명·풍뢰'] = {
   cast(s, slots) {
     applyBuff(s, '청명풍뢰_풍뢰', {}, 20); // crit 시 천뢰 트리거 (별도 처리)
     s.풍뢰남은 = 14; // 발동 가능 횟수: 10 + 천적 4 (max tier)
+    s._풍뢰분수 = 0; // 재시전 시 cr 분수 carry 리셋 (사이클당 buff 초기화)
     applyBuff(s, '청명풍뢰_환우', { cr: 20 }, 10); // [환우] cr 20% (max tier)
     applyBuff(s, '청명풍뢰_뇌벌', { atk: 30 }, 10); // [뇌벌] atk 30% (max tier)
     천뢰발동(s, slots, 60, '풍뢰·뇌벌'); // [뇌벌] 60% 물리 (max tier)
@@ -2570,6 +2573,7 @@ SK['옥추·수광'] = {
     // [뇌격] 15초간 crit 시 8% 물리 × 20회 (max tier)
     s.뇌격End = s.t + 15;
     s.뇌격남은 = 20;
+    s._뇌격분수 = 0; // 재시전 시 cr 분수 carry 리셋 (사이클당 buff 초기화)
     // [천붕] 수광 효과 종료 시 옥추 2중첩당 30% (수광End 트리거에서 처리)
     s.수광End = s.t + 15;
     s.수광종료처리 = false;
@@ -2683,6 +2687,7 @@ SK['오뢰·용음'] = {
     낙뢰발동(s, slots, 40);
     applyBuff(s, '오뢰용음_뇌정', {}, 20);
     s.뇌정남은 = 12; // 뇌정 6 + 어뢰 6 (max tier)
+    s._뇌정분수 = 0; // 재시전 시 cr 분수 carry 리셋 (사이클당 buff 초기화)
     // [천뢰] 낙뢰 피해 +80% (max tier)
     applyBuff(s, '오뢰용음_낙뢰증폭', {}, 20);
     // 3명 중복 명중 decay emit
@@ -4149,8 +4154,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state.castCounts[sk.name] = (state.castCounts[sk.name] || 0) + 1;
         // === 사이클 (45초) 경계마다 옵션 카운터 reset ===
         // "신통 시전 시 (최대 N회)" 류는 cast 마다 reset 이라 여기 제외.
-        // 사이클 reset 대상: 다른 트리거 (천검 발동 시 / 염양 발동 시) 로 발동되는 옵션
-        // [검망] (관일, 천검 시) / [진염] (양운, 염양 시) / [진공]·[순일+분궁] (순일, 염양 시)
+        // 사이클 reset 대상: 다른 트리거 (천검 발동 시 / 염양 발동 시 / 약화 부여 시) 로 발동되는 옵션
+        // [검망] (관일, 천검 시) / [진염] (양운, 염양 시) / [진공]·[순일+분궁] (순일, 염양 시) / [마상] (명화, 약화 추가 시)
         const cycleIdx = Math.floor(state.t / 45);
         if (cycleIdx > (state._lastCycleResetIdx || 0)) {
           state._lastCycleResetIdx = cycleIdx;
@@ -4162,6 +4167,9 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (sel.has('열산·양운')) state.진염남은 = 3;
           // [진공]·[순일+분궁] (순일 장착 시 항상 활성, 염양 발동 시 fire)
           if (sel.has('열산·순일')) { state.진공남은 = 4; state.순일남은 = 5; }
+          // [마상] (명화 장착 시, 약화 효과 추가 시 fire — 명화 cast 무관)
+          if (sel.has('사해·명화')) state.마상남은 = 5;
+          // [적염] (양운) / [업화] (업화) 는 단진 패턴 (cast 시 리셋) 으로 처리됨 — 사이클 리셋 불필요
         }
         // 활성 cast 신통명 — 이 cast 동안의 모든 record() 에 attached (DamageBreakdown 그룹화용)
         state._activeCast = sk.name;
@@ -4251,18 +4259,25 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           검세획득_균천(state, state.famSlots.균천, 1);
           applyBuff(state, '균천파월_파월_' + state.파월남은, { atk: 15 }, 5);
         }
-        // [열산·양운 적염] per-cast: 임의 신통 시전 시 작열 1중첩 44% (최대 4회 발동, 전투 누적)
-        // 단, 양운이 한 번이라도 cast 된 후부터 활성화 (sk.name === '열산·양운' 이면 그 cast 부터 활성)
+        // [열산·양운 적염] per-cast: 임의 신통 시전 시 작열 1중첩 44% (최대 4회 발동)
+        // 단진 패턴: 양운 cast 시 카운터 4 리셋 + 양운 cast 후부터 활성화
+        if (sk.name === '열산·양운' && state.famSlots.열산) {
+          state.적염남은 = 4; state.적염max = 4;
+        }
         if ((state.적염활성 || sk.name === '열산·양운') && state.selectedSkills && state.selectedSkills.has('열산·양운')) {
           if (state.적염남은 == null) state.적염남은 = 4;
           if (state.적염남은 > 0) {
             state.적염남은--;
-            const used = 4 - state.적염남은;
-            TRACE(state, 'OPT', `🟠양운·적염 발동: 신통 시전 → 작열 1중첩 44% (${used}/4회)`);
-            작열부여(state, 1, 44, `양운·적염 (${used}/4)`);
+            const used = (state.적염max || 4) - state.적염남은;
+            TRACE(state, 'OPT', `🟠양운·적염 발동: 신통 시전 → 작열 1중첩 44% (${used}/${state.적염max || 4}회)`);
+            작열부여(state, 1, 44, `양운·적염 (${used}/${state.적염max || 4})`);
           }
         }
         // [형혹·업화 업화] per-cast: 임의 신통 시전 시 작열 1중첩 40% (최대 4회 + [연염] +4회 = 8회 cap)
+        // 단진 패턴: 업화 cast 시 카운터 8 리셋 + 업화 cast 후부터 활성화
+        if (sk.name === '형혹·업화' && state.famSlots.형혹) {
+          state.업화남은 = 8; state.업화max = 8;
+        }
         if ((state.업화활성 || sk.name === '형혹·업화') && state.selectedSkills && state.selectedSkills.has('형혹·업화')) {
           if (state.업화남은 == null) state.업화남은 = 8;
           if (state.업화남은 > 0) {
@@ -4545,29 +4560,31 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         }
         state._검광이미처리 = false;
         // [뇌격] 지속 crit 트리거: 15s간 crit 시 8% 물리 × 최대 20회
+        // 랜덤 모드: 실제 crit 횟수만큼 풀발동
+        // 기댓값 모드: hits×cr 분수 누적 → floor 정수 만큼 풀발동 (잔여 분수 carryover)
         if (state.famSlots.옥추 && state.뇌격End > state.t && state.뇌격남은 > 0) {
           if (CFG.randomCrit) {
-            // 랜덤 모드: 이번 cast에서 실제 발생한 crit 횟수만큼 발동 (남은 제한 내)
             const trigCount = Math.min(state._castCritCount || 0, state.뇌격남은);
             if (trigCount > 0) {
               state.뇌격남은 -= trigCount;
-              state._currentSource = '뇌격(지속)';
               for (let i = 0; i < trigCount; i++) {
+                state._currentSource = `뇌격(crit ${i+1}/${trigCount})`;
                 record(state, dealDamage(state, 8, { noSkillMult: true }));
               }
             }
           } else {
             const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(state) / 100) * (1 + state.nextCast.finalCR / 100) * (1 + sumBuffCritRes(state) / 100)) / 100;
             const _hits뇌격 = (sk && SKILL_HITS[sk.name]) || 1;
-            const totalEff = Math.min(_hits뇌격 * crEff, state.뇌격남은);
-            state.뇌격남은 -= totalEff;
-            // hit 별 분리 emit
-            let remaining = totalEff;
-            for (let i = 0; i < _hits뇌격 && remaining > 1e-9; i++) {
-              const useEff = Math.min(crEff, remaining);
-              state._currentSource = `뇌격(hit ${i+1}/${_hits뇌격}${useEff < crEff ? ` ×${(useEff/crEff).toFixed(2)}` : ''})`;
-              record(state, dealDamage(state, 8 * useEff, { noSkillMult: true }));
-              remaining -= useEff;
+            state._뇌격분수 = (state._뇌격분수 || 0) + _hits뇌격 * crEff;
+            const gained = Math.floor(state._뇌격분수);
+            if (gained > 0) {
+              state._뇌격분수 -= gained;  // 옥추 패턴: cap 무관 분수 차감
+              const fire = Math.min(gained, state.뇌격남은);
+              state.뇌격남은 -= fire;
+              for (let i = 0; i < fire; i++) {
+                state._currentSource = `뇌격(crit ${i+1}/${fire})`;
+                record(state, dealDamage(state, 8, { noSkillMult: true }));
+              }
             }
           }
         }
