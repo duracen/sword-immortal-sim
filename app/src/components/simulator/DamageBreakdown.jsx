@@ -254,7 +254,9 @@ export default function DamageBreakdown({ dmgEvents }) {
       // 비술 분신: src='악신마주·무·분신(옥추·소명)' → child='[옥추·소명]' (trigger 신통명)
       if (비술Match) {
         const triggerMatch = s.match(/·분신\(([^)]+)\)$/);
+        const 멸신Match = s.match(/·멸신\(/);
         if (triggerMatch) child = `[${triggerMatch[1]}]`;
+        else if (멸신Match) child = `[멸신]`;  // 발동 횟수 무관 통합 — 천벌처럼 단일 색
         else child = formatChild(s, parent);
       } else if (법상Match) {
         // 법상: src='법상·청룡(실체)' → child='[실체]' (tier)

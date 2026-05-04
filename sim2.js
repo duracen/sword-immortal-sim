@@ -285,16 +285,13 @@ function famActive(state, fam) { return (state.famSlots[fam] || 0) >= 2; }
 // 활성 시 슬롯 개수, 비활성 시 0 — 슬롯 스케일링용
 function famActiveSlots(state, fam) { return famActive(state, fam) ? (state.famSlots[fam] || 0) : 0; }
 
-// 시스템 격리 헬퍼 — buff key prefix 기반 필터
-// 법상 damage (_isLawDamage): "법상*" buff 만, 본체 buff 제외
-// 본체 damage (default): "법상*" buff 제외
-// 양쪽 모두 적의 defDebuff/crRes (적 상태) 는 universal — sumBuffDefDebuff/sumBuffCritRes 는 prefix 무관
+// 시스템 격리 헬퍼 — 모든 buff 통과 (key prefix 격리 제거)
+// 법상 키워드 buff (교혼/각인/적혼/예가 등) 는 자기 모든 데미지 (본체 + cleanup) 에 적용되어야
+// stack 효과 (옥추 inc, 신소 inc 등) 는 sumShintongInc 안의 isShintong 분기로 자동 격리됨 —
+// 법상 cleanup 데미지는 type='기타'(noSkillMult:true) 라 isShintong=false → 자동 미적용.
 function _isLawBuff(b) { return /^법상/.test(b.key || ''); }
-function _passSystemFilter(b, opts) {
-  // _isLawDamage: 법상 damage — "법상*" prefix 만 (자기 buff)
-  // 그 외 (본체 damage): "법상*" prefix 제외
-  if (opts && opts._isLawDamage) return _isLawBuff(b);
-  return !_isLawBuff(b);
+function _passSystemFilter(_b, _opts) {
+  return true;
 }
 
 function sumBuffAtk(state, opts) {
@@ -847,6 +844,13 @@ function dealDamage(state, base, opts = {}) {
   let finalPct = 0;
   let 유뢰법체Final = 0, 현염법체Final = 0;
   const localFinalDmg = opts.localFinalDmg || 0;
+  // 법상/비술 cat:'final' buff — 모든 type 에 적용 (신통/비신통 무관)
+  // 예: 청교룡 진령 (적 받는 최종피해 +20%), 적난새 실체 (자기 최종피해 +20%)
+  for (const b of state.buffs) {
+    if (b.endT > state.t && b.cat === 'final' && b.dmgMult) {
+      finalPct += b.dmgMult * (b.stackCount || 1);
+    }
+  }
   if (isShintong) {
     finalPct += ncFinalDmg + localFinalDmg;
     if (state.catSlots.뇌전 >= 4) {
@@ -1320,9 +1324,9 @@ function record(state, amount, source) {
   }
   state.dmgEvents.push({ t: state.t, amt: amount, src, activeCast });
   // === 자기 비술: 업화 진 — 업화 멸신 active 동안 record 마다 카운터 +1, 15회마다 발동 (최대 10회) ===
-  // src 가 '업화멸신' 으로 시작하면 자기 자신 발동 — 카운터 X (무한 루프 방지)
+  // 자기 자신 발동 (업화마주·진·멸신) 은 카운터 X — 무한 루프 방지
   if (state.업화멸신End > state.t && (state.업화멸신_발동수 || 0) < 10
-      && !src.startsWith('업화멸신')) {
+      && !src.startsWith('업화마주·진·멸신')) {
     state.업화멸신_피해카운터 = (state.업화멸신_피해카운터 || 0) + 1;
     if (state.업화멸신_피해카운터 >= 15) {
       state.업화멸신_피해카운터 = 0;
@@ -1468,15 +1472,16 @@ function record(state, amount, source) {
   }
   // === 자기 비술: 업화 진 — 멸신 active 동안 카운터 15 도달 시 발동 (최대 10회) ===
   // 데미지 = min(maxHP × 1.5%, atk × 324%) — 절대값 (buff/defMult 미적용)
+  // src 형식 "업화마주·진·..." — DamageBreakdown 의 비술 그룹화 정규식과 일치
   if (state._업화멸신pending) {
     state._업화멸신pending = false;
     const hpDmg = (CFG.baseHP || 0) * 0.015;
     const atkCap = (CFG.baseATK || 0) * 3.24;
     const dmg = Math.min(hpDmg, atkCap);
     const prev업화 = state._currentSource;
-    state._currentSource = `업화멸신·진(${state.업화멸신_발동수}/10)`;
+    state._currentSource = `업화마주·진·멸신(${state.업화멸신_발동수}/10)`;
     TRACE(state, 'OPT', `🔮업화멸신·진 발동 (${state.업화멸신_발동수}/10): min(maxHP×1.5%, atk×324%) = ${(dmg/1e8).toFixed(2)}억`);
-    record(state, dmg, `업화멸신(${state.업화멸신_발동수}/10)`);
+    record(state, dmg, `업화마주·진·멸신(${state.업화멸신_발동수}/10)`);
     state._currentSource = prev업화;
   }
 }
@@ -3477,6 +3482,11 @@ function 법상Dmg(s, base, opts) {
 }
 
 function 법상_시작_cleanup(s, name, tiers) {
+  if (name === '적난새' && tiers.실체) {
+    // 빙의 active 동안 자기 최종피해 +20% (빙의 20초)
+    TRACE(s, 'OPT', `🦅적난새·실체 시작: 빙의 동안 자기 최종피해 +20% (20초)`);
+    applyBuff(s, '법상적난_최종피해', { dmgMult: 20, cat: 'final' }, 20);
+  }
   if (name === '청반룡' && tiers.실체) {
     TRACE(s, 'OPT', `🐉청반룡·실체 시작 cleanup: 용의 숨결 700% + 적 방어 -20% (20초)`);
     applyBuff(s, '법상청반_방어감소', { defDebuff: 20 }, 20);
@@ -3484,11 +3494,16 @@ function 법상_시작_cleanup(s, name, tiers) {
     record(s, 법상Dmg(s, 700), `법상·${name}(시작)`);
     s._currentSource = prev;
   }
+  if (name === '청반룡' && tiers.의념) {
+    // 빙의 돌입 시 자기 입히는 피해 +20% (20초)
+    TRACE(s, 'OPT', `🐉청반룡·의념 시작: 자기 입히는 피해 +20% (20초)`);
+    applyBuff(s, '법상청반의_입히는피해', { dmgMult: 20, cat: 'dealt' }, 20);
+  }
   if (name === '청룡' && tiers.의념) {
     s.법상_용의예가 = Math.min(s.법상_용의예가 + 2, 5);
     TRACE(s, 'OPT', `🐉청룡·의념 시작 cleanup: 청령 1개 (650%) + 용의 예가 ${s.법상_용의예가}/5중첩`);
-    applyBuff(s, '법상청룡_용의예가', { defDebuff: 5 }, 20, 5);
-    applyBuff(s, '법상청룡_용의예가', { defDebuff: 5 }, 20, 5);
+    applyBuff(s, '법상청룡_용의예가', { dmgMult: 5, cat: 'dealt' }, 20, 5);
+    applyBuff(s, '법상청룡_용의예가', { dmgMult: 5, cat: 'dealt' }, 20, 5);
     const prev = s._currentSource; s._currentSource = `법상·${name}·청령`;
     record(s, 법상Dmg(s, 650), `법상·${name}(의념)`);
     s._currentSource = prev;
@@ -3496,8 +3511,8 @@ function 법상_시작_cleanup(s, name, tiers) {
   if (name === '주작' && tiers.의념) {
     s.법상_적혼 = Math.min(s.법상_적혼 + 2, 5);
     TRACE(s, 'OPT', `🦅주작·의념 시작 cleanup: 적색깃털 1개 (450% 확정) + 적혼 ${s.법상_적혼}/5중첩`);
-    applyBuff(s, '법상주작_적혼', { atk: 5 }, 20, 5);
-    applyBuff(s, '법상주작_적혼', { atk: 5 }, 20, 5);
+    applyBuff(s, '법상주작_적혼', { dmgMult: 5, cat: 'dealt' }, 20, 5);
+    applyBuff(s, '법상주작_적혼', { dmgMult: 5, cat: 'dealt' }, 20, 5);
     const prev = s._currentSource; s._currentSource = `법상·${name}·적색깃털`;
     record(s, 법상Dmg(s, 450, { bypassDef: true }), `법상·${name}(의념)`);
     s._currentSource = prev;
@@ -3508,7 +3523,7 @@ function 법상_시작_cleanup(s, name, tiers) {
     for (let i = 0; i < 2; i++) {
       record(s, 법상Dmg(s, 150, { bypassDef: true }), `법상·${name}(의념)`);
       s.법상_봉황각인 = Math.min(s.법상_봉황각인 + 1, 5);
-      applyBuff(s, '법상봉황_봉황각인', { defDebuff: 5 }, 20, 5);
+      applyBuff(s, '법상봉황_봉황각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
     }
     s._currentSource = prev;
   }
@@ -3517,6 +3532,8 @@ function 법상_시작_cleanup(s, name, tiers) {
     const prev = s._currentSource; s._currentSource = `법상·${name}·진령`;
     record(s, 법상Dmg(s, 550), `법상·${name}(진령)`);
     s._currentSource = prev;
+    // 적 받는 최종피해 +20% (10초) — 자기 입히는 finalDmg buff 로 표현 (자기 모든 피해 +20%)
+    applyBuff(s, '법상청교진_최종피해', { dmgMult: 20, cat: 'final' }, 10);
   }
 }
 
@@ -3525,6 +3542,20 @@ function 법상_매cast(s, name, tiers) {
     s.법상_교혼 = Math.min(s.법상_교혼 + 1, 10);
     TRACE(s, 'OPT', `🐉청교룡·실체 발동: 신통/법보 공격 → 교혼 +1 (${s.법상_교혼}/10)`);
     applyBuff(s, '법상청교_교혼', { atk: 6 }, 20, 10);
+    // 의념: 치명타 시 교혼 +1 추가 (cast 당 최대 1회) — sim 기댓값 모드: cr 확률 만큼 추가
+    if (tiers.의념) {
+      const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + (s.nextCast?.finalCR || 0) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
+      const 추가확률 = CFG.randomCrit ? (Math.random() < crEff ? 1 : 0) : crEff;
+      if (추가확률 > 0) {
+        const before = s.법상_교혼;
+        s.법상_교혼 = Math.min(s.법상_교혼 + 추가확률, 10);
+        const 실제증가 = s.법상_교혼 - before;
+        if (실제증가 > 0) {
+          TRACE(s, 'OPT', `🐉청교룡·의념: 치명타 → 교혼 +${실제증가.toFixed(2)} (${s.법상_교혼.toFixed(2)}/10)`);
+          applyBuff(s, '법상청교_교혼', { atk: 6 * 실제증가 }, 20, 10);
+        }
+      }
+    }
   }
   if (name === '적난새' && tiers.실체) {
     // 스펙: "3-5개의 불깃털을 발사, 1개당 3.50% 확정 피해"
@@ -3536,10 +3567,7 @@ function 법상_매cast(s, name, tiers) {
     for (let i = 0; i < 깃털수; i++) {
       record(s, 법상Dmg(s, 3.5 * 진령배수, { bypassDef: true }), `법상·${name}(불깃털)`);
       if (tiers.의념) s.법상_영혼++;
-      if (tiers.진령 && tiers.의념) {
-        s.법상_적난새의념피해횟수++;
-        applyBuff(s, '법상적난_진령_' + s.법상_적난새의념피해횟수, { dmgMult: 4, cat: 'amp' }, 10);
-      }
+      // 진령 buff 는 깃털 발사 시 X — 의념 발동 시 (빙의 종료 cleanup) 에서만 부여 (사양 정확 반영)
     }
     s._currentSource = prev;
     if (tiers.의념) TRACE(s, 'OPT', `🦅적난새·의념 누적: 영혼 ${s.법상_영혼}중첩 (3중첩당 종료 시 진원 7% 확정)`);
@@ -3564,7 +3592,7 @@ function 법상_매cast(s, name, tiers) {
   if (name === '청룡' && tiers.실체) {
     s.법상_용의예가 = Math.min(s.법상_용의예가 + 1, 5);
     TRACE(s, 'OPT', `🐉청룡·실체 발동: 신통/법보 공격 → 용의 예가 ${s.법상_용의예가}/5중첩 (적 받는 +${s.법상_용의예가*5}%, 입히는 -${s.법상_용의예가*5}%)`);
-    applyBuff(s, '법상청룡_용의예가', { defDebuff: 5 }, 20, 5);
+    applyBuff(s, '법상청룡_용의예가', { dmgMult: 5, cat: 'dealt' }, 20, 5);
   }
   if (name === '청룡' && tiers.진령) {
     s.법상_용의위엄 = Math.min(s.법상_용의위엄 + 1, 5);
@@ -3587,7 +3615,7 @@ function 법상_매cast(s, name, tiers) {
       record(s, 법상Dmg(s, 280, { bypassDef: true }), `법상·${name}(적색깃털)`);
       for (let i = 0; i < 6; i++) {
         s.법상_적혼 = Math.min(s.법상_적혼 + 1, 5);
-        applyBuff(s, '법상주작_적혼', { atk: 5 }, 20, 5);
+        applyBuff(s, '법상주작_적혼', { dmgMult: 5, cat: 'dealt' }, 20, 5);
       }
       s._currentSource = prev;
     }
@@ -3599,7 +3627,7 @@ function 법상_매cast(s, name, tiers) {
     s.법상_진룡각인 = Math.min(s.법상_진룡각인 + 1, 5);
     s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
     TRACE(s, 'OPT', `🐉진룡·실체 발동: 신통/법보 공격 → 진룡 각인 ${s.법상_진룡각인}/5중첩 (누적 ${s.법상_진룡각인_누적}회)`);
-    applyBuff(s, '법상진룡_진룡각인', { atk: 5 }, 20, 5);
+    applyBuff(s, '법상진룡_진룡각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
     if (s.법상_진룡각인_누적 % 3 === 0) {
       TRACE(s, 'OPT', `🐉진룡·실체 트리거: 진룡 각인 누적 ${s.법상_진룡각인_누적}회 → 용의 숨결 5회 700% (3명)`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
@@ -3617,7 +3645,7 @@ function 법상_매cast(s, name, tiers) {
       s._currentSource = prev;
       s.법상_진룡각인 = Math.min(s.법상_진룡각인 + 1, 5);
       s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
-      applyBuff(s, '법상진룡_진룡각인', { atk: 5 }, 20, 5);
+      applyBuff(s, '법상진룡_진룡각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
       if (s.법상_진룡각인_누적 % 3 === 0 && tiers.실체) {
         TRACE(s, 'OPT', `🐉진룡·실체 트리거 (의념 경유): 누적 ${s.법상_진룡각인_누적}회 → 용의 숨결 700%`);
         const p2 = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
@@ -3633,13 +3661,12 @@ function 법상_매cast(s, name, tiers) {
     while ((s.t - s.법상_봉황마지막발사T) >= 4 && s.법상_봉황마지막발사T + 4 < s.법상_빙의종료T) {
       s.법상_봉황마지막발사T += 4;
       s.t = s.법상_봉황마지막발사T; // 정확한 fire 시각 (9, 13, 17, 21, 25)
-      TRACE(s, 'OPT', `🦅봉황·실체 발동: 봉황깃털 6개 (총 300% 확정) + 봉황 각인 +6 (cap max 5)${tiers.진령 ? ' [진령: 추가 1-2개]' : ''}`);
+      TRACE(s, 'OPT', `🦅봉황·실체 발동: 봉황깃털 6개 (총 300% 확정) + 봉황 각인 +1${tiers.진령 ? ' [진령: 추가 1-2개]' : ''}`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·봉황깃털`;
       record(s, 법상Dmg(s, 300, { bypassDef: true }), `법상·${name}(봉황깃털)`);
-      for (let i = 0; i < 6; i++) {
-        s.법상_봉황각인 = Math.min(s.법상_봉황각인 + 1, 5);
-        applyBuff(s, '법상봉황_봉황각인', { defDebuff: 5 }, 20, 5);
-      }
+      // 사양: "대상에게 봉황 각인을 1중첩 부여" — 트리거 1번당 1중첩 (깃털 6개 발사와 별개)
+      s.법상_봉황각인 = Math.min(s.법상_봉황각인 + 1, 5);
+      applyBuff(s, '법상봉황_봉황각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
       if (tiers.진령) {
         if (CFG.randomCrit) {
           const 추가 = Math.random() < 0.5 ? 1 : 2;
@@ -3668,8 +3695,17 @@ function 법상_종료_cleanup(s, name, tiers) {
     if (발동수 > 0) {
       TRACE(s, 'OPT', `🦅적난새·의념 종료 cleanup: 영혼 ${s.법상_영혼}/3 = ${발동수}회 발동 → 3명 진원 7% 확정 (1회당)`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·영혼`;
-      for (let i = 0; i < 발동수; i++) record(s, 법상Dmg(s, 7, { bypassDef: true }), `법상·${name}(영혼)`);
+      for (let i = 0; i < 발동수; i++) {
+        record(s, 법상Dmg(s, 7, { bypassDef: true }), `법상·${name}(영혼)`);
+        // 진령: 의념 재능 효과로 피해 1회 입힐 때마다 자기 최종 피해 +4% (10초, 중첩)
+        if (tiers.진령) {
+          applyBuff(s, '법상적난_진령_' + i, { dmgMult: 4, cat: 'final' }, 10);
+        }
+      }
       s._currentSource = prev;
+      if (tiers.진령 && 발동수 > 0) {
+        TRACE(s, 'OPT', `🦅적난새·진령: 의념 ${발동수}회 발동 → 자기 최종피해 +${발동수*4}% (10초)`);
+      }
     }
   }
   if (name === '청반룡' && tiers.실체) {
@@ -3678,6 +3714,10 @@ function 법상_종료_cleanup(s, name, tiers) {
     const prev = s._currentSource; s._currentSource = `법상·${name}·종료`;
     record(s, 법상Dmg(s, 700), `법상·${name}(종료)`);
     s._currentSource = prev;
+  }
+  if (name === '청반룡' && tiers.의념) {
+    // 종료 시 자기 받는 피해 -20% (20초) — sim 자기 받는 피해 미모델, TRACE 만
+    TRACE(s, 'OPT', `🐉청반룡·의념 종료: 자기 받는 피해 -20% (sim 미모델, 효과 없음)`);
   }
   if (name === '청룡' && tiers.실체) {
     TRACE(s, 'OPT', `🐉청룡·실체 종료 cleanup: 3명 1500% (용의 숨결)`);
@@ -3720,7 +3760,7 @@ function 법상_종료_cleanup(s, name, tiers) {
     for (let i = 0; i < 2; i++) {
       record(s, 법상Dmg(s, 150, { bypassDef: true }), `법상·${name}(의념)`);
       s.법상_봉황각인 = Math.min(s.법상_봉황각인 + 1, 5);
-      applyBuff(s, '법상봉황_봉황각인', { defDebuff: 5 }, 20, 5);
+      applyBuff(s, '법상봉황_봉황각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
     }
     s._currentSource = prev;
   }
