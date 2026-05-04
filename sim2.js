@@ -3331,14 +3331,16 @@ function 비술_발동_자기(state, master, branch) {
     else state.악신_호신심화 = 0;
     TRACE(state, 'OPT', `🔮악신마주·${branch} 발동: 15초간 분신 추가 데미지 (본체 ${pct}% 속성)${branch === '진' ? ' + 호신강기 심화 +33%' : ''}`);
   } else if (master === '식혼') {
-    // sim 한계: 자기 사망 / 자기 호신강기 모델 X.
-    // 효과 구현 가능한 것만:
-    //   - 진: 자기 cr +9~19% (저체력) → 평균 14% buff 140초
-    //   - 허: 자기 피해 감면 — sim 미모델
-    //   - 무: 호신강기 회복 — sim 미모델 (state.shieldRem 은 적 호신강기라 건드리면 X)
+    // 사양: 첫 공격 시 발동, 140초간 효과 active. 호신강기 1개 (=baseShield/3) 흡수.
+    // 흡수 후 자기 HP = 호신강기 총합 × 47% (진) = baseShield × 0.47.
+    //   sim 환경 (baseHP 200억, baseShield 60억): HP = 60×0.47 = 28.2억 = maxHP 의 14%
+    //   → HP 25% 이하 → cr 9~19% 의 max 19% 도달
+    // 진: cr +19% (max, 흡수 후 저체력 가정)
+    // 허: 피해 감면 7~12% — sim 자기 받는 피해 미모델 → 효과 없음
+    // 무: 호신강기 회복 — sim 자기 호신강기 미모델 → 효과 없음
     if (branch === '진') {
-      applyBuff(state, '식혼진_cr', { cr: 14 }, 140);
-      TRACE(state, 'OPT', `🔮식혼마주·진 발동 (자기): cr +14% 140초`);
+      applyBuff(state, '식혼진_cr', { cr: 19 }, 140);
+      TRACE(state, 'OPT', `🔮식혼마주·진 발동 (자기): cr +19% 140초 (호신강기 1/3 흡수 → HP ~14% → 사양 max 19%)`);
     } else {
       TRACE(state, 'OPT', `🔮식혼마주·${branch} 발동 (자기): 자기 호신강기/피해감면 — sim 미모델, 효과 없음`);
     }
