@@ -11,8 +11,8 @@ const CFG = {
   // ---- 기본 스탯 (사용자 지정) ----
   baseATK: 160_000_000,    // 공격력 1.6억
   baseDEF: 100_000_000,    // 방어력 1억
-  baseHP: 20_000_000_000,  // 체력 200억
-  baseShield: 6_000_000_000, // 호신강기 60억
+  baseHP: 25_000_000_000,  // 체력 250억
+  baseShield: 9_000_000_000, // 호신강기 90억
   baseCR: 30,         // 기본 치명타율 (%)
   baseCD: 200,        // 기본 치명타 피해 (%)
   baseDodge: 5,       // 기본 회피 (%)
@@ -27,9 +27,9 @@ const CFG = {
   lowHPProb: 0.5,   // (임시) targetHPRatio 기반 모델 리팩터 전까지 유지
   // ---- 방어력 감산 (공식 비공개 → 단순 근사, 리팩터 시 적용 예정) ----
   defReduction: 0.7,   // 일반피해는 원피해의 70%만 적용 (30% 감산). 확정피해(백족)는 우회.
-  targetMaxHP: 20_000_000_000, // 160억 HP + 40억 호신강기
+  targetMaxHP: 25_000_000_000, // 250억 HP (호신강기 별도 90억)
   호신강기대상확률: 0.5, // 환음요탑: 대상이 호신강기 보유 확률
-  자신호신강기확률: 0.9, // 오염혁선: 자신 호신강기 활성 확률 (60억 풀이라 거의 항상 활성)
+  자신호신강기확률: 0.9, // 오염혁선: 자신 호신강기 활성 확률 (90억 풀이라 거의 항상 활성)
   // ---- 법보 절대값 (스크린샷 원문) ----
   법보_base_절대: 564_000_000, // 본체 5.64억
   법보_호신강기추가: 452_000_000, // 호신강기에 추가 4.52억 (대상 보유 시)
@@ -3353,7 +3353,7 @@ function 비술_발동_자기(state, master, branch) {
   } else if (master === '식혼') {
     // 사양: 첫 공격 시 발동, 140초간 효과 active. 호신강기 1개 (=baseShield/3) 흡수.
     // 흡수 후 자기 HP = 호신강기 총합 × 47% (진) = baseShield × 0.47.
-    //   sim 환경 (baseHP 200억, baseShield 60억): HP = 60×0.47 = 28.2억 = maxHP 의 14%
+    //   sim 환경 (baseHP 250억, baseShield 90억): HP = 90×0.47 = 42.3억 = maxHP 의 16.92%
     //   → HP 25% 이하 → cr 9~19% 의 max 19% 도달
     // 진: cr +19% (max, 흡수 후 저체력 가정)
     // 허: 피해 감면 7~12% — sim 자기 받는 피해 미모델 → 효과 없음
@@ -3630,12 +3630,11 @@ function 법상_매cast(s, name, tiers) {
     s._currentSource = prev;
   }
   if (name === '주작' && tiers.실체) {
-    // 5초마다 발동 — fire 시각을 state.t 로 임시 set 해서 정확한 시각에 emit
+    // 5초마다 발동 — 누적 미발동분 catch-up
+    // ⚠️ state.t 임시변경 안 함 — 현재 시각에 catch-up emit (trace 시간/풀 일관성)
     if (s.법상_주작마지막발사T === -Infinity) s.법상_주작마지막발사T = s.법상_빙의시작T - 5;
-    const savedT_주작 = s.t;
     while ((s.t - s.법상_주작마지막발사T) >= 5 && s.법상_주작마지막발사T + 5 < s.법상_빙의종료T) {
       s.법상_주작마지막발사T += 5;
-      s.t = s.법상_주작마지막발사T; // 정확한 fire 시각 (예: 14, 19, 24)
       TRACE(s, 'OPT', `🦅주작·실체 발동: 적색깃털 6개 (총 280% 확정) + 적혼 +6 (cap max 5)`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·적색깃털`;
       record(s, 법상Dmg(s, 280, { bypassDef: true }), `법상·${name}(적색깃털)`);
@@ -3645,7 +3644,6 @@ function 법상_매cast(s, name, tiers) {
       }
       s._currentSource = prev;
     }
-    s.t = savedT_주작; // 원래 cast 시각으로 복원
     if (s.법상_적혼 > 0) TRACE(s, 'OPT', `🦅주작 적혼 ${s.법상_적혼}/5중첩 (자기 입히는 +${s.법상_적혼*5}%, 받는 -${s.법상_적혼*5}%)`);
   }
   if (name === '진룡' && tiers.실체) {
@@ -3681,12 +3679,11 @@ function 법상_매cast(s, name, tiers) {
     }
   }
   if (name === '봉황' && tiers.실체) {
-    // 4초마다 발동 — fire 시각을 state.t 로 임시 set 해서 정확한 시각에 emit
+    // 4초마다 발동 — 누적 미발동분 catch-up
+    // ⚠️ state.t 임시변경 안 함 — 현재 시각에 catch-up emit (trace 시간/풀 일관성)
     if (s.법상_봉황마지막발사T === -Infinity) s.법상_봉황마지막발사T = s.법상_빙의시작T - 4;
-    const savedT_봉황 = s.t;
     while ((s.t - s.법상_봉황마지막발사T) >= 4 && s.법상_봉황마지막발사T + 4 < s.법상_빙의종료T) {
       s.법상_봉황마지막발사T += 4;
-      s.t = s.법상_봉황마지막발사T; // 정확한 fire 시각 (9, 13, 17, 21, 25)
       TRACE(s, 'OPT', `🦅봉황·실체 발동: 봉황깃털 6개 (총 300% 확정) + 봉황 각인 +1${tiers.진령 ? ' [진령: 추가 1-2개]' : ''}`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·봉황깃털`;
       record(s, 법상Dmg(s, 300, { bypassDef: true }), `법상·${name}(봉황깃털)`);
@@ -3703,7 +3700,6 @@ function 법상_매cast(s, name, tiers) {
       }
       s._currentSource = prev;
     }
-    s.t = savedT_봉황;
     if (s.법상_봉황각인 > 0) TRACE(s, 'OPT', `🦅봉황 각인 ${s.법상_봉황각인}/5중첩 (적 받는 +${s.법상_봉황각인*5}%, 입히는 -${s.법상_봉황각인*5}%)`);
   }
 }
@@ -4467,52 +4463,44 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         }
         state._관일이미처리 = false;
         // [청명·투진 → 경정] 지속 트리거: 투진 buff 동안 (20s) 2초마다 천뢰 15% — 최대 10회
-        // 봉황/주작 패턴 — 정확한 fire 시각마다 state.t 임시 변경하여 emit (시점별 buff snapshot 적용)
-        // 발동 시각: 경정시작+2, +4, ..., +20
-        // ⚠️ while 조건은 savedT (cast 시각) 기준 — state.t 는 iter 안에서 변경되므로 사용 X
+        // 발동 시각: 경정시작+2, +4, ..., +20 — 누적 카운터로 미발동분 catch-up
+        // ⚠️ state.t 임시변경 안 함 (시간/풀 상태 불일치 방지) — 모든 catch-up emit 은 현재 state.t 에 기록됨
         if (state.경정End > 0 && (state.경정누적 || 0) < 10) {
-          const savedT_경정 = state.t;
           while (state.경정누적 < 10
-                 && (state.경정시작 + (state.경정누적 + 1) * 2) <= savedT_경정
+                 && (state.경정시작 + (state.경정누적 + 1) * 2) <= state.t
                  && (state.경정시작 + (state.경정누적 + 1) * 2) <= state.경정End) {
             state.경정누적 = (state.경정누적 || 0) + 1;
-            state.t = state.경정시작 + state.경정누적 * 2;  // 정확한 fire 시각
             state._currentSource = '투진·경정(지속)';
             천뢰발동(state, state.famSlots, 15, '투진·경정');
           }
-          state.t = savedT_경정;  // 원래 cast 시각 복원
-          if (state.경정누적 >= 10 || savedT_경정 >= state.경정End) {
+          if (state.경정누적 >= 10 || state.t >= state.경정End) {
             state.경정End = 0;
           }
         }
         // [천벌] (청명 유파 — 뇌인 4중첩 획득 시): 10초간 초당 천뢰 30% × 10회
+        // ⚠️ state.t 임시변경 안 함 — 모든 catch-up emit 은 현재 state.t 에 기록됨 (trace 시간/풀 일관성)
         if (state.천벌End > 0 && (state.천벌누적 || 0) < 10) {
-          const savedT_천벌 = state.t;
           while (state.천벌누적 < 10
-                 && (state.천벌시작 + (state.천벌누적 + 1)) <= savedT_천벌
+                 && (state.천벌시작 + (state.천벌누적 + 1)) <= state.t
                  && (state.천벌시작 + (state.천벌누적 + 1)) <= state.천벌End) {
             state.천벌누적 = (state.천벌누적 || 0) + 1;
-            state.t = state.천벌시작 + state.천벌누적;
             state._currentSource = '천벌(뇌인4)';
             천뢰발동(state, state.famSlots.청명 || 0, 30, '천벌(뇌인4)');
           }
-          state.t = savedT_천벌;
           if (state.천벌누적 >= 10) state.천벌End = 0;
         }
         // [업화 비술 무/허] 10초간 초당 1tick × 10회 — DoT 분산 emit
         // 데미지 = min(maxHP×hpPct, atk×atkCap) — 부여 시점에 절대값 스냅샷, buff/defMult 미적용
+        // ⚠️ state.t 임시변경 안 함 — 현재 state.t 에 catch-up emit
         if (state.업화DoTEnd > 0 && (state.업화DoT누적 || 0) < 10) {
-          const savedT_업화 = state.t;
           while (state.업화DoT누적 < 10
-                 && (state.업화DoT시작 + (state.업화DoT누적 + 1)) <= savedT_업화
+                 && (state.업화DoT시작 + (state.업화DoT누적 + 1)) <= state.t
                  && (state.업화DoT시작 + (state.업화DoT누적 + 1)) <= state.업화DoTEnd) {
             state.업화DoT누적 = (state.업화DoT누적 || 0) + 1;
-            state.t = state.업화DoT시작 + state.업화DoT누적;
             state._currentSource = `업화마주·${state.업화DoT브랜치}(DoT)`;
             // 절대값 직접 emit — dealDamage 거치지 않음
             record(state, state.업화DoT단위_절대 || 0, `업화마주·${state.업화DoT브랜치}(DoT tick ${state.업화DoT누적}/10)`);
           }
-          state.t = savedT_업화;
           if (state.업화DoT누적 >= 10) state.업화DoTEnd = 0;
         }
         // [분광] 지속 트리거: 30s간 신통 시전마다 검심 +1 + 24% 호무 (max tier)
