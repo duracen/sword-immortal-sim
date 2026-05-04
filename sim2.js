@@ -252,6 +252,26 @@ function hpRatio(state) {
   const hpRem = (state.hpRem !== undefined) ? state.hpRem : baseHP;
   return Math.max(0, Math.min(1, hpRem / baseHP));
 }
+// === 자기 HP 비율 — 현재 sim 에선 자기 받는 피해 미모델이라 항상 100%.
+// 미래 대결 sim 에서 자기 HP 가 줄어들 수 있도록 인프라만 준비.
+// 식혼·진 cr 9~19% 같이 자기 HP 기반 효과 계산용.
+function selfHpRatio(state) {
+  const max = state.selfHpMax || CFG.baseHP || 1;
+  const rem = (state.selfHpRem !== undefined) ? state.selfHpRem : max;
+  return Math.max(0, Math.min(1, rem / max));
+}
+// 자기 HP 기반 선형 보간 (예: HP 100% → low 값, HP 25% 이하 → high 값)
+// thresholdLow: 이 비율 이하에서 high 값 적용 (사양 "HP 25% 이하 max")
+// 사용 예: selfHpScale(state, 9, 19, 0.25) → HP 따라 9~19% 동적
+function selfHpScale(state, lowVal, highVal, thresholdLow) {
+  const ratio = selfHpRatio(state);
+  const thr = thresholdLow != null ? thresholdLow : 0;
+  if (ratio <= thr) return highVal;
+  if (ratio >= 1) return lowVal;
+  // 100% ~ thr 사이 선형 보간
+  const t = (1 - ratio) / (1 - thr);
+  return lowVal + (highVal - lowVal) * t;
+}
 // 불씨 세트 급수 보너스 계산 — "개수별 최대급수" (성급 조건 없이 장착 개수로만)
 function 불씨급수값(state, name, tiers) {
   const src = (state && state.불씨) || CFG.불씨 || {};
@@ -3339,8 +3359,12 @@ function 비술_발동_자기(state, master, branch) {
     // 허: 피해 감면 7~12% — sim 자기 받는 피해 미모델 → 효과 없음
     // 무: 호신강기 회복 — sim 자기 호신강기 미모델 → 효과 없음
     if (branch === '진') {
-      applyBuff(state, '식혼진_cr', { cr: 19 }, 140);
-      TRACE(state, 'OPT', `🔮식혼마주·진 발동 (자기): cr +19% 140초 (호신강기 1/3 흡수 → HP ~14% → 사양 max 19%)`);
+      // 사양: cr 9~19% (HP 100% → 9%, HP 25% → 19% 선형, 25% 이하 max)
+      // selfHpScale 로 자기 HP 비율 따라 동적 계산 — 현재 sim 자기 HP 100% 라
+      // cr 9% 부여되지만, 미래 대결 sim 추가 시 자동으로 9~19% 스케일 동작.
+      const cr값 = selfHpScale(state, 9, 19, 0.25);
+      applyBuff(state, '식혼진_cr', { cr: cr값 }, 140);
+      TRACE(state, 'OPT', `🔮식혼마주·진 발동 (자기): cr +${cr값.toFixed(1)}% 140초 (자기 HP ${(selfHpRatio(state)*100).toFixed(0)}% 기준, 사양 9~19%)`);
     } else {
       TRACE(state, 'OPT', `🔮식혼마주·${branch} 발동 (자기): 자기 호신강기/피해감면 — sim 미모델, 효과 없음`);
     }
@@ -3857,9 +3881,14 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   state.treasures = treasures;
   state.selectedSkills = new Set(chosen.map(c => c.name));
   state.targetLawBody = (opts && opts.targetLawBody) || null;
-  // 호신강기 / HP 풀 초기화
+  // 호신강기 / HP 풀 초기화 (적측)
   state.shieldRem = CFG.baseShield;
   state.hpRem = CFG.baseHP;
+  // 자기 측 HP 풀 (현재 sim 자기 받는 피해 미모델 — 항상 100% 유지).
+  // 미래 대결 sim 에서 자기 HP 가 줄어들 수 있도록 인프라만 준비.
+  // selfHpScale() 함수가 이 값 기반으로 자기 HP 기반 효과 계산 (식혼·진 cr 9~19% 등).
+  state.selfHpMax = CFG.baseHP;
+  state.selfHpRem = CFG.baseHP;
   // 비술 옵션: opts.bisul = { self: [...], enemy: [...] } → CFG.bisul 에 set (사용 후 비움)
   CFG.bisul = (opts && opts.bisul) || { self: [], enemy: [] };
   // 법상 옵션: opts.법상 = { name: string|null, tiers: {실체,의념,진령} }
