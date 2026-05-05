@@ -1808,13 +1808,12 @@ SK['균천·현봉'] = {
       TRACE(s, 'OPT', `🟠현봉·남월 발동: 검세 ${js}중첩 ≥ 5 → 즉시 천검 발동 (천검 +80% 증폭)`);
       천검발동(s, slots, 80, '천검(남월)');
     }
-    // [절진] crRes 20% 10s (max tier) — "본 신통으로 명중 시" debuff, 본 신통 record 직전 부여 (본 신통이 디버프 받도록)
-    applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10);
     // === 본 신통 (물리, 현봉 +3%/검세) ===
     record(s, dealDamage(s, 252 * selfMult));
-    // === 본 신통 명중 후 추가 데미지 ===
-    // [절진] 60% 호무 추가 — 명중 시 트리거
-    record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '절진(호무)');
+    // === 본 신통 명중 후 ===
+    // [절진] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
+    applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10); // crRes 20% 10s (max tier) — 후속 신통에 적용
+    record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '절진(호무)'); // 60% 호무 추가
   }
 };
 SK['균천·파월'] = {
@@ -1826,14 +1825,12 @@ SK['균천·파월'] = {
     // [여명] 100% 호무 추가 + 검세 +1 (max tier)
     record(s, dealDamage(s, 100, { noSkillMult: true, type: '호무' }), '여명(호무)');
     검세획득_균천(s, slots, 1);
-    // === "본 신통으로 적을 명중 시" 트리거 — 본 신통 record 직전 buff 부여 ===
-    // [귀진] def-20% 10s (max tier)
-    applyBuff(s, '균천파월_귀진', { defDebuff: 20 }, 10);
     // === 본 신통 ===
     record(s, dealDamage(s, 225));
     // === 본 신통 명중 후 ===
-    // [귀진] 60% 호무 추가 — 본 신통 명중 후 추가 데미지 1회
-    record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '귀진(호무)');
+    // [귀진] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
+    applyBuff(s, '균천파월_귀진', { defDebuff: 20 }, 10); // def-20% 10s (max tier) — 후속 신통에 적용
+    record(s, dealDamage(s, 60, { noSkillMult: true, type: '호무' }), '귀진(호무)'); // 60% 호무 추가
   }
 };
 SK['균천·관일'] = {
@@ -1892,15 +1889,15 @@ SK['참허·단진'] = {
   fam: '참허', cat: '영검', main: 200,
   cast(s, slots) {
     // [단진+연광] 리필 창은 pre-DMG 섹션에서 reset+fire (자기 cast 포함, [광염] 패턴)
-    // [참파] 본 신통 명중 시 atk 20% 5s
-    applyBuff(s, '참허단진_참파', { atk: 20 }, 5);
-    // [참멸] 검심 +2 + def-30% 10s
+    // [참멸] 검심 +2 + def-30% 10s — "참멸" 사양상 즉발 부여 (본 신통에도 적용)
     검심획득(s, 2);
     applyBuff(s, '참허단진_참멸', { defDebuff: 30 }, 10);
     // 본 신통
     record(s, dealDamage(s, 200));
-    // [참파] 40% 호무 추가 (본 신통 명중 시 1회)
-    record(s, dealDamage(s, 40, { noSkillMult: true, type: '호무' }), '참파(호무)');
+    // === 본 신통 명중 후 ===
+    // [참파] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
+    applyBuff(s, '참허단진_참파', { atk: 20 }, 5); // atk 20% 5s — 후속 신통에 적용
+    record(s, dealDamage(s, 40, { noSkillMult: true, type: '호무' }), '참파(호무)'); // 40% 호무 추가
   }
 };
 SK['참허·엄동'] = {
@@ -2499,10 +2496,12 @@ SK['청명·풍뢰'] = {
     applyBuff(s, '청명풍뢰_풍뢰', {}, 20); // crit 시 천뢰 트리거 (별도 처리)
     s.풍뢰남은 = 14; // 발동 가능 횟수: 10 + 천적 4 (max tier)
     s._풍뢰분수 = 0; // 재시전 시 cr 분수 carry 리셋 (사이클당 buff 초기화)
-    applyBuff(s, '청명풍뢰_환우', { cr: 20 }, 10); // [환우] cr 20% (max tier)
-    applyBuff(s, '청명풍뢰_뇌벌', { atk: 30 }, 10); // [뇌벌] atk 30% (max tier)
-    천뢰발동(s, slots, 60, '풍뢰·뇌벌'); // [뇌벌] 60% 물리 (max tier)
-    record(s, dealDamage(s, 225));
+    applyBuff(s, '청명풍뢰_환우', { cr: 20 }, 10); // [환우] cr 20% (max tier) — 신통 시전 시 즉발
+    record(s, dealDamage(s, 225));  // 본 신통 먼저
+    // === 본 신통 명중 후 ===
+    // [뇌벌] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
+    applyBuff(s, '청명풍뢰_뇌벌', { atk: 30 }, 10); // atk 30% (max tier) — 후속 신통/천뢰에 적용
+    천뢰발동(s, slots, 60, '풍뢰·뇌벌'); // 60% 물리 천뢰 (max tier)
   }
 };
 
@@ -2657,16 +2656,17 @@ SK['오뢰·호후'] = {
     const baseCR = CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + (로컬FinalCR + s.nextCast.finalCR) / 100) * (1 + sumBuffCritRes(s) / 100);
     const crEff = Math.min(100, baseCR) / 100;
     const hits = SKILL_HITS['오뢰·호후'] || 3;  // 3명 광역
-    // [뇌신] 낙뢰 35% 기본 1회 + 본 신통 치명타 발동마다 추가 1회 (최대 3회 추가)
+    // [파군] 낙뢰 40% (max tier) — 본 신통 시전 시 즉발
+    낙뢰발동(s, slots, 40);
+    // 본 신통 (3명 광역)
+    record(s, dealDamage(s, 135, { localFinalCR: 로컬FinalCR }));
+    // === 본 신통 명중 후 ===
+    // [뇌신] "낙뢰 35% 기본 1회 + 본 신통 치명타 발동마다 추가 1회 (최대 3회)" — 본 신통 record 후 트리거
     낙뢰발동(s, slots, 35);
-    // 추가 낙뢰: hits 번 crit roll 후 실제 crit 수만큼 발동 (최대 3회)
     const 뇌신추가 = Math.min(randomTries(hits, crEff), 3);
     if (뇌신추가 > 0) 낙뢰발동(s, slots, 35 * 뇌신추가);
-    // [파군] 낙뢰 40% (max tier)
-    낙뢰발동(s, slots, 40);
-    // [성류] 본 신통으로 치명타 2회 이상 시 낙뢰 200% 술법 추가
+    // [성류] "본 신통으로 치명타 2회 이상 시 낙뢰 200% 술법 추가" — 본 신통 record 후 트리거
     if (CFG.randomCrit) {
-      // 랜덤 모드: hits 번 roll, 2회 이상 crit 났으면 발동
       let critRolls = 0;
       for (let i = 0; i < hits; i++) if (Math.random() < crEff) critRolls++;
       if (critRolls >= 2) 낙뢰발동(s, slots, 200);
@@ -2676,8 +2676,6 @@ SK['오뢰·호후'] = {
       const p성류 = Math.max(0, 1 - pNone - pOne);
       if (p성류 > 0) 낙뢰발동(s, slots, 200 * p성류);
     }
-    // 본 신통 (3명 광역)
-    record(s, dealDamage(s, 135, { localFinalCR: 로컬FinalCR }));
   }
 };
 SK['오뢰·용음'] = {
@@ -2712,15 +2710,16 @@ SK['신소·운록'] = {
     // [뇌동] 신소 +1 획득 + cd+15% 10s 지속 버프 (shintongOnly)
     addStack(s, '신소', 1, Infinity);
     applyBuff(s, '신소운록_뇌동', { cd: 15, shintongOnly: true }, 10);
-    // [벽력] crit 시 atk 40% 10초 (max tier)
-    const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
-    const 벽력val = probScale(crEff) * 40;
-    if (벽력val > 0) applyBuff(s, '신소운록_벽력', { atk: 벽력val }, 10);
     // [파군] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·운록 → 파군] 본 신통 cd +35% (이번 cast 한정)`);
     record(s, dealDamage(s, 135, { localCD: 35 }));
-    // [전철] 범위 내 3명 81% 물리 추가
+    // [전철] 범위 내 3명 81% 물리 추가 (시전 시 즉발)
     record(s, dealDamage(s, 81, { noSkillMult: true }), '전철');
+    // === 본 신통 명중 후 ===
+    // [벽력] "본 신통으로 적에게 치명타를 입힐 경우, 10초간 atk 40%" — 본 신통 record 후 트리거
+    const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
+    const 벽력val = probScale(crEff) * 40;
+    if (벽력val > 0) applyBuff(s, '신소운록_벽력', { atk: 벽력val }, 10); // 후속 신통에 적용
   }
 };
 SK['신소·천고'] = {
@@ -2753,9 +2752,10 @@ SK['신소·환뢰'] = {
     applyBuff(s, '신소환뢰_구소', { atk: 15 }, 5); // [구소] atk 15% (max tier)
     // [뇌전] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·환뢰 → 뇌전] 본 신통 cd +35% (이번 cast 한정)`);
-    // [호탕] crit 시 방어력 50% 감소 (max tier)
-    // 기댓값: 4히트 중 ≥1 crit 확률 × 50 스케일
-    // 랜덤: 4번 roll, 1회 이상 crit 이면 full 50
+    // 4회 반사 decay emit
+    recordMultiHit(s, 128, 4, { localCD: 35 });
+    // === 본 신통 명중 후 ===
+    // [호탕] "본 신통으로 적에게 치명타를 입힐 경우" — 본 신통 record 후 트리거
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
     let 호탕val;
     if (CFG.randomCrit) {
@@ -2766,9 +2766,7 @@ SK['신소·환뢰'] = {
       const p호탕 = 1 - Math.pow(1 - crEff, 4);
       호탕val = 50 * p호탕;
     }
-    if (호탕val > 0) applyBuff(s, '신소환뢰_호탕', { defDebuff: 호탕val }, 10);
-    // 4회 반사 decay emit
-    recordMultiHit(s, 128, 4, { localCD: 35 });
+    if (호탕val > 0) applyBuff(s, '신소환뢰_호탕', { defDebuff: 호탕val }, 10); // def-50% 10s — 후속 신통에 적용
     // [풍세] 다음 신통 최종 피해 +20% (max tier) — record 후 설정
     TRACE(s, 'OPT', `🟠환뢰·풍세 발동: 다음 신통 최종피해 +20%`);
     addNextCast(s, 'finalDmg', 20);

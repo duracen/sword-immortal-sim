@@ -14,10 +14,12 @@ function Row({ ev }) {
   const tagCls = TAG_COLORS[ev.tag] || 'text-slate-300 bg-slate-800';
   return (
     <div className="flex items-start gap-2 px-3 py-1 border-b border-slate-800/70 font-mono text-xs">
-      <span className="text-slate-500 w-16 shrink-0 leading-5">{(ev.t ?? 0).toFixed(2)}s</span>
-      <span className={`px-1.5 rounded shrink-0 w-12 text-center leading-5 ${tagCls}`}>
-        {ev.tag}
-      </span>
+      <div className="shrink-0 w-16 flex flex-col items-start gap-0.5">
+        <span className="text-slate-500 leading-4">{(ev.t ?? 0).toFixed(2)}s</span>
+        <span className={`px-1.5 rounded leading-4 w-full text-center ${tagCls}`}>
+          {ev.tag}
+        </span>
+      </div>
       <span className="text-slate-200 whitespace-pre-wrap break-words leading-5 flex-1 min-w-0">
         {ev.msg}
       </span>
