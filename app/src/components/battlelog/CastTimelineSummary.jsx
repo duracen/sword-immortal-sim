@@ -118,30 +118,34 @@ function parseEvents(events) {
         }
       } catch (_) { /* ignore */ }
     } else if (ev.tag === 'TRG' && ev.msg.includes('천검발동')) {
-      pushTrigger({ t: ev.t, kind: '천검', label: '천검', dur: TRIG_DUR.천검 });
+      // 천검 — sim 의 [post] 태그로 timing 결정 (record 전: cast 시점 / record 후: +0.4)
+      const offset = ev.msg.includes('[post]') ? 0.4 : 0;
+      pushTrigger({ t: ev.t + offset, kind: '천검', label: '천검', dur: TRIG_DUR.천검 });
     } else if (ev.tag === 'OPT' && ev.msg.includes('⚡천벌')) {
-      pushTrigger({ t: ev.t, kind: '천벌', label: '천벌 10s', dur: TRIG_DUR.천벌 });
+      // 천벌 — 뇌인 4중첩 도달 시 발동. 뇌인은 청명 유파 "신통 명중 시"만 누적 → 항상 cast 후 trigger
+      pushTrigger({ t: ev.t + 0.4, kind: '천벌', label: '천벌 10s', dur: TRIG_DUR.천벌 });
     } else if (ev.tag === 'OPT' && ev.msg.includes('🔥염양')) {
-      // 염양은 본 신통 DMG 후에 발동 → 시각상 cast 라인보다 살짝 뒤에 표시
-      // (이번 신통에는 buff 미적용 의미)
-      pushTrigger({ t: ev.t + 0.4, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
+      // 염양 — sim 의 [post] 태그로 timing 결정 (record 전: cast 시점 / record 후: +0.4)
+      const offset = ev.msg.includes('[post]') ? 0.4 : 0;
+      pushTrigger({ t: ev.t + offset, kind: '염양', label: '염양 10s', dur: TRIG_DUR.염양 });
     } else if (ev.tag === 'OPT' && /(?:🐉|🦅)법상·/.test(ev.msg) && ev.msg.includes('빙의 시작')) {
-      // 법상 빙의 시작 — "🐉법상·{name} 빙의 시작 @29.0s (지속 20초)" 형식
-      // 메시지에 @t 가 있으면 정확한 시작 시각 사용 (cast 이벤트 단위 sim 의 보정)
+      // 법상 빙의 시작 — 첫 공격 cast 직후 (cast 자체엔 effect 미적용)
+      // 시각상 cast 라인보다 살짝 뒤(+0.4s)에 표시 (염양 패턴 — 이번 cast 영향 X 의미)
       const m = ev.msg.match(/(🐉|🦅)법상·([가-힣]+) 빙의 시작/);
       const tMatch = ev.msg.match(/@([\d.]+)s/);
       if (m) {
         const name = m[2];
         const startT = tMatch ? parseFloat(tMatch[1]) : ev.t;
-        pushTrigger({ t: startT, kind: name, label: `${m[1]}법상·${name} 20s`, dur: TRIG_DUR[name] || 20 });
+        pushTrigger({ t: startT + 0.4, kind: name, label: `${m[1]}법상·${name} 20s`, dur: TRIG_DUR[name] || 20 });
       }
     } else if (ev.tag === 'OPT' && ev.msg.includes('🔮')) {
-      // 비술 발동 — "🔮{master}마주·{branch} 발동:..." 형식
+      // 비술 발동 — cast 후 효과 적용 (이번 cast 영향 X)
+      // 시각상 cast 라인보다 살짝 뒤(+0.4s)에 표시 (염양/법상 패턴)
       const m = ev.msg.match(/🔮(분혼|식혼|탁천|악신|혼원|업화)마주·([무허진])/);
       if (m) {
         const masterKey = `${m[1]}마주`;
         const dur = TRIG_DUR[masterKey] || 1;
-        pushTrigger({ t: ev.t, kind: masterKey, label: `${masterKey}·${m[2]} ${dur}s`, dur, branch: m[2] });
+        pushTrigger({ t: ev.t + 0.4, kind: masterKey, label: `${masterKey}·${m[2]} ${dur}s`, dur, branch: m[2] });
       }
     }
     // 열산상태 / 검심통명 등 유파 효과 buff 는 BUF 이벤트에서 처리

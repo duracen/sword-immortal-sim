@@ -1297,6 +1297,12 @@ function record(state, amount, source) {
   if (state._recordCount > 200000) {
     throw new Error(`record() 호출 횟수 200k 초과 — 무한 루프 가능성 (state.t=${state.t.toFixed(2)}s, src=${source || state._currentSource})`);
   }
+  // 본 신통 record 후 flag — 천검/염양 [post] 태그 검출용 (호무/천뢰 등 부수 record 는 무시)
+  // 신통 type 만 main hit 으로 인정 (호무 등은 부수 데미지)
+  const _bdType = state._lastBreakdown && state._lastBreakdown.type;
+  if (state._inMainCast && _bdType === '신통' && !state._postMainShintong) {
+    state._postMainShintong = true;
+  }
   // 첫 record 시점 buff/stack snapshot 캡처 — UI SNAP 용 (모든 cast type 포함: 신통/법보/기타)
   // _inMainCast 가 true 일 때만 캡처 (pre-cast hook 의 폭파 record 는 무시)
   if (state._inMainCast && !state._snapBuffsCaptured) {
@@ -1717,7 +1723,10 @@ SK['복룡·붕산'] = {
 
 // ---------- 영검: 균천 (검세·천검) ----------
 function 천검발동(s, slots, ampPct = 0, srcTag = '천검') {
-  TRACE(s, 'TRG', `천검발동 (검세=${s.stacks.검세||0}, +${ampPct}% 증폭, 검망남은=${s.검망남은||0}, src=${srcTag})`);
+  // 발동 timing — 본 신통 record 후면 [post] (검세 누적이 명중으로 도달 → 이번 cast 미적용)
+  // _postMainShintong: 신통 type record 후만 set (호무/천뢰 부수 record 는 미반영)
+  const postTag = s._postMainShintong ? ' [post]' : '';
+  TRACE(s, 'TRG', `천검발동 (검세=${s.stacks.검세||0}, +${ampPct}% 증폭, 검망남은=${s.검망남은||0}, src=${srcTag})${postTag}`);
   const prevSrc = s._currentSource;
   s._currentSource = srcTag;
   s.castCounts = s.castCounts || {};
@@ -2024,7 +2033,10 @@ function 염양발동(s, slots) {
   const slotPct = slots * 10;
   const 분겁보정 = s._분겁보정 || 1;
   const total = 80 * mult * 분겁보정;
-  TRACE(s, 'OPT', `🔥염양 발동: 80% × ${mult.toFixed(1)}(열산${slots}슬롯 +${slotPct}%)${분겁보정 > 1 ? ' ×1.5(분겁)' : ''} = ${total.toFixed(0)}%`);
+  // 발동 timing — 본 신통 record 후면 [post] (작열 6중첩 도달이 명중 후 작열 부여로 발생)
+  // _postMainShintong: 신통 type record 후만 set
+  const postTag = s._postMainShintong ? ' [post]' : '';
+  TRACE(s, 'OPT', `🔥염양 발동: 80% × ${mult.toFixed(1)}(열산${slots}슬롯 +${slotPct}%)${분겁보정 > 1 ? ' ×1.5(분겁)' : ''} = ${total.toFixed(0)}%${postTag}`);
   record(s, dealDamage(s, total, { noSkillMult: true }), '염양(유파)');
   // [순일·진공] 염양 발동 시 작열 1중첩 추가 (최대 4회)
   // [순일·순일+분궁] 염양 발동 시 30% 물리 1회 (최대 4회: 3+분궁1)
@@ -4300,6 +4312,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state._snapBuffsCaptured = false;
         state._snapBuffsAtDmg = null;
         state._snapStacksAtDmg = null;
+        // 본 신통 record 후 flag 리셋 — 천검/염양 [post] 태그 검출용
+        state._postMainShintong = false;
         state._snapNextCastConsumed = null;  // nextCast 소비 스냅샷 리셋
         state._consumedNextCastSources = [];  // 이전 cast 의 소비 source 가 stale 로 남지 않도록 리셋
         state._inMainCast = false;  // pre-cast hook 단계에선 false (메인 cast 진입 시 true)
@@ -4419,21 +4433,31 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // === 자기 비술 발동 (CD 160초 통일 — 비술_발동_자기 안에서 검사) ===
         state._castCountTotal = (state._castCountTotal || 0) + 1;
         const selfBisul = (CFG.bisul && CFG.bisul.self) || [];
+        // [Pre-cast] 분혼 — 사양 "공격 시" (cast 와 동시) → cast() 전 발동, 본 신통 영향 없는 별도 4회 1000%
         for (const b of selfBisul) {
           if (!b || !b.master || !b.branch) continue;
-          // 분혼: 신통/법보 공격 시 (매 cast 시도, CD 160s 통과 시만 발동)
           if (b.master === '분혼') {
             비술_발동_자기(state, b.master, b.branch);
           }
-          // 악신·진: 신통/법보 4회 공격 후 (4의 배수마다 시도, CD 통과 시만 발동)
+        }
+        SK[sk.name].cast(state, slots);
+        // [Post-cast] 악신/업화/식혼/탁천 — 사양 "공격 후" (cast 후 발동)
+        // 본 신통이 비술 effect 받지 않도록 cast() 후 호출 → 다음 cast 부터 분신/멸신 active
+        for (const b of selfBisul) {
+          if (!b || !b.master || !b.branch) continue;
+          // 악신·진: 신통/법보 4회 공격 후
           if (b.master === '악신' && b.branch === '진' && state._castCountTotal % 4 === 0) {
             비술_발동_자기(state, b.master, b.branch);
           }
-          // 악신·허: "자기 호신강기 0" 사양 — sim 자기 받는 피해 미모델 → 가상 트리거 (5번째 cast 시도)
+          // 악신·허: "자기 호신강기 0" 사양 — sim 미모델 → 가상 트리거 (5번째 cast 후)
           if (b.master === '악신' && b.branch === '허' && state._castCountTotal % 5 === 0) {
             비술_발동_자기(state, b.master, b.branch);
           }
-          // 업화: 진 = 매 cast 시도. 무/허 = 5회 누적마다 시도
+          // 악신·무: 적 호신강기 0 도달 시 (cast 후 체크)
+          if (b.master === '악신' && b.branch === '무' && (state.shieldRem || 0) <= 0) {
+            비술_발동_자기(state, b.master, b.branch);
+          }
+          // 업화: 진 = 매 cast 후 / 무·허 = 5회 누적 후
           if (b.master === '업화') {
             if (b.branch === '진') {
               비술_발동_자기(state, b.master, b.branch);
@@ -4442,20 +4466,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
               if (state.업화_누적공격 >= 5) {
                 const fired = 비술_발동_자기(state, b.master, b.branch);
                 if (fired) state.업화_누적공격 = 0;
-                // CD 미통과면 카운터 그대로 유지 — 다음 cast 시 재시도
               }
             }
           }
-          // 식혼/탁천: 자기 사용 시 sim 한계로 효과 의미 없으나 분기 추가 (예외 없이)
+          // 식혼/탁천: 자기 발동 시 sim 한계로 효과 의미 없으나 (cast 후 발동)
           if (b.master === '식혼' || b.master === '탁천') {
-            // 매 cast 시도 (CD 160 통과 시 발동, no-op 데미지)
-            비술_발동_자기(state, b.master, b.branch);
-          }
-        }
-        SK[sk.name].cast(state, slots);
-        // 악신·무: 적 호신강기 0 도달 시 (cast 후 체크) — _악신무발동 flag 대신 CD 160s 사용 (재발동 가능)
-        for (const b of selfBisul) {
-          if (b && b.master === '악신' && b.branch === '무' && (state.shieldRem || 0) <= 0) {
             비술_발동_자기(state, b.master, b.branch);
           }
         }
