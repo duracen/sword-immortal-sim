@@ -11,11 +11,13 @@ function canonicalDisplayKey(rawKey) {
   // "유파·신통 → 옵션" 형식 (applyBuff 에서 자동 생성)
   if (rawKey.includes('→')) {
     const parts = rawKey.split('→').map((s) => s.trim());
-    const skillFull = parts[0];  // "옥추·소명" 또는 "유리·옥호"
-    const suffix = parts[1];     // "소명" or "cd" or "버프"
+    const skillFull = parts[0];  // "옥추·소명" 또는 "유리·옥호" 또는 "법상·진룡"
+    const suffix = parts[1].replace(/_\d+$/, '');  // "소명" / "cd" / "진룡각인" / "진령"
     // 법보 체크 (유리·옥호 → 유리옥호)
     const joined = skillFull.replace(/·/g, '');
     if (TREASURE_PREFIXES.has(joined)) return joined;
+    // 법상 (법상·진룡 → 진룡각인 / 법상·청반의 → 입히는피해 등) — keyword 그대로
+    if (skillFull.startsWith('법상·')) return suffix;
     const opts = SKILL_OPTIONS[skillFull];
     if (opts && opts[suffix]) return suffix;
     // 옵션명 아님 (cd/cr 같은 기술적 접미) → 신통 뒷부분으로 수렴
@@ -28,6 +30,13 @@ function canonicalDisplayKey(rawKey) {
   const suffix = rawKey.substring(idx + 1).replace(/_\d+$/, '');
   // 법보 버프 (예: "유리옥호_버프") → 법보명 그대로 표시
   if (TREASURE_PREFIXES.has(prefix)) return prefix;
+  // 비술 buff (식혼진_cr, 분혼무_봉인 등) → '마주·갈래' 형식 (신통이 아니므로 별도 처리)
+  const bisulMatch = prefix.match(/^(분혼|식혼|탁천|악신|혼원|업화)([무허진])$/);
+  if (bisulMatch) return `${bisulMatch[1]}·${bisulMatch[2]}`;
+  // 법상 buff (법상청교_교혼, 법상진룡_진룡각인, 법상청반의_입히는피해 등) → keyword 이름 (suffix) 그대로
+  // tier suffix '의'/'진' (의념/진령) 도 prefix 의 일부 (법상청반의 / 법상청교진)
+  const lawMatch = prefix.match(/^법상(..)([의진])?$/);
+  if (lawMatch) return suffix;
   if (prefix.length >= 3) {
     const skillFull = `${prefix.substring(0, 2)}·${prefix.substring(2)}`;
     const opts = SKILL_OPTIONS[skillFull];
@@ -242,9 +251,10 @@ function parseEvents(events) {
       if (!buffMap.has(displayKey)) buffMap.set(displayKey, []);
       const spans = buffMap.get(displayKey);
       const last = spans[spans.length - 1];
-      // 같은 timestamp + 같은 rawKey 만 병합 (다른 rawKey 가 displayKey 만 같다면 별도)
-      // 예: '옥추소명_소명' / '옥추소명_cd' → 둘 다 display '소명' 이지만 rawKey 다르면 분리
-      if (last && last.rawKey === rawKey && Math.abs(last.start - start) < 0.05) {
+      // 같은 rawKey 의 연속 갱신 → 동일 span 으로 병합 (만료 전 재적용 케이스 — 진룡각인/적혼/봉황각인 등)
+      // 만료 후 재적용 (gap 발생) 시에만 새 span 시작
+      // 0.1s 버퍼: catch-up emit / 동시 cast 시 약간의 timing 오차 흡수
+      if (last && last.rawKey === rawKey && start <= last.end + 0.1) {
         last.end = Math.max(last.end, end);
         last.maxStack = Math.max(last.maxStack || 1, stack);
         last.stackCap = Math.max(last.stackCap || 1, stackCap);

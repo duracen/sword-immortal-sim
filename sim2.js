@@ -3468,10 +3468,13 @@ function 법상_틱(s, opts) {
   const name = CFG.법상.name;
   const tiers = CFG.법상.tiers || { 실체: true, 의념: true, 진령: true };
   const def = 법상_DEFS[name];
-  // 첫 공격 기록
-  if (s.법상_첫공격T === -Infinity) s.법상_첫공격T = s.t;
-  // 빙의 시작 — 첫 공격 즉시 (no delay) 또는 CD 끝난 후
-  // 스펙: "신통/법보로 공격 후 20초간 빙의" — "20초간" 은 빙의 지속시간 (delay 아님)
+  // 첫 공격 기록 — 스펙 "신통/법보로 공격 후" → 첫 공격 자체는 빙의 active 아님 (다음 cast 부터 빙의)
+  if (s.법상_첫공격T === -Infinity) {
+    s.법상_첫공격T = s.t;
+    return; // 첫 cast 는 법상 effect skip — 빙의는 이 cast 직후부터 시작
+  }
+  // 빙의 시작 — 첫 공격 직후 시작 (다음 cast 시점부터 active) 또는 CD 끝난 후
+  // 스펙: "신통/법보로 공격 후 20초간 빙의" — "공격 후" 라 첫 공격 자체엔 미적용
   // CD 180초 = 빙의 트리거 시각 기준 (트리거 후 180초 동안 다음 빙의 불가)
   const 다음빙의가능T = Math.max(s.법상_첫공격T, s.법상_lastCdEnd);
   if (s.t >= 다음빙의가능T && s.법상_빙의종료T <= s.t) {

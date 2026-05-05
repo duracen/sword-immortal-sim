@@ -189,6 +189,31 @@ const BEOPSANG_KEYWORD_DESCS = {
   봉황각인: '1중첩당 20초간 대상이 받는 피해를 5.00% 증가시키고, 입히는 피해를 5.00% 감소시킨다 (최대 5중첩).',
   방어감소: '청반룡 빙의 시작/종료 시 용의 숨결 700% + 20초간 대상의 방어력 20.00% 감소.',
   진령: '적난새 진령: 의념 효과로 피해 1회당 10초간 자기 입히는 최종 피해 +4.00% 증가 (중첩 가능).',
+  최종피해: '법상 의념/진령 효과 — 빙의 동안 자기 입히는 최종 피해 +20% (적난새 의념: 빙의 중 +20%, 청교룡 진령: 빙의 시 적 받는 최종 피해 +20% 10초).',
+  입히는피해: '청반룡 의념 — 빙의 돌입 시 20초간 자기 입히는 피해 +20%. 빙의 종료 시 20초간 자기 받는 피해 -20%.',
+  적약화: '업화·허 효과 — 10초간 대상의 신통 피해 심화/감면 -11%.',
+};
+
+// 비술 buff 설명 (sim2.js applyBuff 기준)
+const BISUL_DESCS = {
+  '식혼·진': '식혼마주·진 발동 후 140초간 치명타율 +9~19% (자기 HP 비율 따라 동적, HP 100% → +9%, HP 25% 이하 → +19%, sim 환경 자기 HP 미감소라 +9% 적용).',
+  '식혼·허': '식혼마주·허 발동 후 140초간 피해 감면 +7~12% (자기 HP 비율 따라 동적). sim 환경 자기 받는 피해 미모델 → 효과 미적용.',
+  '식혼·무': '식혼마주·무 발동 후 140초간 모든 방어법보 호신강기 총합의 76% 만큼 HP/maxHP 획득. sim 환경 자기 호신강기 미모델 → 효과 미적용.',
+  '분혼·무': '분혼마주·무 — 신통/법보 공격 시 15초간 대상 방어법보 봉인 + 4회 공격 (총 1000% 피해).',
+  '분혼·허': '분혼마주·허 — 신통/법보 공격 시 10초간 봉인 + 4회 1000% + 봉인 종료 후 10초간 호신강기 피해 심화 +18%.',
+  '분혼·진': '분혼마주·진 — 신통/법보 공격 시 15초간 자기 강화 (호신강기에 입히는 피해의 25% 만큼 추가 HP 감소) + 4회 800%.',
+  '악신·무': '악신마주·무 — 적 호신강기 0 도달 시 15초간 분신 (본체 39% 속성, 호신강기 0).',
+  '악신·허': '악신마주·허 — 자기 호신강기 0 도달 시 15초간 분신 (본체 20%, HP는 150%, 받는 피해 26% 전이).',
+  '악신·진': '악신마주·진 — 신통/법보 4회 공격 후 15초간 분신 (본체 30% + 호신강기 심화 +33%, 어떠한 피해도 받지 않음).',
+  '혼원·무': '혼원마주·무 — 방어법보 파괴 시 1법보 복구 + 호신강기 평균값 + 추가 10% 호신강기 획득 (적측).',
+  '혼원·허': '혼원마주·허 — 방어법보 파괴 시 1법보 복구 + 호신강기 평균의 60% + 12초간 신통/치명타 차단 +48%.',
+  '혼원·진': '혼원마주·진 — 방어법보 파괴 시 1법보 복구 + 호신강기 평균의 93% + 모든 미파괴 효과 지속.',
+  '탁천·무': '탁천마주·무 — 치명일격 받았을 때 maxHP 29% 회복 + 1초 면역. sim 환경 자기 받는 피해 미모델 → 효과 미적용.',
+  '탁천·허': '탁천마주·허 — 치명일격 시 maxHP 18% 회복 + 1초 면역 + 주변 3명 maxHP 9% (max atk 1620%) 확정 피해 × 2회. sim 자기측 효과 미적용.',
+  '탁천·진': '탁천마주·진 — 치명일격 시 maxHP 21% 회복 + 1초 면역 + 6초간 피해 감면 +24%. sim 자기측 효과 미적용.',
+  '업화·무': '업화마주·무 — 5회 공격마다 10초간 업화 DoT (1tick = min(maxHP×1.5%, atk×324%) × 10회).',
+  '업화·허': '업화마주·허 — 5회 공격마다 10초간 업화 DoT (1tick = min(maxHP×0.75%, atk×162%) × 10회) + 10초간 적 신통 피해 심화/감면 -11%.',
+  '업화·진': '업화마주·진 — 매 cast 시 10초간 업화 멸신 상태. 피해 15회마다 광역 발동 (대상 maxHP 1.5% / 자기 atk 324% 상한, 최대 10회).',
 };
 
 const BEOPSANG_NAME_MAP = {
@@ -205,17 +230,34 @@ const BEOPSANG_NAME_MAP = {
 export function lookupOption(bufKey) {
   if (!bufKey) return null;
 
-  // 법상 buff: "법상{2자}_{옵션}" 형식 (예: 법상청교_교혼, 법상진룡_진룡각인, 법상적난_진령_3)
+  // 비술 buff: "{마주}{갈래}_{stat}" 형식 (예: 식혼진_cr, 업화허_적약화, 분혼무_봉인)
+  const bisulMatch = bufKey.match(/^(분혼|식혼|탁천|악신|혼원|업화)([무허진])_(.+)$/);
+  if (bisulMatch) {
+    const master = bisulMatch[1];
+    const branch = bisulMatch[2];
+    const optionPart = bisulMatch[3].replace(/_\d+$/, '');
+    const fullKey = `${master}·${branch}`;
+    return {
+      skill: `🔮 비술·${master}마주 (${branch})`,
+      option: optionPart,
+      desc: BISUL_DESCS[fullKey] || null,
+    };
+  }
+
+  // 법상 buff: "법상{2자}{tier?}_{옵션}" — tier='의'/'진' (의념/진령), 없으면 실체
+  // 예: 법상청교_교혼 (실체) / 법상청반의_입히는피해 (의념) / 법상청교진_최종피해 (진령) / 법상적난_진령_3 (stack suffix)
   if (bufKey.startsWith('법상')) {
-    const after = bufKey.substring(2); // 예: "청교_교혼" 또는 "적난_진령_3"
-    const m = after.match(/^(..)_(.+)$/);
+    const after = bufKey.substring(2);
+    const m = after.match(/^(..)([의진])?_(.+)$/);
     if (m) {
       const shortName = m[1];
-      const optionPart = m[2].replace(/_\d+$/, ''); // stack suffix 제거
+      const tier = m[2]; // '의' / '진' / undefined
+      const optionPart = m[3].replace(/_\d+$/, '');
       const lawInfo = BEOPSANG_NAME_MAP[shortName];
+      const tierLabel = tier === '의' ? ' 의념' : tier === '진' ? ' 진령' : '';
       const desc = BEOPSANG_KEYWORD_DESCS[optionPart] || null;
       return {
-        skill: lawInfo ? `${lawInfo.icon} 법상·${lawInfo.full} (${lawInfo.급수}급)` : `법상·${shortName}`,
+        skill: lawInfo ? `${lawInfo.icon} 법상·${lawInfo.full}${tierLabel} (${lawInfo.급수}급)` : `법상·${shortName}${tierLabel}`,
         option: optionPart,
         desc,
       };
@@ -228,16 +270,29 @@ export function lookupOption(bufKey) {
     return { skill: '불씨', option: name, desc: BULSSI_DESCS[name] || null };
   }
 
-  // 포맷 1: "유파·신통 → 옵션"
+  // 포맷 1: "유파·신통 → 옵션" (or "법상·이름 → 옵션", "법상·이름의 → 옵션", "법상·이름진 → 옵션")
   if (bufKey.includes('→')) {
     const parts = bufKey.split('→').map((s) => s.trim());
-    const skillFull = parts[0];  // e.g., "청명·풍뢰" 또는 "유리·옥호"
+    const skillFull = parts[0];  // e.g., "청명·풍뢰" 또는 "유리·옥호" 또는 "법상·진룡"
     const optionRaw = parts[1];  // e.g., "뇌벌" 또는 "단진_5" (스택 suffix 포함될 수 있음)
     const option = optionRaw.replace(/_\d+$/, '');  // 스택 suffix 제거
     // 법보 체크 먼저 (유리·옥호 → 유리옥호)
     const joined = skillFull.replace(/·/g, '');
     if (TREASURE_DESCS[joined]) {
       return { skill: `📿${joined}`, option, desc: TREASURE_DESCS[joined] };
+    }
+    // 법상 (법상·진룡 → 진룡각인 / 법상·청반의 → 입히는피해 / 법상·청교진 → 최종피해 등)
+    const lawArrowMatch = skillFull.match(/^법상·(..)([의진])?$/);
+    if (lawArrowMatch) {
+      const shortName = lawArrowMatch[1];
+      const tier = lawArrowMatch[2];
+      const lawInfo = BEOPSANG_NAME_MAP[shortName];
+      const tierLabel = tier === '의' ? ' 의념' : tier === '진' ? ' 진령' : '';
+      return {
+        skill: lawInfo ? `${lawInfo.icon} 법상·${lawInfo.full}${tierLabel} (${lawInfo.급수}급)` : `법상·${shortName}${tierLabel}`,
+        option,
+        desc: BEOPSANG_KEYWORD_DESCS[option] || null,
+      };
     }
     const skillOpts = SKILL_OPTIONS[skillFull];
     if (skillOpts && skillOpts[option]) {
