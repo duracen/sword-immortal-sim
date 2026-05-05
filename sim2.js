@@ -1117,7 +1117,7 @@ function summarizeActiveEffects(state) {
 
 // 적용 레이어별 기여 버프 상세 나열 (breakdown에 부가)
 function detailedBuffBreakdown(state, bd) {
-  const cat = { 공격력: [], 유형피해: [], 신통피해: [], 심화피해: [], 입히는피해: [], 최종피해: [], cr: [], cd: [], crRes: [], def: [] };
+  const cat = { 공격력: [], 유형피해: [], 신통피해: [], 심화피해: [], 입히는피해: [], 최종피해: [], cr: [], cr_신통: [], cd: [], cd_신통: [], crRes: [], def: [] };
   const isShintong = (bd?.type === '신통');
   const isLawDmg = !!bd?.isLaw;  // 법상 damage — 법상* prefix buff 만, 본체 buff 미공유
   // state.buffs
@@ -1125,39 +1125,45 @@ function detailedBuffBreakdown(state, bd) {
     if (b.endT <= state.t) continue;
     // shintongOnly 버프는 신통 피해에만 표시 (실제 계산도 그때만 적용됨)
     if (b.shintongOnly && !isShintong) continue;
-    // 시스템 격리: 법상 damage 는 법상* prefix buff 만 (단, defDebuff/crRes 는 universal — 적 상태)
-    // 본체 damage 는 법상* prefix buff 제외
+    // 시스템 격리:
+    //  - 법상 damage: 법상* prefix buff + 일반 본체 buff (atk/cr/cd/crRes/dealt) 모두 적용 (sumBuff 함수가 이미 적용 중) → 표시도 동일
+    //  - 본체 damage: 법상* prefix buff 제외 (자기 본체 buff 만)
+    //  - 신통 전용 buff (inc/amp) 는 위 isShintong 가드로 자동 차단 — 법상 damage 에선 노출 X
     const isLawBuff = /^법상/.test(b.key || '');
-    const isAdversary = (b.defDebuff || b.crRes);  // 적 상태 — universal
-    if (!isAdversary) {
-      if (isLawDmg && !isLawBuff) continue;
-      if (!isLawDmg && isLawBuff) continue;
-    }
+    if (!isLawDmg && isLawBuff) continue;  // 본체 damage 시 법상 buff 제외
     const sc = b.stackCount || 1;
     const m = (b.key || '').match(/^(..)(..)_(.+)$/);
     const short = m ? `${m[2]}·${m[3]}` : b.key;
     const tag = sc > 1 ? `${short}×${sc}` : short;
     if (b.atk) cat.공격력.push(`${tag}+${(b.atk * sc).toFixed(0)}`);
-    if (b.inc) cat.신통피해.push(`${tag}+${(b.inc * sc).toFixed(0)}`);
-    if (b.amp) cat.심화피해.push(`${tag}+${(b.amp * sc).toFixed(0)}`);
+    // 신통 전용 buff (inc/amp) 는 신통 type 일 때만 표시 — 실제 적용도 isShintong 일 때만 됨
+    if (isShintong && b.inc) cat.신통피해.push(`${tag}+${(b.inc * sc).toFixed(0)}`);
+    if (isShintong && b.amp) cat.심화피해.push(`${tag}+${(b.amp * sc).toFixed(0)}`);
     if (b.finalDmg) cat.최종피해.push(`${tag}+${(b.finalDmg * sc).toFixed(0)}`);
-    if (b.cr) cat.cr.push(`${tag}+${(b.cr * sc).toFixed(0)}`);
-    if (b.cd) cat.cd.push(`${tag}+${(b.cd * sc).toFixed(0)}`);
+    // cr / cd: shintongOnly 여부에 따라 분리 (입히는피해 vs 신통피해 패턴과 동일)
+    if (b.cr) {
+      if (b.shintongOnly) cat.cr_신통.push(`${tag}+${(b.cr * sc).toFixed(0)}`);
+      else cat.cr.push(`${tag}+${(b.cr * sc).toFixed(0)}`);
+    }
+    if (b.cd) {
+      if (b.shintongOnly) cat.cd_신통.push(`${tag}+${(b.cd * sc).toFixed(0)}`);
+      else cat.cd.push(`${tag}+${(b.cd * sc).toFixed(0)}`);
+    }
     if (b.crRes) cat.crRes.push(`${tag}+${(b.crRes * sc).toFixed(0)}`);
     if (b.defDebuff) cat.def.push(`${tag}-${(b.defDebuff * sc).toFixed(0)}`);
-    if (b.cat === 'inc' && b.dmgMult) cat.신통피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
-    if (b.cat === 'amp' && b.dmgMult) cat.심화피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
+    if (isShintong && b.cat === 'inc' && b.dmgMult) cat.신통피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
+    if (isShintong && b.cat === 'amp' && b.dmgMult) cat.심화피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
     if (b.cat === 'dealt' && b.dmgMult) cat.입히는피해.push(`${tag}+${(b.dmgMult * sc).toFixed(0)}`);
   }
   // 자동 소스 (state.buffs 외 유파·공명·자원 기반 기여) — 법상 damage 는 본체 시스템 미공유
-  if (!isLawDmg && (state.catSlots.화염 || 0) >= 2 && (state.stacks.작열 || 0) > 0) cat.공격력.push('현염법체2+9');
-  // 영검법체4 는 buff '영검법체4' 로 등록되어 위 루프에서 자동 처리됨 (manual push 제거)
+  if (!isLawDmg && (state.catSlots.화염 || 0) >= 2 && (state.stacks.작열 || 0) > 0) cat.공격력.push('현염2법체+9');
+  // 영검4법체 는 buff '영검4법체' 로 등록되어 위 루프에서 자동 처리됨 (manual push 제거)
   // 신통피해 소스는 type='신통'일 때만 실제 적용됨 → 표시도 그때만 (법상 damage 도 isShintong=false 라 skip)
   const isShintongType = isShintong && !isLawDmg;
   if (isShintongType) {
     if ((state.catSlots.영검 || 0) >= 2) {
       const incContrib = 공명inc(state);
-      if (incContrib) cat.신통피해.push(`공명영검2+${incContrib.toFixed(1)}`);
+      if (incContrib) cat.신통피해.push(`영검2법체+${incContrib.toFixed(1)}`);
     }
     if (famActive(state, '옥추') && state.stacks.옥추) {
       cat.신통피해.push(`옥추×${state.stacks.옥추}+${state.stacks.옥추}`);
@@ -1172,10 +1178,10 @@ function detailedBuffBreakdown(state, bd) {
       if (환) cat.신통피해.push(`환체독고×${환.toFixed(0)}+${(환*2.5).toFixed(0)}`);
     }
   }
-  // 공명뇌전2 / 뇌인 스택은 "신통 시전 시" → 신통 피해에만 표시
+  // 공명뇌전2 / 뇌인 스택은 "신통 시전 시" → 신통 전용 cr 카테고리에 표시
   if (isShintong) {
-    if ((state.catSlots.뇌전 || 0) >= 2) cat.cr.push('공명뇌전2+11');
-    if (famActive(state, '청명') && state.stacks.뇌인) cat.cr.push(`뇌인×${state.stacks.뇌인}+${state.stacks.뇌인 * 5}`);
+    if ((state.catSlots.뇌전 || 0) >= 2) cat.cr_신통.push('유뢰2법체+11');
+    if (famActive(state, '청명') && state.stacks.뇌인) cat.cr_신통.push(`뇌인×${state.stacks.뇌인}+${state.stacks.뇌인 * 5}`);
   }
   // 불씨 세트 효과 표시 — 탑티어 값만 (state.불씨 또는 CFG.불씨 fallback)
   const 불씨Src = (state.불씨) || CFG.불씨 || {};
@@ -1261,7 +1267,9 @@ function detailedBuffBreakdown(state, bd) {
   push('심화피해', cat.심화피해);
   push('입히는피해', cat.입히는피해);
   push('cr', cat.cr);
+  push('cr(신통)', cat.cr_신통);
   push('cd', cat.cd);
+  push('cd(신통)', cat.cd_신통);
   push('crRes', cat.crRes);
   push('def', cat.def);
   push('최종피해', cat.최종피해);
@@ -1289,13 +1297,9 @@ function record(state, amount, source) {
   if (state._recordCount > 200000) {
     throw new Error(`record() 호출 횟수 200k 초과 — 무한 루프 가능성 (state.t=${state.t.toFixed(2)}s, src=${source || state._currentSource})`);
   }
-  // 첫 신통-type record 시점 buff/stack snapshot 캡처 — UI SNAP 용 ("본 신통 DMG 적용 시점" 상태)
-  // 호무/천뢰/작열 등 추가 데미지가 본 신통보다 먼저 record 되는 경우 (여명/동현/뇌벌 등),
-  // 그 이후 본 신통 record 직전에 부여되는 buff (제월/귀진/검망 등) 도 SNAP 에 포함되도록
-  // type==='신통' 인 record 까지 캡처 보류.
+  // 첫 record 시점 buff/stack snapshot 캡처 — UI SNAP 용 (모든 cast type 포함: 신통/법보/기타)
   // _inMainCast 가 true 일 때만 캡처 (pre-cast hook 의 폭파 record 는 무시)
-  const _bdType = state._lastBreakdown && state._lastBreakdown.type;
-  if (state._inMainCast && !state._snapBuffsCaptured && _bdType === '신통') {
+  if (state._inMainCast && !state._snapBuffsCaptured) {
     state._snapBuffsCaptured = true;
     state._snapBuffsAtDmg = state.buffs.map(b => ({
       key: b.key, endT: b.endT, stackCount: b.stackCount, maxStacks: b.maxStacks,
@@ -1472,7 +1476,7 @@ function record(state, amount, source) {
   // 분신 damage 는 본체 신통이 아니므로 법체4 트리거 X. 법상 damage 는 type='기타' 라 자동 제외.
   if (bd && bd.type === '신통' && (state.catSlots.영검 || 0) >= 4 && hpBelow(state, 0.80)
       && !(state._activeCast && state._activeCast.startsWith('법보:'))) {
-    applyBuff(state, '영검법체4', { atk: 20 }, 5);
+    applyBuff(state, '영검4법체', { atk: 20 }, 5);
   }
   // === 법상 금오 실체 발사 (record 안에서 카운터 10 도달 시 pending 설정 → 여기서 emit) ===
   // 재귀 안전: 화염깃털 record() 호출 시 src 가 '법상·' 시작이라 카운터 ++ 안 됨
@@ -3795,6 +3799,8 @@ function 법상_종료_cleanup(s, name, tiers) {
 // 모든 법보: base 5.64억 절대값 + 호신강기에 추가 4.52억 (대상 보유 시), 32s CD, 5s 공통쿨 공유
 // 원문: "재사용 시간: 32초, 적군에게 5.64억의 피해를 입히고, 호신강기에 추가로 4.52억의 피해를 입힌다"
 // 법보: 공격력 100% 기반 (신통과 동일 시스템)
+// 법보는 type='법보절대' 로 처리 — 신통 전용 buff (inc/amp/신통계수보너스/합체기·반허기·인간계 보너스/영검2법체·유뢰4법체 등) 미적용
+// dealt/atk/dmgMult cat:'final' buff 등 "모든 type 적용" 인 buff 만 적용됨
 const TREASURES = {
   환음요탑: {
     name: '환음요탑',
@@ -3802,7 +3808,7 @@ const TREASURES = {
       // 대상 호신강기 보유 시 본 법보 피해 +25%
       // 기댓값: 확률 × 25 / 랜덤: 주사위 roll → 발동 시 full 25
       const mult = 1 + 0.25 * probScale(CFG.호신강기대상확률);
-      record(s, dealDamage(s, 100 * mult));
+      record(s, dealDamage(s, 100 * mult, { type: '법보절대' }));
     }
   },
   참원선검: {
@@ -3810,13 +3816,13 @@ const TREASURES = {
     cast(s) {
       // 본 법보 피해 +10%~+20% (대상 현재 체력% 낮을수록 증가) — 실시간 HP 기반 선형
       const mult = 1 + (0.10 + 0.10 * hpLowFactor(s));
-      record(s, dealDamage(s, 100 * mult));
+      record(s, dealDamage(s, 100 * mult, { type: '법보절대' }));
     }
   },
   유리옥호: {
     name: '유리옥호',
     cast(s) {
-      record(s, dealDamage(s, 100));
+      record(s, dealDamage(s, 100, { type: '법보절대' }));
       // 10초간 자가 cr+15, cd+15 (신통/법보 치명타 피해 배율 +15%)
       applyBuff(s, '유리옥호_버프', { cr: 15, cd: 15, shintongOnly: true }, 10); // "신통/법보 치명타 피해 배율"
     }
@@ -3827,7 +3833,7 @@ const TREASURES = {
       // 자신 호신강기 보유 시 본 법보 피해 +15%
       // 기댓값: 확률 × 15 / 랜덤: 주사위 roll → 발동 시 full 15
       const mult = 1 + 0.15 * probScale(CFG.자신호신강기확률);
-      record(s, dealDamage(s, 100 * mult));
+      record(s, dealDamage(s, 100 * mult, { type: '법보절대' }));
     }
   },
 };
@@ -3870,6 +3876,117 @@ function selectSkillsForBuild(build) {
   }
   return chosen;
 }
+// 버프 key 를 통일 라벨로 정규화 — detailedBuffBreakdown 과 동일 규칙 + 특수 케이스
+//   '청명풍뢰_뇌벌'  → '풍뢰·뇌벌'      (신통 옵션)
+//   '법상진룡_진룡각인' → '진룡·진룡각인'  (법상 keyword)
+//   '유리옥호_버프'  → '유리옥호'        (법보)
+//   '식혼진_cr'      → '식혼·진'         (비술)
+//   '검심통명' / '유뢰2법체' → 자체 (특수 상태/공명)
+function formatBuffLabel(key) {
+  if (!key) return '?';
+  // 법보 buff (treasure_X 형태) — 법보명 그대로
+  if (/^(환음요탑|참원선검|유리옥호|오염혁선)_/.test(key)) {
+    return key.split('_')[0];
+  }
+  // 비술 buff: 분혼무_X / 식혼진_cr / 악신허_X 등 → 마주·갈래 형식
+  const bisulMatch = key.match(/^(분혼|식혼|탁천|악신|혼원|업화)([무허진])(?:_(.+))?$/);
+  if (bisulMatch) return `${bisulMatch[1]}·${bisulMatch[2]}`;
+  // 신통 옵션 / 법상 keyword (4-char prefix + _ + suffix): {계열2}{유파2}_{옵션}
+  //   예: 청명풍뢰_뇌벌 → 풍뢰·뇌벌, 법상진룡_진룡각인 → 진룡·진룡각인
+  const m = key.match(/^(..)(..)_(.+)$/);
+  if (m) return `${m[2]}·${m[3]}`;
+  // 그 외 (검심통명/유뢰2법체/영검4법체/뇌인×N 등) — 자체 그대로
+  return key;
+}
+
+// 활성 버프 수치 SNAP 캡처/emit — 신통/법보 cast 후 호출 (state.t 기반)
+function emitSnapTrace(state) {
+  const bd = { atk: [], inc: [], amp: [], dealt: [], dealtShintong: [], cr: [], crShintong: [], cd: [], cdShintong: [], crRes: [], defDebuff: [], finalCR: [], finalCD: [], finalDmg: [] };
+  bd.inc = bd.dealtShintong;
+  const pushBuff = (field, key, val) => { if (val) bd[field].push({ src: key, val }); };
+  const snapBuffs = state._snapBuffsAtDmg || state.buffs;
+  const snapStacks = state._snapStacksAtDmg || state.stacks;
+  for (const b of snapBuffs) {
+    if (b.endT <= state.t) continue;
+    const stack = b.stackCount || 1;
+    // 버프 key 통일 라벨 (옵션·법상·법보·비술 일관 포맷)
+    const short = formatBuffLabel(b.key);
+    const label = stack > 1 ? `${short}×${stack}` : short;
+    if (b.atk) pushBuff('atk', label, b.atk * stack);
+    if (b.cr && !b.shintongOnly) pushBuff('cr', label, b.cr * stack);
+    if (b.cr && b.shintongOnly)  pushBuff('crShintong', label, b.cr * stack);
+    if (b.cd && !b.shintongOnly) pushBuff('cd', label, b.cd * stack);
+    if (b.cd && b.shintongOnly)  pushBuff('cdShintong', label, b.cd * stack);
+    if (b.crRes) pushBuff('crRes', label, b.crRes * stack);
+    if (b.defDebuff) pushBuff('defDebuff', label, b.defDebuff * stack);
+    if (b.cat === 'amp' && b.dmgMult) pushBuff('amp', label, b.dmgMult * stack);
+    if (b.cat === 'inc' && b.dmgMult) pushBuff('inc', label, b.dmgMult * stack);
+    if (b.cat === 'dealt' && b.dmgMult) pushBuff('dealt', label, b.dmgMult * stack);
+    if (b.dealt) pushBuff('dealt', label, b.dealt * stack);
+  }
+  if (famActive(state, '청명') && snapStacks.뇌인) pushBuff('crShintong', `뇌인×${snapStacks.뇌인}`, snapStacks.뇌인 * 5);
+  if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('crShintong', `유뢰2법체`, 11);
+  if (famActive(state, '옥추') && snapStacks.옥추) pushBuff('inc', `옥추×${snapStacks.옥추}`, snapStacks.옥추);
+  if (famActive(state, '옥추') && snapStacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
+  if (famActive(state, '신소') && snapStacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
+  if (famActive(state, '참허') && snapStacks.검심통명) pushBuff('inc', `참허슬롯×${state.famSlots.참허}`, state.famSlots.참허 * 3);
+  const 영검공명 = 공명inc(state);
+  if (영검공명) pushBuff('inc', `영검2법체`, 영검공명);
+  if (famActive(state, '균천') && snapStacks.검세) pushBuff('amp', `검세×${snapStacks.검세}`, snapStacks.검세 * 1.5);
+  const 통명 = 불씨급수값(state, '통명묘화', [4, 6, 8]);
+  if (통명) pushBuff('amp', '불씨·통명묘화', 통명);
+  const 유리 = 불씨급수값(state, '유리현화', [5, 10, 15]);
+  if (유리) pushBuff('amp', '불씨·유리현화', 유리);
+  const 태현 = 불씨급수값(state, '태현잔화', [4, 6, 8]);
+  if (태현) pushBuff('inc', '불씨·태현잔화(기댓값)', 태현);
+  const 진마Per = 불씨급수값(state, '진마성화', [1, 3, 3]);
+  if (진마Per && state.진마성화스택) pushBuff('amp', `불씨·진마성화×${state.진마성화스택}`, 진마Per * state.진마성화스택);
+  if (state.진무절화스택) pushBuff('dealt', '불씨·진무절화', state.진무절화스택);
+  if (state.nextCast) {
+    const nc = state.nextCast || {};
+    const ncSnap = state._snapNextCastConsumed || {};
+    if (nc.cr) pushBuff('crShintong', 'nextCast (다음)', nc.cr);
+    if (nc.cd) pushBuff('cdShintong', 'nextCast (다음)', nc.cd);
+    if (nc.finalCR) pushBuff('finalCR', 'nextCast (다음)', nc.finalCR);
+    if (nc.finalCD) pushBuff('finalCD', 'nextCast (다음)', nc.finalCD);
+    if (nc.finalDmg) pushBuff('finalDmg', 'nextCast (다음)', nc.finalDmg);
+    if (ncSnap.consumedSources && ncSnap.consumedSources.length > 0) {
+      for (const src of ncSnap.consumedSources) {
+        let field = src.field || 'finalDmg';
+        if (field === 'cr') field = 'crShintong';
+        else if (field === 'cd') field = 'cdShintong';
+        pushBuff(field, src.key, src.pct || 0);
+      }
+    } else {
+      if (ncSnap.cr) pushBuff('crShintong', 'nextCast (소비)', ncSnap.cr);
+      if (ncSnap.cd) pushBuff('cdShintong', 'nextCast (소비)', ncSnap.cd);
+      if (ncSnap.finalCR) pushBuff('finalCR', 'nextCast (소비)', ncSnap.finalCR);
+      if (ncSnap.finalCD) pushBuff('finalCD', 'nextCast (소비)', ncSnap.finalCD);
+      if (ncSnap.finalDmg) pushBuff('finalDmg', 'nextCast (소비)', ncSnap.finalDmg);
+    }
+    if (ncSnap.localFinalDmg) {
+      pushBuff('finalDmg', ncSnap.localFinalDmgSrc || '본 cast 한정', ncSnap.localFinalDmg);
+    }
+  }
+  const sum = (arr) => arr.reduce((a, b) => a + b.val, 0);
+  const _crGen = sum(bd.cr), _crShin = sum(bd.crShintong);
+  const _cdGen = sum(bd.cd), _cdShin = sum(bd.cdShintong);
+  const _dealtGen = sum(bd.dealt), _incShin = sum(bd.inc);
+  const snap = {
+    atk: sum(bd.atk),
+    dealt: _dealtGen + _incShin,
+    dealtShintong: _incShin,
+    inc: _incShin,
+    amp: sum(bd.amp),
+    cr: _crGen + _crShin, crShintong: _crShin,
+    cd: _cdGen + _cdShin, cdShintong: _cdShin,
+    crRes: sum(bd.crRes), defDebuff: sum(bd.defDebuff),
+    finalCR: sum(bd.finalCR), finalCD: sum(bd.finalCD), finalDmg: sum(bd.finalDmg),
+    bd,
+  };
+  TRACE(state, 'SNAP', JSON.stringify(snap));
+}
+
 function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   // skillsOverride: [{name, fam}, ...] 6개. 지정 시 자동선택 대신 사용.
   // opts.maxTime: 시뮬 조기 종료 시간 (초). 랭킹 속도 향상용 (예: 60초 기준이면 maxTime:60)
@@ -4342,15 +4459,9 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state._inMainCast = false;
         // 청명 유파: 임의 신통 명중 시 뇌인 1중첩 획득
         뇌인획득(state);
-        // 활성 버프 수치 스냅샷 — DMG 적용 시점 상태 (post-DMG 트리거 buff/stack 제외)
-        // 본 cast 데미지에 실제로 영향을 준 buff 만 표시 — post-dmg buff 는 다음 cast 위치 막대에서 확인 가능
-        {
-          // 기여 소스별 분해 (툴팁 용)
-          // cr/cd/dealt 는 일반(공통) 과 신통전용(shintongOnly/inc) 을 별도 field 로 분리해서 관리.
-          // 활성 버프 히트맵 호버 툴팁에서 "치명타율(신통)" / "치명타 배율(신통)" / "피해 증가(신통)" 시 신통분 따로 표시.
-          //   bd.dealt        — 일반 입히는 피해 (모든 type 적용)
-          //   bd.dealtShintong— 신통 전용 피해 증가 (= 기존 bd.inc 와 동의어)
-          //   bd.inc          — legacy alias (dealtShintong 와 같은 배열)
+        // 활성 버프 수치 스냅샷 — DMG 적용 시점 상태 (emitSnapTrace 함수로 추출됨, 신통/법보 모두 호출)
+        emitSnapTrace(state);
+        if (false) {  // dead code — emitSnapTrace 로 대체됨
           const bd = { atk: [], inc: [], amp: [], dealt: [], dealtShintong: [], cr: [], crShintong: [], cd: [], cdShintong: [], crRes: [], defDebuff: [], finalCR: [], finalCD: [], finalDmg: [] };
           // bd.inc 는 호환을 위해 dealtShintong 와 같은 배열 참조 — 어느 쪽에 push 해도 동기화됨
           bd.inc = bd.dealtShintong;
@@ -4379,13 +4490,13 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           // 유파/공명/불씨 패시브 — 스택은 snapStacks 기준
           // 뇌인/뇌전공명: 신통 전용 cr 보너스 → crShintong 으로
           if (famActive(state, '청명') && snapStacks.뇌인) pushBuff('crShintong', `뇌인×${snapStacks.뇌인}`, snapStacks.뇌인 * 5);
-          if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('crShintong', `뇌전공명(${state.catSlots.뇌전}슬롯)`, 11);
+          if ((state.catSlots.뇌전 || 0) >= 2) pushBuff('crShintong', `유뢰2법체`, 11);
           if (famActive(state, '옥추') && snapStacks.옥추) pushBuff('inc', `옥추×${snapStacks.옥추}`, snapStacks.옥추);
           if (famActive(state, '옥추') && snapStacks.옥추 > 0) pushBuff('inc', `옥추슬롯×${state.famSlots.옥추}`, state.famSlots.옥추 * 2.5);
           if (famActive(state, '신소') && snapStacks.신소 > 0) pushBuff('inc', `신소슬롯×${state.famSlots.신소}`, state.famSlots.신소 * 4);
           if (famActive(state, '참허') && snapStacks.검심통명) pushBuff('inc', `참허슬롯×${state.famSlots.참허}`, state.famSlots.참허 * 3);
           const 영검공명 = 공명inc(state);
-          if (영검공명) pushBuff('inc', `영검공명(${state.catSlots.영검}슬롯)`, 영검공명);
+          if (영검공명) pushBuff('inc', `영검2법체`, 영검공명);
           if (famActive(state, '균천') && snapStacks.검세) pushBuff('amp', `검세×${snapStacks.검세}`, snapStacks.검세 * 1.5);
           // 불씨
           const 통명 = 불씨급수값(state, '통명묘화', [4, 6, 8]);
@@ -4674,7 +4785,15 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       state.castCounts[trSrc] = (state.castCounts[trSrc] || 0) + 1;
       state._currentSource = trSrc;
       state._activeCast = trSrc;
+      // SNAP 캡처용 — 법보 cast 도 첫 record 시점에 buff/stack 스냅샷 캡처되도록
+      state._inMainCast = true;
+      state._snapBuffsCaptured = false;
+      state._snapBuffsAtDmg = null;
+      state._snapStacksAtDmg = null;
       TREASURES[trName].cast(state);
+      state._inMainCast = false;
+      // 법보 cast 후 SNAP TRACE emit — 활성 buff 히트맵에 법보 cast 칸도 표시
+      emitSnapTrace(state);
       state._activeCast = null;
     }
     // === 법상 (法相) 틱 — 매 신통/법보 cast 후 호출 ===
