@@ -3207,14 +3207,11 @@ SK['주술·경선'] = {
 SK['주술·유식'] = {
   fam: '주술', cat: '백족', main: 300,
   cast(s, slots) {
+    // [유식] 단진 패턴 — 카운터 reset 은 main loop pre-cast hook 에서 처리됨
     // 본 신통 main — 4회 공격 총합 300% 물리
     record(s, dealDamage(s, 300));
     const prev = s._currentSource;
-    // [유식] 본 신통 시전 시 1독고 + 30% 추가 물리 (최대 3회 발동, max tier)
-    for (let i = 0; i < 3; i++) 독고부여(s, 1);
-    s._currentSource = '유식(효과)';
-    record(s, dealDamage(s, 30 * 3, { noSkillMult: true }), '유식');
-    // [심장] 1~3 독고 + 40% × 평균 2회 물리 (max tier) — 즉시 발동
+    // [심장] 1~3 독고 + 40% × 평균 2회 물리 (max tier) — 본 신통 시전 시 즉발
     독고부여(s, 2);
     s._currentSource = '심장(평균2회)';
     record(s, dealDamage(s, 40 * 2, { noSkillMult: true }), '심장');
@@ -3480,11 +3477,10 @@ function 법상_틱(s, opts) {
   const name = CFG.법상.name;
   const tiers = CFG.법상.tiers || { 실체: true, 의념: true, 진령: true };
   const def = 법상_DEFS[name];
-  // 첫 공격 기록 — 스펙 "신통/법보로 공격 후" → 첫 공격 자체는 빙의 active 아님 (다음 cast 부터 빙의)
-  if (s.법상_첫공격T === -Infinity) {
-    s.법상_첫공격T = s.t;
-    return; // 첫 cast 는 법상 effect skip — 빙의는 이 cast 직후부터 시작
-  }
+  // 첫 공격 기록 — 스펙 "신통/법보로 공격 후"
+  // 첫 cast 자체는 빙의 effect 미적용 (active 처리 X), 단 trace 와 빙의 state 는 이 시점에 set
+  const isFirstCast = (s.법상_첫공격T === -Infinity);
+  if (isFirstCast) s.법상_첫공격T = s.t;
   // 빙의 시작 — 첫 공격 직후 시작 (다음 cast 시점부터 active) 또는 CD 끝난 후
   // 스펙: "신통/법보로 공격 후 20초간 빙의" — "공격 후" 라 첫 공격 자체엔 미적용
   // CD 180초 = 빙의 트리거 시각 기준 (트리거 후 180초 동안 다음 빙의 불가)
@@ -3507,8 +3503,8 @@ function 법상_틱(s, opts) {
     s.법상_적난새의념피해횟수 = 0;
     TRACE(s, 'OPT', `${def.color}법상·${name} 빙의 시작 @${다음빙의가능T.toFixed(1)}s (지속 20초, 종료 ${s.법상_빙의종료T.toFixed(1)}s)`);
   }
-  // 빙의 active 처리
-  if (법상_빙의active(s)) {
+  // 빙의 active 처리 — 첫 cast 자체는 effect 미적용 (스펙 "공격 후")
+  if (!isFirstCast && 법상_빙의active(s)) {
     if (!s.법상_빙의시작처리) {
       s.법상_빙의시작처리 = true;
       법상_시작_cleanup(s, name, tiers);
@@ -4391,6 +4387,21 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           검세획득_균천(state, state.famSlots.균천, 1);
           applyBuff(state, '균천파월_파월_' + state.파월남은, { atk: 15 }, 5);
         }
+        // [주술·유식] per-cast: 3회 신통 시전 시 1독고 + 30% 추가 물리 (유식 cast 포함, 단진/파월 패턴)
+        // 유식남은 카운터는 SK['주술·유식'].cast() 에서 reset (state.유식남은 = 3)
+        if (sk.name === '주술·유식' && famActive(state, '주술')) {
+          state.유식남은 = 3; state.유식max = 3;
+        }
+        if (famActive(state, '주술') && (state.유식남은 || 0) > 0 && state.selectedSkills && state.selectedSkills.has('주술·유식')) {
+          const 유식used = (state.유식max || 3) - state.유식남은 + 1;
+          TRACE(state, 'OPT', `🟠유식·유식 발동: 신통 시전 → 1독고 + 30% 물리 (${유식used}/${state.유식max || 3}회)`);
+          state.유식남은--;
+          독고부여(state, 1);
+          const prev = state._currentSource;
+          state._currentSource = '유식(효과)';
+          record(state, dealDamage(state, 30, { noSkillMult: true }), '유식');
+          state._currentSource = prev;
+        }
         // [열산·양운 적염] per-cast: 임의 신통 시전 시 작열 1중첩 44% (최대 4회 발동)
         // 단진 패턴: 양운 cast 시 카운터 4 리셋 + 양운 cast 후부터 활성화
         if (sk.name === '열산·양운' && state.famSlots.열산) {
@@ -4424,27 +4435,50 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             state._currentSource = prevSrc;
           }
         }
+        // === [Pre-cast] "시전 시" 유파/옵션 trigger — main 신통 record 전 (main 신통이 효과 적용받음) ===
+        // 사양 "시전 시" — cast 시작 시점 발동 (vs "명중 시" / "공격 시" 는 record 후)
+        // 주술 (독고 부여) / 참허 (검심) / 옥추·수광 [수광] / 참허·분광 [분광]
+        if (famActive(state, '주술')) {
+          state._currentSource = '독고부여';
+          독고부여(state, 1);
+        }
+        if (famActive(state, '참허')) {
+          state._currentSource = '검심';
+          검심획득(state, 1);
+        }
+        if (state.famSlots.옥추 && state.buffs.some(b => b.key === '옥추수광_수광' && b.endT > state.t)) {
+          if (!state._수광이미처리) {
+            옥추획득(state);
+            state._currentSource = '수광(지속)';
+            record(state, dealDamage(state, 30, { noSkillMult: true }));
+          }
+        }
+        if (state.famSlots.참허 && state.분광End > 0 && state.t < state.분광End - 0.1) {
+          if (!state._분광이미처리) {
+            검심획득(state, 1);
+            state._currentSource = '분광(지속)';
+            record(state, dealDamage(state, 24, { noSkillMult: true, type: '호무' }));
+          }
+        }
         // === cast 실행 ===
         state._currentSource = sk.name;
         // _inMainCast: 본 신통 cast 실행 중에만 true.
         // record() 가 _snapBuffsCaptured 를 set 하는 조건과 applyBuff [post] 태깅 조건의
         // 기준이 되는 플래그 — pre-cast hook 의 폭파 record / applyBuff 와 구분하기 위함.
         state._inMainCast = true;
-        // === 자기 비술 발동 (CD 160초 통일 — 비술_발동_자기 안에서 검사) ===
+        // === 자기 비술 발동 — 모두 cast() 후 호출 ===
+        // 사양 "공격 시 / 공격 후 / 공격할 때" — 모두 명중 (= record) 후 의미
+        // ("시전 시" 가 아닌 "공격 시" 는 attack hit 시점 → post-record)
         state._castCountTotal = (state._castCountTotal || 0) + 1;
         const selfBisul = (CFG.bisul && CFG.bisul.self) || [];
-        // [Pre-cast] 분혼 — 사양 "공격 시" (cast 와 동시) → cast() 전 발동, 본 신통 영향 없는 별도 4회 1000%
+        SK[sk.name].cast(state, slots);
+        // [Post-cast] 모든 비술 — 본 신통 record 후 발동 (이번 cast 자체엔 effect 미적용)
         for (const b of selfBisul) {
           if (!b || !b.master || !b.branch) continue;
+          // 분혼: 사양 "신통 또는 법보로 공격 시" — 공격 hit 후 발동 (cast() 후 호출)
           if (b.master === '분혼') {
             비술_발동_자기(state, b.master, b.branch);
           }
-        }
-        SK[sk.name].cast(state, slots);
-        // [Post-cast] 악신/업화/식혼/탁천 — 사양 "공격 후" (cast 후 발동)
-        // 본 신통이 비술 effect 받지 않도록 cast() 후 호출 → 다음 cast 부터 분신/멸신 active
-        for (const b of selfBisul) {
-          if (!b || !b.master || !b.branch) continue;
           // 악신·진: 신통/법보 4회 공격 후
           if (b.master === '악신' && b.branch === '진' && state._castCountTotal % 4 === 0) {
             비술_발동_자기(state, b.master, b.branch);
@@ -4645,14 +4679,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           }
           if (state.업화DoT누적 >= 10) state.업화DoTEnd = 0;
         }
-        // [분광] 지속 트리거: 30s간 신통 시전마다 검심 +1 + 24% 호무 (max tier)
-        if (state.famSlots.참허 && state.분광End > 0 && state.t < state.분광End - 0.1) {
-          if (!state._분광이미처리) {
-            검심획득(state, 1);
-            state._currentSource = '분광(지속)';
-            record(state, dealDamage(state, 24, { noSkillMult: true, type: '호무' }));
-          }
-        }
+        // [분광] 지속 트리거 — 사양 "시전 시" → pre-cast hook 으로 이동됨
         state._분광이미처리 = false;
         // [단진]/[파월] 리필 트리거는 pre-DMG 섹션으로 이동 (자기 cast 포함하여 본 신통 데미지에 반영)
         // [사해·명화] per-cast: 30s간(15+암용15, max tier) 시전마다 살혼 20% 확정 (max tier)
@@ -4665,14 +4692,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         }
         state._명화이미처리 = false;
         // (작열부여 per-cast 트리거는 cast 전에 이미 처리됨)
-        // [옥추·수광 수광] 지속: 15s간 시전마다 옥추 +1 + 30% 물리 (max tier)
-        if (state.famSlots.옥추 && state.buffs.some(b => b.key === '옥추수광_수광' && b.endT > state.t)) {
-          if (!state._수광이미처리) {
-            옥추획득(state);
-            state._currentSource = '수광(지속)';
-            record(state, dealDamage(state, 30, { noSkillMult: true }));
-          }
-        }
+        // [옥추·수광 수광] — 사양 "시전 시" → pre-cast hook 으로 이동됨
         state._수광이미처리 = false;
         // [중광·육요 검광] 지속: 30s간 신통 시전마다 23% 호무 (max tier)
         if (state.famSlots.중광 && state.검광End > 0 && state.t < state.검광End - 0.1) {
@@ -4715,17 +4735,13 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             }
           }
         }
-        // 백족 공통 트리거 (살혼은 사해 ≥2 시 모든 신통 명중에서 발동)
+        // 백족 공통 트리거 (살혼은 사해 ≥2 시 모든 신통 명중에서 발동) — "명중 시" 사양 → post-cast
         state._currentSource = '살혼';
         if (famActive(state, '사해')) 살혼발사(state);
-        // 주술 유파 효과: 임의의 신통 시전 시 무작위 1독고 + 슬롯당 25% 추가 (주술 ≥2)
-        state._currentSource = '독고부여';
-        if (famActive(state, '주술')) 독고부여(state, 1);
-        // 유파 공통 트리거 (모두 ≥2 활성 조건)
+        // 주술/참허 유파 효과 — "시전 시" 사양 → pre-cast hook 으로 이동됨 (이 위치 제거)
+        // 균천 검세획득 — "명중 시" 사양 → post-cast (여기 유지)
         state._currentSource = '검세(천검)';
         if (famActive(state, '균천')) 검세획득_균천(state, state.famSlots.균천, 1);
-        state._currentSource = '검심';
-        if (famActive(state, '참허')) 검심획득(state, 1);
         if (famActive(state, '옥추')) {
           // 치명타 입히면 옥추 +1 — 멀티히트 스킬은 히트당 독립 판정
           // 기댓값 방식: hits × crEff 만큼 누적하여 1 이상이면 정수만큼 획득 (잔여분수 유지)
