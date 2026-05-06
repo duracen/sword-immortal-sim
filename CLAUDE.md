@@ -8,6 +8,32 @@
 - `trace.js` — 화염 1위 빌드(열산4+청명2) 1회 상세 전투 로그 출력
 - `trace_thunder.js` — 뇌전 1위 빌드(청명4+주술2) 1회 상세 전투 로그 출력
 
+## ⚠️ Git Push 워크플로우 (중요)
+
+이 폴더는 **git 저장소가 아니다**. 별도 git repo와 수동 동기화 후 push.
+
+### 경로
+- **로컬 작업 폴더 (현재)**: `C:/Users/ljc47/Pictures/BlueStacks/검선귀환 신통/` ← 여기서 코드 수정
+- **Git 저장소**: `C:/Users/ljc47/sword-immortal-sim/` ← 동기화 + commit + push
+- **Remote**: `https://github.com/duracen/sword-immortal-sim.git` (origin/main)
+
+### Push 절차
+1. 로컬 폴더와 git 저장소의 차이 확인:
+   ```bash
+   diff -rq "C:/Users/ljc47/Pictures/BlueStacks/검선귀환 신통" "C:/Users/ljc47/sword-immortal-sim"
+   ```
+2. 변경된 파일을 git 저장소로 복사 (cp). **gitignore된 파일 제외:**
+   - `*.docx` (검선귀환_신통_정리.docx 등 — 로컬에서만 재생성)
+   - 스크린샷 (`*.png`)
+   - 로그 (`*위빌드_상세로그.txt`, `trace_output.txt`, `빌드_랭킹_결과.txt`)
+   - 자료 폴더 (`/검/`, `/뇌/`, `/백족/`, `/불씨/`, `/비술/`, `/화/`)
+3. `cd /c/Users/ljc47/sword-immortal-sim && git add -A && git commit -m "..." && git push origin main`
+
+### 주의사항
+- main 직접 push 가 sandbox 에서 차단될 수 있음 → 권한 다이얼로그에서 Allow
+- 개인 프로젝트라 main 직접 push 가 정상 워크플로우 (PR 안 씀)
+- commit 메시지 스타일: `sim/UI: [요약]` 또는 `sim: [요약]` (한글 OK)
+
 ## 실행 방법
 모두 Node.js만 있으면 됨. 의존성 없음.
 
