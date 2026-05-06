@@ -6,6 +6,7 @@ import OrderEditor from '../components/simulator/OrderEditor.jsx';
 import BulssiPicker from '../components/simulator/BulssiPicker.jsx';
 import BisulPicker from '../components/simulator/BisulPicker.jsx';
 import BeopsangPicker from '../components/simulator/BeopsangPicker.jsx';
+import YeokPicker from '../components/simulator/YeokPicker.jsx';
 import ResultSummary from '../components/simulator/ResultSummary.jsx';
 import RankingTable from '../components/ranking/RankingTable.jsx';
 import WinnerPodium from '../components/ranking/WinnerPodium.jsx';
@@ -112,6 +113,8 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   const [bisul, setBisul] = useState({ self: [], enemy: [] });
   // 법상 — { name: string|null, tiers: { 실체, 의념, 진령 } }
   const [법상, set법상] = useState({ name: null, tiers: { 실체: true, 의념: true, 진령: true } });
+  // 영역 (법칙) — string|null (선택된 영역 이름)
+  const [영역, set영역] = useState(null);
   const [selected, setSelected] = useState(null); // 로그 보기용
   const battleLogRef = useRef(null);
   // selected 변경 → BattleLogPanel 영역으로 스크롤
@@ -144,6 +147,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       불씨,
       bisul,
       법상,
+      영역,
     });
   }
 
@@ -242,7 +246,12 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       </section>
 
       <section>
-        <h2 className="text-lg font-bold mb-3 text-amber-400">5. 탐색 설정</h2>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">6. 영역 선택 <span className="text-xs text-slate-400 font-normal">(6개 중 1개 선택 — 누적 10회 시전마다 발동, CD 180초 / 사해 마관 이후 항목은 선택 불가)</span></h2>
+        <YeokPicker value={영역} onChange={set영역} />
+      </section>
+
+      <section>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">7. 탐색 설정</h2>
         <div className="flex flex-wrap items-end gap-6 mb-4">
           <div>
             <label className="block text-xs text-slate-400 mb-1">기준 시간</label>
@@ -517,6 +526,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                 불씨={불씨}
                 bisul={bisul}
                 법상={법상}
+                영역={영역}
                 onClose={() => setSelected(null)}
               />
             </div>
@@ -612,6 +622,8 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [bisul, setBisul] = useState({ self: [], enemy: [] });
   // 법상
   const [법상, set법상] = useState({ name: null, tiers: { 실체: true, 의념: true, 진령: true } });
+  // 영역 (법칙)
+  const [영역, set영역] = useState(null);
 
   // skillSel 에서 slotMap 자동 유도 (유파별 신통 수)
   const slotMap = useMemo(() => {
@@ -684,6 +696,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       불씨: { ...불씨 },
       bisul: { self: [...(bisul.self||[])], enemy: [...(bisul.enemy||[])] },
       법상: { name: 법상.name, tiers: { ...법상.tiers } },
+      영역,
       randomCrit,
       slotMap: { ...slotMap },
     };
@@ -699,6 +712,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       불씨: snapshot.불씨,
       bisul: snapshot.bisul,
       법상: snapshot.법상,
+      영역: snapshot.영역,
       randomCrit: snapshot.randomCrit,
     });
   }
@@ -740,9 +754,14 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <BeopsangPicker value={법상} onChange={set법상} />
       </section>
 
+      <section>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">6. 영역 선택 <span className="text-xs text-slate-400 font-normal">(6개 중 1개 선택 — 누적 10회 시전마다 발동, CD 180초 / 사해 마관 이후 항목은 선택 불가)</span></h2>
+        <YeokPicker value={영역} onChange={set영역} />
+      </section>
+
       {canEditOrder && order && (
         <section>
-          <h2 className="text-lg font-bold mb-3 text-amber-400">4. 시전 순서 (드래그로 변경)</h2>
+          <h2 className="text-lg font-bold mb-3 text-amber-400">7. 시전 순서 (드래그로 변경)</h2>
           <OrderEditor items={order} onChange={setOrder} />
         </section>
       )}
@@ -846,6 +865,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
             불씨={simSnap.불씨}
             bisul={simSnap.bisul}
             법상={simSnap.법상}
+            영역={simSnap.영역}
             randomCrit={simSnap.randomCrit}
           />
         </>

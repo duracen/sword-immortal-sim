@@ -133,6 +133,7 @@ let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
 let G_BULSSI = null;     // 불씨 세트 (start 시 세팅)
 let G_BISUL = null;      // 비술 (start 시 세팅)
 let G_BEOPSANG = null;   // 법상 (start 시 세팅)
+let G_YEOK = null;       // 영역 (법칙) (start 시 세팅)
 let G_FIXED_TR_ORDER = false;  // 법보 순서 고정 (체크 시 user 입력 순서 그대로)
 function simOptsFor(markerIdx) {
   const o = { maxTime: getMaxTime(markerIdx) };
@@ -140,6 +141,7 @@ function simOptsFor(markerIdx) {
   if (G_BULSSI) o.불씨 = G_BULSSI;
   if (G_BISUL) o.bisul = G_BISUL;
   if (G_BEOPSANG) o.법상 = G_BEOPSANG;
+  if (G_YEOK) o.영역 = G_YEOK;
   return o;
 }
 
@@ -608,12 +610,14 @@ async function handleMessage(e) {
     불씨 = null,
     bisul = null,
     법상 = null,
+    영역 = null,
     fixedTreasureOrder = false,
   } = msg.config || {};
   G_TARGET_LAW = targetLawBody;
   G_BULSSI = 불씨;
   G_BISUL = (bisul && (bisul.self?.length || bisul.enemy?.length)) ? bisul : null;
   G_BEOPSANG = (법상 && 법상.name) ? 법상 : null;
+  G_YEOK = 영역 || null;
   G_FIXED_TR_ORDER = !!fixedTreasureOrder;
   if (fixedTreasures && Array.isArray(fixedTreasureList) && fixedTreasureList.length === 3) {
     FIXED_TREASURES = fixedTreasureList.slice();

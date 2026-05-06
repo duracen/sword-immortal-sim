@@ -152,8 +152,8 @@ function newState() {
     작열Arr: [],
     // 폭파(60%) 트리거용 결정적 RNG seed — 매 시뮬마다 0 으로 초기화 → 같은 빌드/순서/스킬 = 같은 결과
     폭파RngSeed: 0,
-    작열부여카운터: 0, // 신규 작열 부여 누적 (6회마다 염양 트리거)
-    화상: 0, 화상EndT: 0,
+    작열부여_누적: 0, // 신규 작열 부여 누적 (6회마다 염양 트리거)
+    화상: 0, 화상_stacks: [],
     염양방감: 0, 염양방감EndT: 0, // 염양 방어력 감소 디버프 (10%/스택, 최대 3중첩, 10초)
     // 계약은 applyBuff 정식 시스템으로 처리 (key='계약·실혼','계약·매혹' 등)
     // 도천지세 카운터 (살혼 누적 시전 횟수)
@@ -185,9 +185,9 @@ function newState() {
     // 옥추 분수 누적 (기댓값 모드에서 hits × crEff 누적)
     _옥추분수: 0,
     // 검세 3회 획득마다 천검 발동 카운터 (염양 스타일)
-    검세획득카운터: 0,
     // 뇌인 4회 획득마다 천벌 발동 카운터 (염양 스타일)
-    뇌인획득카운터: 0,
+    // ※ 영역대결 시작도 +1 (임의 신통 취급)
+    뇌인_누적: 0,
     // 히트 창(window) 카운터들 — 피해 N회 입힐 때마다 트리거
     // [동허] 중광·투영: 20초, 5히트마다 defDebuff+4% (최대 5중첩)
     동허End: 0, 동허히트: 0, 동허중첩: 0,
@@ -215,7 +215,7 @@ function newState() {
     법상_첫공격T: -Infinity,     // 첫 신통/법보 공격 시각 (+20초 후 빙의)
     // 법상 stack 카운터 (빙의 active 중 누적)
     법상_교혼: 0,    // 청교룡 (atk +6/스택, max 10)
-    법상_영혼: 0,    // 적난새 (3중첩당 종료 시 진원피해)
+    법상_염혼: 0,    // 적난새 (3중첩당 종료 시 진원피해)
     법상_염백: 0,    // 금오 (자기 입히는 +1, 받는 -1, max 20)
     법상_용의예가: 0, // 청룡 (적 받는 +5, 입히는 -5, max 5)
     법상_용의위엄: 0, // 청룡 (자기 cr +3, max 5)
@@ -460,17 +460,31 @@ function sumBuffDealt(state, isShintong = true, opts) {
   }
   return s;
 }
+// 화상 — 개별 TTL 20s × N stack, cap 없음 (무한 중첩 가능).
+// 사양: "20초간 방어력이 2.00% 감소한다(중첩 가능)" — 각 stack 자체 20s timer, stagger 만료.
 function prune화상(state) {
-  if (state.화상EndT > 0 && state.t >= state.화상EndT) {
-    state.화상 = 0;
-    state.화상EndT = 0;
+  if (!state.화상_stacks) state.화상_stacks = [];
+  const before = state.화상_stacks.length;
+  state.화상_stacks = state.화상_stacks.filter(et => et > state.t);
+  const after = state.화상_stacks.length;
+  state.화상 = after;
+  if (before !== after) {
+    TRACE(state, 'STK', `화상 ${before}→${after} (TTL 만료)`);
   }
 }
 function 화상부여(state, n = 1) {
   if ((state.catSlots.화염 || 0) < 2) return;
   prune화상(state);
-  state.화상 = (state.화상 || 0) + n;
-  state.화상EndT = state.t + 20;
+  if (!state.화상_stacks) state.화상_stacks = [];
+  const before = state.화상_stacks.length;
+  for (let i = 0; i < n; i++) {
+    state.화상_stacks.push(state.t + 20);
+  }
+  const after = state.화상_stacks.length;
+  state.화상 = after;
+  if (after !== before) {
+    TRACE(state, 'STK', `화상 ${before}→${after} (개별 TTL=20s)`);
+  }
 }
 // 버프에서 방어력 감소(%) 합산 (스킬별 defDebuff 필드)
 function sumBuffDefDebuff(state) {
@@ -480,12 +494,18 @@ function sumBuffDefDebuff(state) {
   }
   return s;
 }
-// 독고 만료 정리
+// 독고 만료 정리 — 만고귀종/주술 분수 처리와 얽혀 있어 type별 shared TTL 유지
+// (fractional 독고 처리 때문에 stack array model 부적합)
 function pruneDokgo(state) {
   for (const t of ['강체','환체','실혼','매혹']) {
     if (state.독고EndT[t] > 0 && state.t >= state.독고EndT[t]) {
+      const before = state.독고[t];
       state.독고[t] = 0;
       state.독고EndT[t] = 0;
+      if (before > 0) {
+        const total = (state.독고.강체||0) + (state.독고.환체||0) + (state.독고.실혼||0) + (state.독고.매혹||0);
+        TRACE(state, 'STK', `☠️독고 -${before.toFixed(2)} [${t}] (TTL 만료) → 합계 ${total.toFixed(2)}`);
+      }
     }
   }
 }
@@ -506,31 +526,32 @@ function sumBuffAmp(state) {
   return s;
 }
 function applyBuff(state, key, spec, dur, maxStack = 1) {
-  // 같은 key 존재하면 stack 증가 / 갱신
-  const ex = state.buffs.find(b => b.key === key && b.endT > state.t);
   const isWeak = !!(spec.defDebuff || spec.crRes);
-  // 본 cast 의 dealDamage 가 이미 실행된 후에 부여되는 buff 는 [post] 표시
-  // (이 buff 는 본 cast 에 영향 없고 다음 cast 부터 적용 — 타임라인 시각화에 사용)
   const postTag = state._snapBuffsCaptured ? ' [post]' : '';
+  // === 통일된 매커니즘: 모든 buff/debuff (지속시간 + 중첩 ≥ 1) ===
+  // - 각 stack 자체 endT (개별 TTL)
+  // - cap 도달 시 oldest stack 제거 (FIFO 교체)
+  // - maxStack === 1 = cap 1 = 매 add 시 1개 교체 (= 갱신과 동일)
+  // - maxStack > 1 = cap N = oldest 제거 + 새 stack 추가
+  const ex = state.buffs.find(b => b.key === key && b.endT > state.t);
+  const newEndT = state.t + dur + 0.001;
   if (ex) {
-    ex.endT = state.t + dur + 0.001; // +epsilon — 갱신 시에도 dur초 후 cast 포함
-    const prevStack = ex.stackCount || 1;
-    ex.stackCount = Math.min(prevStack + 1, maxStack);
-    // 갱신 로그
+    if (!ex.endTs) ex.endTs = [ex.endT];
+    ex.endTs.push(newEndT);
+    while (ex.endTs.length > maxStack) ex.endTs.shift();
+    ex.stackCount = ex.endTs.length;
+    ex.endT = Math.max(...ex.endTs);
     const m2 = key.match(/^(..)(..)_(.+)$/);
     const keyLabel2 = m2 ? `[${m2[1]}·${m2[2]} → ${m2[3]}]` : `[${key}]`;
-    if (ex.stackCount > prevStack) {
-      TRACE(state, 'BUF', `↑중첩 ${keyLabel2} ${prevStack}→${ex.stackCount} (${dur}초 재갱신)${postTag}`);
+    if (maxStack === 1) {
+      TRACE(state, 'BUF', `↻갱신 ${keyLabel2} (${dur}초 재갱신, FIFO 1↔1)${postTag}`);
     } else {
-      TRACE(state, 'BUF', `↻갱신 ${keyLabel2} (${dur}초 재갱신, 중첩 ${ex.stackCount}/${maxStack} 유지)${postTag}`);
+      TRACE(state, 'BUF', `↑중첩 ${keyLabel2} → ${ex.stackCount}/${maxStack} (개별 TTL ${dur}s, FIFO)${postTag}`);
     }
-    // 약화 중첩 증가 시 마상 트리거 (갱신이 아닌 중첩 증가만)
-    if (isWeak && ex.stackCount > prevStack && typeof 마상트리거 === 'function') 마상트리거(state);
+    if (isWeak && typeof 마상트리거 === 'function') 마상트리거(state);
     return;
   }
-  // endT에 +0.001 epsilon — "10초 지속"이 정확히 10초 후 cast까지 포함되도록
-  // (예: t=15에 10초 버프 → t=25 cast에서 여전히 활성)
-  state.buffs.push({ key, endT: state.t + dur + 0.001, stackCount: 1, maxStacks: maxStack, ...spec });
+  state.buffs.push({ key, endT: newEndT, endTs: [newEndT], stackCount: 1, maxStacks: maxStack, ...spec });
   // 로그: "+열산염폭_염식" → "+[열산·염폭 → 염식]"
   const m = key.match(/^(..)(..)_(.+)$/);
   const keyLabel = m ? `[${m[1]}·${m[2]} → ${m[3]}]` : `[${key}]`;
@@ -557,8 +578,8 @@ function addStackTTL(state, resource, n, max, dur = 20) {
   // 검세 (균천) 의 경우 획득 카운터 (N+n)/3 을 트레이스에 포함 — 다음 천검 발동까지 누적치 표시
   let extraStr = '';
   if (resource === '검세' && famActive(state, '균천')) {
-    const nextCnt = ((state.검세획득카운터 || 0) + n) % 3;
-    extraStr = ` (획득카운터 ${nextCnt}/3)`;
+    const nextCnt = ((state.검세_누적 || 0) + n) % 3;
+    extraStr = ` (검세_누적 ${nextCnt}/3)`;
   }
   if (st.count !== before) {
     TRACE(state, 'STK', `${resource} ${before}→${st.count} (TTL=${dur}s reset)${extraStr}`);
@@ -585,8 +606,13 @@ function consumeStack(state, resource, n) {
 // ---- 작열 개별 타이머 헬퍼 ----
 // 만료된 작열 스택 제거 (피해 정산 없음 — 틱에서 처리)
 function prune작열(s) {
+  const before = s.작열Arr.length;
   s.작열Arr = s.작열Arr.filter(st => st.endT > s.t);
-  s.stacks.작열 = s.작열Arr.length;
+  const after = s.작열Arr.length;
+  s.stacks.작열 = after;
+  if (before !== after) {
+    TRACE(s, 'STK', `🔥작열 +0 → 현재 ${after}중첩 (TTL 만료, ${before}→${after})`);
+  }
 }
 // 작열 DoT 1tick 데미지 — 매 tick 호출 시점의 현재 buff/debuff 상태로 계산.
 // 자기 buff (atk, dealt, type, final) + 적 상태 (defDebuff, 화상, 염양방감) 모두 시점별 재계산.
@@ -648,15 +674,20 @@ function tick작열(s) {
 // 작열 스택 FIFO 소모 — 폭파용. 잔여 틱 피해 (폭파 시점 buff/debuff 로 재계산) 합산 반환
 function consume작열(s, n) {
   prune작열(s);
+  const before = s.작열Arr.length;
   let remainingDot = 0;
-  const toConsume = Math.min(n, s.작열Arr.length);
+  const toConsume = Math.min(n, before);
   for (let i = 0; i < toConsume; i++) {
     const st = s.작열Arr.shift();
     const remainSec = Math.max(0, st.endT - s.t);
     // 폭파 시점의 현재 buff/debuff 로 잔여 tick 데미지 재계산
     remainingDot += _작열tickDmg(s, st.tickBasePct) * remainSec;
   }
-  s.stacks.작열 = s.작열Arr.length;
+  const after = s.작열Arr.length;
+  s.stacks.작열 = after;
+  if (before !== after) {
+    TRACE(s, 'STK', `🔥작열 +0 → 현재 ${after}중첩 (폭파 소모, ${before}→${after})`);
+  }
   return remainingDot;
 }
 
@@ -1759,14 +1790,57 @@ function 천검발동(s, slots, ampPct = 0, srcTag = '천검') {
   record(s, dealDamage(s, base * mult * amp, { noSkillMult: true, type: '천검', localDealt: 검망localDealt }));
   s._currentSource = prevSrc;
 }
+// 검세 — TTL 20s 개별, cap=10 FIFO 교체 (인게임 버프 표준).
+// 사양 원문: "검세를 3중첩 획득할 때마다 천검 효과를 발동" — 누적 카운터 3마다 발동 (염양 스타일).
+// stack 값 무관, 누적 카운터만 본다.
+function 검세_prune(s) {
+  if (!s.검세_stacks) s.검세_stacks = [];
+  const before = s.검세_stacks.length;
+  s.검세_stacks = s.검세_stacks.filter(expireT => expireT > s.t);
+  const after = s.검세_stacks.length;
+  s.stacks.검세 = after;
+  if (before !== after) {
+    TRACE(s, 'STK', `검세 ${before}→${after} (TTL 만료)`);
+  }
+}
 function 검세획득_균천(s, slots, n = 1) {
   if (!famActive(s, '균천')) return;
-  addStackTTL(s, '검세', n, 10, 20);
-  // 검세 3회 획득마다 천검 발동 (누적 counter, 염양 스타일)
-  // TTL로 스택이 사라져도 누적 획득 카운트는 유지되어 다음 3회차에 다시 발동
-  s.검세획득카운터 = (s.검세획득카운터 || 0) + n;
-  while (s.검세획득카운터 >= 3) {
-    s.검세획득카운터 -= 3;
+  const TTL = 20;
+  if (!s.검세_stacks) s.검세_stacks = [];
+  s.검세_stacks = s.검세_stacks.filter(expireT => expireT > s.t);
+  const before = s.검세_stacks.length;
+  for (let i = 0; i < n; i++) {
+    s.검세_stacks.push(s.t + TTL);
+    while (s.검세_stacks.length > 10) s.검세_stacks.shift();
+  }
+  const after = s.검세_stacks.length;
+  s.stacks.검세 = after;
+  if (after !== before) {
+    TRACE(s, 'STK', `검세 ${before}→${after} (개별 TTL=${TTL}s, cap=10 FIFO)`);
+  } else if (after > 0) {
+    TRACE(s, 'STK', `검세 ${after}↻ (cap=10, FIFO 교체)`);
+  }
+  // 천검 trigger: 누적 카운터 분리 함수로 (영역대결 시작도 트리거 가능, 천벌 동일 매커니즘)
+  for (let i = 0; i < n; i++) 검세_누적트리거(s, slots, '신통명중');
+}
+// 검세 누적 카운터 (천벌의 뇌인_누적 동일 매커니즘) — 영역대결 시작도 +1
+// slots 옵션 — 신통명중 시 호출하면 slots 전달, 영역대결 시작 시 균천 famSlots 자동 사용
+function 검세_누적트리거(s, slotsOrSrc, src) {
+  if (!famActive(s, '균천')) return;
+  let slots, source;
+  if (typeof slotsOrSrc === 'string') {
+    // 영역대결 시작 등 — slots 미전달 시 균천 famSlots 사용
+    slots = s.famSlots.균천 || 0;
+    source = slotsOrSrc;
+  } else {
+    slots = slotsOrSrc;
+    source = src;
+  }
+  s.검세_누적 = (s.검세_누적 || 0) + 1;
+  TRACE(s, 'STK', `검세_누적 ${s.검세_누적}/3 (${source})`);
+  while (s.검세_누적 >= 3) {
+    s.검세_누적 -= 3;
+    TRACE(s, 'OPT', `🗡️천검 발동 (누적 3 도달 by ${source})`);
     천검발동(s, slots);
   }
 }
@@ -1865,14 +1939,16 @@ SK['균천·관일'] = {
 };
 
 // ---------- 영검: 참허 (검심통명) ----------
+// 검심 — 사양 TTL 명시 X, cap 명시 X. 단순 누적, 10 도달 시 -10 검심통명 진입.
+function 검심_prune(s) { /* TTL 없음 — no-op */ }
 function 검심획득(s, n = 1) {
   if (!famActive(s, '참허')) return;
-  // 검심 10 도달 시 -10 차감 + 검심통명 진입 (초과분 보존)
-  // 예: 9 + 2 = 11 → -10 = 1
   addStack(s, '검심', n, Infinity);
   while (s.stacks.검심 >= 10) {
+    const before = s.stacks.검심;
     s.stacks.검심 -= 10;
-    TRACE(s, 'STK', `검심 -10 (검심통명 진입), 잔여=${s.stacks.검심}`);
+    const after = s.stacks.검심;
+    TRACE(s, 'STK', `검심 ${before}→${after} (검심통명 진입, -10)`);
     applyBuff(s, '검심통명', { dmgMult: 20, cat: 'inc' }, 10);
     s.stacks.검심통명 = 1;
   }
@@ -2080,7 +2156,7 @@ function 작열부여(s, n, perTick = 25, source) {
   for (let i = 0; i < n; i++) {
     add작열(s, perTick, 20, src); // basePct 저장, 1틱 피해는 add작열 내부에서 스냅샷
     // 매 stack 마다 STK trace 발생 (시간 순서 보존: stack → 폭파 → 염양 발동 순)
-    const cnt = famActive(s, '열산') ? s.작열부여카운터 + 1 : 0;
+    const cnt = famActive(s, '열산') ? s.작열부여_누적 + 1 : 0;
     const cntStr = famActive(s, '열산') ? ` (부여카운터 ${cnt}/6)` : '';
     TRACE(s, 'STK', `🔥작열 +1 [${src}] → 현재 ${s.stacks.작열}중첩${cntStr}`);
     // 현염법체 기본(화 2+): 작열 부여 시 화상 1중첩 자동 부여
@@ -2091,9 +2167,9 @@ function 작열부여(s, n, perTick = 25, source) {
     }
     // [열산 유파] 신규 작열 6회 부여할 때마다 염양 발동 + 열산 상태 진입 (동시) (열산 ≥2)
     if (famActive(s, '열산')) {
-      s.작열부여카운터++;
-      while (s.작열부여카운터 >= 6) {
-        s.작열부여카운터 -= 6;
+      s.작열부여_누적++;
+      while (s.작열부여_누적 >= 6) {
+        s.작열부여_누적 -= 6;
         // 열산 상태 진입 먼저 — 염양 DMG 가 열산 +10% amp 를 받도록
         TRACE(s, 'OPT', `⚡️열산 유파: 작열 6중첩 부여 달성 → 열산 상태 진입 + 염양 발동`);
         applyBuff(s, '열산상태', { cat: 'amp', dmgMult: 10 }, 10);
@@ -2316,9 +2392,9 @@ SK['이화·염무'] = {
       s.stacks.작열 = s.작열Arr.length;
       if (famActive(s, '형혹') && seededRand(s) < 0.60) 폭파(s);
       if (famActive(s, '열산')) {
-        s.작열부여카운터 = (s.작열부여카운터 || 0) + 1;
-        while (s.작열부여카운터 >= 6) {
-          s.작열부여카운터 -= 6;
+        s.작열부여_누적 = (s.작열부여_누적 || 0) + 1;
+        while (s.작열부여_누적 >= 6) {
+          s.작열부여_누적 -= 6;
           applyBuff(s, '열산상태', { cat: 'amp', dmgMult: 10 }, 10);
           염양발동(s, s.famSlots.열산);
         }
@@ -2435,16 +2511,53 @@ function 천뢰발동(s, slots, basePct, reason) {
     }
   }
 }
+// 뇌인 모델 — 인게임 영상 분석 기반:
+// - 개별 TTL 25초 (각 stack 자체 timer)
+// - cap=4, 초과 시 새 stack 거부 (FIFO 교체 X)
+// - 누적 부여 카운터: 매 신통 명중 시 +1, 4 도달 시 천벌 발동 (염양 스타일)
+// - 영역대결 시작/끝 = "임의 신통" 취급 (누적 +1, 단 stack 변화 X)
+// 인게임 검증:
+//   1st: 22s (cast 4, 누적 4 → fire)
+//   2nd: 45s (cast 10 누적 3 + 영역대결 시작 = 누적 4 → fire)
+//   3rd: 56s (영역대결 끝 + cast 11/12/13 = 누적 4 → fire)
+function 뇌인_prune(s) {
+  if (!s.뇌인_stacks) s.뇌인_stacks = [];
+  const before = s.뇌인_stacks.length;
+  s.뇌인_stacks = s.뇌인_stacks.filter(expireT => expireT > s.t);
+  const after = s.뇌인_stacks.length;
+  s.stacks.뇌인 = after;
+  if (before !== after) {
+    TRACE(s, 'STK', `뇌인 ${before}→${after} (TTL 만료)`);
+  }
+}
+// 신통 명중 시 호출 — 뇌인 stack +1 (cap=4 시 FIFO 교체) + 누적 카운터 +1 + 천벌 fire 체크
+// TTL 20초 (인게임 버프 표준), cap 4, 초과 시 oldest stack 제거 (FIFO 교체)
 function 뇌인획득(s) {
   if (!famActive(s, '청명')) return;
-  // 원문: "임의의 신통으로 적을 명중 시 뇌인 1중첩 획득" — 매 신통 cast 마다 +1
-  addStackTTL(s, '뇌인', 1, 4, 20);
-  // 누적 카운터 — 4회 획득마다 천벌 상태 돌입 (10s간 초당 천뢰 30% 물리 × 10회) — 시간 분산
-  s.뇌인획득카운터 = (s.뇌인획득카운터 || 0) + 1;
-  while (s.뇌인획득카운터 >= 4) {
-    s.뇌인획득카운터 -= 4;
-    TRACE(s, 'OPT', `⚡천벌 상태 돌입 (뇌인 4중첩 획득): 10초 동안 초당 천뢰 30% × 10회 (시간 분산 emit)`);
-    // 한 번에 10발 emit X — main loop 의 catch-up 에서 1초 단위로 분산 emit
+  const TTL = 20;
+  if (!s.뇌인_stacks) s.뇌인_stacks = [];
+  s.뇌인_stacks = s.뇌인_stacks.filter(et => et > s.t);
+  const before = s.뇌인_stacks.length;
+  // 새 stack 추가 → cap 초과 시 oldest 제거 (FIFO 교체)
+  s.뇌인_stacks.push(s.t + TTL);
+  while (s.뇌인_stacks.length > 4) s.뇌인_stacks.shift();
+  const after = s.뇌인_stacks.length;
+  s.stacks.뇌인 = after;
+  if (after !== before) {
+    TRACE(s, 'STK', `뇌인 ${before}→${after} (개별 TTL=${TTL}s, cap=4 FIFO)`);
+  } else {
+    TRACE(s, 'STK', `뇌인 ${after}↻ (cap=4, FIFO 교체로 oldest 제거)`);
+  }
+  뇌인_누적트리거(s, '신통명중');
+}
+// 영역대결 시작/끝 등 "신통 취급" trigger — stack 변화 X, 누적만 +1
+function 뇌인_누적트리거(s, src) {
+  if (!famActive(s, '청명')) return;
+  s.뇌인_누적 = (s.뇌인_누적 || 0) + 1;
+  TRACE(s, 'STK', `뇌인_누적 ${s.뇌인_누적}/4 (${src})`);
+  if (s.뇌인_누적 >= 4 && s.t >= (s.천벌End || 0)) {
+    s.뇌인_누적 -= 4;
+    TRACE(s, 'OPT', `⚡천벌 발동 (누적 4 도달 by ${src}): 10초 천뢰 효과 (초당 30% × 10회)`);
     s.천벌End = s.t + 10;
     s.천벌시작 = s.t;
     s.천벌누적 = 0;
@@ -2522,10 +2635,33 @@ SK['청명·풍뢰'] = {
 };
 
 // ---------- 뇌전: 옥추 (옥추 스택 - 크리 기반) ----------
-// 옥추 스택은 TTL 기반: 각 중첩 20s 만료, inc %는 sumBuffInc에서 stacks.옥추 × 1%로 자동 계산
+// 옥추 — 개별 TTL 20s, cap=10 FIFO 교체 (인게임 버프 표준).
+// 누적 카운터 트리거 없음 — 각 신통의 옵션이 cast 시점에 옥추 ≥ N 조건 체크 (운한/섬천/뇌운 등).
+function 옥추_prune(s) {
+  if (!s.옥추_stacks) s.옥추_stacks = [];
+  const before = s.옥추_stacks.length;
+  s.옥추_stacks = s.옥추_stacks.filter(et => et > s.t);
+  const after = s.옥추_stacks.length;
+  s.stacks.옥추 = after;
+  if (before !== after) {
+    TRACE(s, 'STK', `옥추 ${before}→${after} (TTL 만료)`);
+  }
+}
 function 옥추획득(s) {
   if (!famActive(s, '옥추')) return;
-  addStackTTL(s, '옥추', 1, 10, 20);
+  const TTL = 20;
+  if (!s.옥추_stacks) s.옥추_stacks = [];
+  s.옥추_stacks = s.옥추_stacks.filter(et => et > s.t);
+  const before = s.옥추_stacks.length;
+  s.옥추_stacks.push(s.t + TTL);
+  while (s.옥추_stacks.length > 10) s.옥추_stacks.shift();
+  const after = s.옥추_stacks.length;
+  s.stacks.옥추 = after;
+  if (after !== before) {
+    TRACE(s, 'STK', `옥추 ${before}→${after} (개별 TTL=${TTL}s, cap=10 FIFO)`);
+  } else if (after > 0) {
+    TRACE(s, 'STK', `옥추 ${after}↻ (cap=10, FIFO 교체)`);
+  }
 }
 function 옥추유파Mult(s, slots) {
   // dealDamage에서 글로벌 적용 중이므로 중복 방지
@@ -2716,6 +2852,28 @@ SK['오뢰·용음'] = {
 function 신소상태(s) {
   return s.stacks.신소 > 0;
 }
+// 신소 — 개별 TTL 20s × N stack (buff 표준), cap 없음.
+function 신소_prune(s) {
+  if (!s.신소_stacks) s.신소_stacks = [];
+  const before = s.신소_stacks.length;
+  s.신소_stacks = s.신소_stacks.filter(et => et > s.t);
+  const after = s.신소_stacks.length;
+  s.stacks.신소 = after;
+  if (before !== after) {
+    TRACE(s, 'STK', `신소 ${before}→${after} (TTL 만료)`);
+  }
+}
+function 신소획득(s, n = 1) {
+  if (!s.신소_stacks) s.신소_stacks = [];
+  s.신소_stacks = s.신소_stacks.filter(et => et > s.t);
+  const before = s.신소_stacks.length;
+  for (let i = 0; i < n; i++) s.신소_stacks.push(s.t + 20);
+  const after = s.신소_stacks.length;
+  s.stacks.신소 = after;
+  if (after !== before) {
+    TRACE(s, 'STK', `신소 ${before}→${after} (개별 TTL=20s)`);
+  }
+}
 function 신소유파Mult(s, slots) {
   // dealDamage에서 글로벌 적용 중이므로 중복 방지
   return 1;
@@ -2724,7 +2882,7 @@ SK['신소·운록'] = {
   fam: '신소', cat: '뇌전', main: 135,
   cast(s, slots) {
     // [뇌동] 신소 +1 획득 + cd+15% 10s 지속 버프 (shintongOnly)
-    addStack(s, '신소', 1, Infinity);
+    신소획득(s, 1);
     applyBuff(s, '신소운록_뇌동', { cd: 15, shintongOnly: true }, 10);
     // [파군] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·운록 → 파군] 본 신통 cd +35% (이번 cast 한정)`);
@@ -2741,7 +2899,7 @@ SK['신소·운록'] = {
 SK['신소·천고'] = {
   fam: '신소', cat: '뇌전', main: 135,
   cast(s, slots) {
-    addStack(s, '신소', 1, Infinity);
+    신소획득(s, 1);
     applyBuff(s, '신소천고_뇌명', { cr: 7 }, 10); // [뇌명] cr 7% (max tier)
     // [통할] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·천고 → 통할] 본 신통 cd +35% (이번 cast 한정)`);
@@ -2764,7 +2922,7 @@ SK['신소·천고'] = {
 SK['신소·환뢰'] = {
   fam: '신소', cat: '뇌전', main: 128,
   cast(s, slots) {
-    addStack(s, '신소', 1, Infinity);
+    신소획득(s, 1);
     applyBuff(s, '신소환뢰_구소', { atk: 15 }, 5); // [구소] atk 15% (max tier)
     // [뇌전] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·환뢰 → 뇌전] 본 신통 cd +35% (이번 cast 한정)`);
@@ -3448,6 +3606,101 @@ function 비술_발동_적(state, master, branch) {
   }
 }
 
+// ======================== 영역 (法則) ========================
+// 발동: 신통/법보 누적 10회 시전마다 발동 (CD 180초)
+// 발동 시: 4-hit 2100% + AOE 900% (1:1 sim 에선 2100% 만 record) + 자기 버프 + 적 디버프
+//
+// 영역 종류:
+// - 진양화련 → 열반 (자기): HP<70% 시 dmgInc +10% (10초). sim 자기 풀체력 → 효과 미발동
+//                        (적): 적 dmgDealt -10% (10초). 적 자기 피해 미모델 → 효과 없음
+// - 제왕의 정 → 천위 (자기): 10초간 신통/법보 시전 시 atk 70% × 2~4회 (기댓값 3회 = 210%)
+//                       (적): 5초간 질겁 (신통/공격법보 사용 불가). 1:1 sim → 영향 없음
+// - 사해 마관 → 심연 (자기): 10초간 신통/법보 시전 시 적 max HP 1.5% (캡 atk 300%)
+//                       (적): 진원 -15% + 받는 피해 +20% (10초). 적 받는 피해 +20% → finalDmg +20% buff 적용
+// - 파천절검 / 상천한빙 / 청제신목 — 선택 불가 (UI 잠금)
+
+// 영역 발동 — 매 cast 후 호출, 누적 10회 + CD 180s
+// 영역대결 (5초 차단) 동안엔 데미지/효과 미발동, 영역대결 끝난 시점에 데미지+효과 입력
+function 영역_틱(s) {
+  if (!CFG.영역) return;
+  s.영역_누적 = (s.영역_누적 || 0) + 1;
+  // CD 체크
+  const CD = 180;
+  if (s.t - (s.영역_lastFireT || -Infinity) < CD) return;
+  if (s.영역_누적 < 10) return;
+  // 영역 차단 시작 (5초). 데미지/효과는 영역_pendingFireT 시점 (5초 후) 에 적용.
+  // ※ "발동" 키워드는 영역대결 끝난 시점에만 emit — UI 가 발동 trace 만 trigger lane 에 push
+  const name = CFG.영역;
+  const 영역_DUR = 5;
+  TRACE(s, 'OPT', `🌐영역 [${name}] 차단 시작 → ${(s.t + 영역_DUR).toFixed(1)}초에 데미지/효과 입력`);
+  TRACE(s, 'OPT', `⚔️영역대결 [${name}] 시전 차단 5초`);
+  // 영역대결 시작 = "임의 신통" 취급 → 뇌인/검세 누적 카운터 +1 (천벌/천검 동일 매커니즘)
+  뇌인_누적트리거(s, '영역대결시작');
+  검세_누적트리거(s, '영역대결시작');
+  s.영역_pendingFireT = s.t + 영역_DUR;
+  s.영역_pendingName = name;
+  // 카운터/CD 갱신 (CD 는 발동 시각이 아닌 trigger 시각 기준 — 차단 중 재발동 방지 차원)
+  s.영역_lastFireT = s.t;
+  s.영역_누적 = 0;
+}
+
+// 영역 차단 종료 시 호출 — 데미지 + 자기 버프 + 디버프 발동
+// 메인 이벤트 루프에서 매 이벤트 시작 시 check (state.t 가 영역_pendingFireT 에 도달했는지)
+function 영역_pendingFire(s) {
+  if (!s.영역_pendingFireT || s.t < s.영역_pendingFireT - 0.001) return;
+  const name = s.영역_pendingName;
+  const fireT = s.영역_pendingFireT;
+  // state.t 를 영역 발동 시각으로 일시 조정 (record 의 t 정확히 표시)
+  const savedT = s.t;
+  s.t = fireT;
+  const prevSrc = s._currentSource;
+  s._currentSource = `영역(${name})`;
+  TRACE(s, 'OPT', `🌐영역 [${name}] 발동: 4타 총 2100% + AOE 900% (영역대결 종료 시점)`);
+  // 4-hit damage (총 2100%) — 한 번에 record
+  record(s, dealDamage(s, 2100, { type: '영역' }));
+  // AOE 900% — 1:1 sim 이라 무시
+  // === 자기 버프 ===
+  if (name === '진양화련') {
+    applyBuff(s, '영역_열반_조건부', { dmgMult: 10, cat: 'inc', _condHpBelow70: true }, 10);
+    TRACE(s, 'OPT', `🌐영역 [열반] (자기): HP<70% 시 신통/법보 입힌 피해 +10% 10s (sim 풀체력 → 효과 X)`);
+  } else if (name === '제왕의 정') {
+    s.영역_천위End = s.t + 10;
+    TRACE(s, 'OPT', `🌐영역 [천위] (자기): 10초간 시전 시 70% × 2~4회 (기댓값 210%)`);
+  } else if (name === '사해 마관') {
+    s.영역_심연End = s.t + 10;
+    applyBuff(s, '영역_심연_받는피해', { dmgMult: 20, cat: 'finalDmg' }, 10);
+    TRACE(s, 'OPT', `🌐영역 [심연]: 자기 10초간 시전 시 max HP 1.5% (캡 atk 300%) + 적 받는 피해 +20% 10s`);
+  }
+  s._currentSource = prevSrc;
+  s.t = savedT;
+  s.영역_pendingFireT = 0;
+  s.영역_pendingName = null;
+}
+
+// 천위/심연 — 매 cast 후 (영역 발동 후 자기 버프 active 시 추가 피해)
+function 영역_시전트리거(s) {
+  if (!CFG.영역) return;
+  const name = CFG.영역;
+  if (name === '제왕의 정' && s.t < (s.영역_천위End || 0)) {
+    // 천위: 70% × 2~4회 (기댓값 3회) = 210% (확정 피해 → noSkillMult, type='호무')
+    const prevSrc = s._currentSource;
+    s._currentSource = '천위(영역)';
+    TRACE(s, 'OPT', `🌐영역 [천위] 트리거: 70% × 3회 (기댓값) = 210% 확정`);
+    record(s, dealDamage(s, 210, { noSkillMult: true, type: '호무' }));
+    s._currentSource = prevSrc;
+  } else if (name === '사해 마관' && s.t < (s.영역_심연End || 0)) {
+    // 심연: 적 max HP 1.5% (캡 atk 300%) — 진원 = baseHP, 1.5% = 0.015 × baseHP
+    // sim 의 dealDamage 는 atk 비율 기반 → 진원 비례 피해는 별도 처리
+    // 캡: atk 300% (= dealDamage(s, 300, ...))
+    // 우선 단순화: 항상 atk 300% 발동 (캡 가까운 케이스 가정)
+    const prevSrc = s._currentSource;
+    s._currentSource = '심연(영역)';
+    TRACE(s, 'OPT', `🌐영역 [심연] 트리거: 적 max HP 1.5% 또는 atk 300% (캡)`);
+    record(s, dealDamage(s, 300, { noSkillMult: true, type: '호무' }));
+    s._currentSource = prevSrc;
+  }
+}
+
 // ======================== 법상 (法相) ========================
 // 빙의 메커니즘:
 // - 신통/법보 첫 공격 후 20초 → 빙의 시작 (지속 20초)
@@ -3491,7 +3744,7 @@ function 법상_틱(s, opts) {
     s.법상_lastCdEnd = 다음빙의가능T + 180;
     s.법상_빙의시작처리 = false;
     s.법상_빙의종료처리 = false;
-    s.법상_교혼 = 0; s.법상_영혼 = 0; s.법상_염백 = 0;
+    s.법상_교혼 = 0; s.법상_염혼 = 0; s.법상_염백 = 0;
     s.법상_용의예가 = 0; s.법상_용의위엄 = 0; s.법상_적혼 = 0;
     s.법상_진룡각인 = 0; s.법상_봉황각인 = 0;
     s.법상_금오피해카운터 = 0;
@@ -3610,11 +3863,11 @@ function 법상_매cast(s, name, tiers) {
     const prev = s._currentSource; s._currentSource = `법상·${name}·불깃털`;
     for (let i = 0; i < 깃털수; i++) {
       record(s, 법상Dmg(s, 3.5 * 진령배수, { bypassDef: true }), `법상·${name}(불깃털)`);
-      if (tiers.의념) s.법상_영혼++;
+      if (tiers.의념) s.법상_염혼++;
       // 진령 buff 는 깃털 발사 시 X — 의념 발동 시 (빙의 종료 cleanup) 에서만 부여 (사양 정확 반영)
     }
     s._currentSource = prev;
-    if (tiers.의념) TRACE(s, 'OPT', `🦅적난새·의념 누적: 영혼 ${s.법상_영혼}중첩 (3중첩당 종료 시 진원 7% 확정)`);
+    if (tiers.의념) TRACE(s, 'OPT', `🦅적난새·의념 누적: 염혼 ${s.법상_염혼}중첩 (3중첩당 종료 시 진원 7% 확정)`);
   }
   if (name === '청반룡' && tiers.진령) {
     TRACE(s, 'OPT', `🐉청반룡·진령 발동: 신통/법보 공격 → 청린 1개 (220%)`);
@@ -3665,13 +3918,22 @@ function 법상_매cast(s, name, tiers) {
     if (s.법상_적혼 > 0) TRACE(s, 'OPT', `🦅주작 적혼 ${s.법상_적혼}/5중첩 (자기 입히는 +${s.법상_적혼*5}%, 받는 -${s.법상_적혼*5}%)`);
   }
   if (name === '진룡' && tiers.실체) {
-    // 진룡 각인 — buff stack max 5중첩 (스펙). but 누적 획득 횟수는 cap 없음 (3중첩 획득마다 트리거)
-    s.법상_진룡각인 = Math.min(s.법상_진룡각인 + 1, 5);
-    s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
-    TRACE(s, 'OPT', `🐉진룡·실체 발동: 신통/법보 공격 → 진룡 각인 ${s.법상_진룡각인}/5중첩 (누적 ${s.법상_진룡각인_누적}회)`);
+    // 진룡 각인 — TTL 20s 개별, cap 5 FIFO 교체.
+    // 사양 원문: "진룡 각인을 3중첩 획득할 때마다 용의 숨결을 방출" — 누적 카운터 3마다 발동 (염양 스타일).
+    if (!s.법상_진룡각인_stacks) s.법상_진룡각인_stacks = [];
+    s.법상_진룡각인_stacks = s.법상_진룡각인_stacks.filter(et => et > s.t);
+    const 진룡각인_before = s.법상_진룡각인_stacks.length;
+    s.법상_진룡각인_stacks.push(s.t + 20);
+    while (s.법상_진룡각인_stacks.length > 5) s.법상_진룡각인_stacks.shift();
+    const 진룡각인_after = s.법상_진룡각인_stacks.length;
+    s.법상_진룡각인 = 진룡각인_after;
+    TRACE(s, 'OPT', `🐉진룡·실체 발동: 신통/법보 공격 → 진룡 각인 ${진룡각인_before}→${진룡각인_after}/5중첩 (TTL 20s, FIFO)`);
     applyBuff(s, '법상진룡_진룡각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
-    if (s.법상_진룡각인_누적 % 3 === 0) {
-      TRACE(s, 'OPT', `🐉진룡·실체 트리거: 진룡 각인 누적 ${s.법상_진룡각인_누적}회 → 용의 숨결 5회 700% (3명)`);
+    // 누적 카운터 3 도달 시 발동 (stack 값 무관)
+    s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
+    while (s.법상_진룡각인_누적 >= 3) {
+      s.법상_진룡각인_누적 -= 3;
+      TRACE(s, 'OPT', `🐉진룡·실체 트리거: 누적 3회 → 용의 숨결 5회 700% (3명)`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
       record(s, 법상Dmg(s, 700), `법상·${name}(실체)`);
       s._currentSource = prev;
@@ -3685,14 +3947,23 @@ function 법상_매cast(s, name, tiers) {
       const prev = s._currentSource; s._currentSource = `법상·${name}·청령`;
       record(s, 법상Dmg(s, 250), `법상·${name}(의념)`);
       s._currentSource = prev;
-      s.법상_진룡각인 = Math.min(s.법상_진룡각인 + 1, 5);
-      s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
+      // 진룡 각인 — TTL 20s 개별, cap 5 FIFO. 누적 카운터 3마다 발동 (실체 효과)
+      if (!s.법상_진룡각인_stacks) s.법상_진룡각인_stacks = [];
+      s.법상_진룡각인_stacks = s.법상_진룡각인_stacks.filter(et => et > s.t);
+      s.법상_진룡각인_stacks.push(s.t + 20);
+      while (s.법상_진룡각인_stacks.length > 5) s.법상_진룡각인_stacks.shift();
+      s.법상_진룡각인 = s.법상_진룡각인_stacks.length;
       applyBuff(s, '법상진룡_진룡각인', { dmgMult: 5, cat: 'dealt' }, 20, 5);
-      if (s.법상_진룡각인_누적 % 3 === 0 && tiers.실체) {
-        TRACE(s, 'OPT', `🐉진룡·실체 트리거 (의념 경유): 누적 ${s.법상_진룡각인_누적}회 → 용의 숨결 700%`);
-        const p2 = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
-        record(s, 법상Dmg(s, 700), `법상·${name}(실체)`);
-        s._currentSource = p2;
+      // 누적 카운터 (실체 효과 의념 경유) — 의념 의 진룡 각인 +1 도 누적에 포함
+      if (tiers.실체) {
+        s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
+        while (s.법상_진룡각인_누적 >= 3) {
+          s.법상_진룡각인_누적 -= 3;
+          TRACE(s, 'OPT', `🐉진룡·실체 트리거 (의념 경유): 누적 3회 → 용의 숨결 700%`);
+          const p2 = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
+          record(s, 법상Dmg(s, 700), `법상·${name}(실체)`);
+          s._currentSource = p2;
+        }
       }
     }
   }
@@ -3731,12 +4002,12 @@ function 법상_종료_cleanup(s, name, tiers) {
     s._currentSource = prev;
   }
   if (name === '적난새' && tiers.의념) {
-    const 발동수 = Math.floor(s.법상_영혼 / 3);
+    const 발동수 = Math.floor(s.법상_염혼 / 3);
     if (발동수 > 0) {
-      TRACE(s, 'OPT', `🦅적난새·의념 종료 cleanup: 영혼 ${s.법상_영혼}/3 = ${발동수}회 발동 → 3명 진원 7% 확정 (1회당)`);
-      const prev = s._currentSource; s._currentSource = `법상·${name}·영혼`;
+      TRACE(s, 'OPT', `🦅적난새·의념 종료 cleanup: 염혼 ${s.법상_염혼}/3 = ${발동수}회 발동 → 3명 진원 7% 확정 (1회당)`);
+      const prev = s._currentSource; s._currentSource = `법상·${name}·염혼`;
       for (let i = 0; i < 발동수; i++) {
-        record(s, 법상Dmg(s, 7, { bypassDef: true }), `법상·${name}(영혼)`);
+        record(s, 법상Dmg(s, 7, { bypassDef: true }), `법상·${name}(염혼)`);
         // 진령: 의념 재능 효과로 피해 1회 입힐 때마다 자기 최종 피해 +4% (10초, 중첩)
         if (tiers.진령) {
           applyBuff(s, '법상적난_진령_' + i, { dmgMult: 4, cat: 'final' }, 10);
@@ -4016,10 +4287,22 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   // selfHpScale() 함수가 이 값 기반으로 자기 HP 기반 효과 계산 (식혼·진 cr 9~19% 등).
   state.selfHpMax = CFG.baseHP;
   state.selfHpRem = CFG.baseHP;
+  // 진원 (자원) — 법보 시전마다 -15% 소모. 시작 100%, 부족 시 (15% 미만) 법보 발사 안 됨.
+  // 사해 마관 영역 발동 시 최대 진원의 15% 차감 (영역 효과).
+  state.진원_remaining = 1.0;
+  state.진원_법보소모 = 0.15; // 법보 1회 = 15% 진원 소모
   // 비술 옵션: opts.bisul = { self: [...], enemy: [...] } → CFG.bisul 에 set (사용 후 비움)
   CFG.bisul = (opts && opts.bisul) || { self: [], enemy: [] };
   // 법상 옵션: opts.법상 = { name: string|null, tiers: {실체,의념,진령} }
   CFG.법상 = (opts && opts.법상) || { name: null, tiers: { 실체: true, 의념: true, 진령: true } };
+  // 영역 (법칙) 옵션: opts.영역 = string|null (선택된 영역 이름)
+  // 영역은 신통/법보 누적 10회 시전 시 발동, CD 180초.
+  // 발동 시 4-hit 2100% + AOE 900% (이번 sim 에선 적 1명 1:1 → 본 시 본 sim 은 2100% 만 record)
+  // + 자기 버프 (열반/천위/심연) 10초 발동
+  CFG.영역 = (opts && opts.영역) || null;
+  state.영역_누적 = 0;     // 신통/법보 누적 시전 카운터 (10마다 발동)
+  state.영역_lastFireT = -Infinity;  // 마지막 영역 발동 시각 (CD 180초)
+  state.영역_심연_fires = 0;       // (디버깅용) 발동 횟수 카운트
   // 비술 state 초기화
   state.봉인EndT = 0;
   state.악신EndT = 0;
@@ -4027,7 +4310,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   state.악신_호신심화 = 0;
   state.분혼허_심화End = 0;
   state.분혼진_hp추가End = 0;
-  state.업화_누적공격 = 0;
+  state.업화_누적 = 0;
   state.업화멸신End = 0;
   state.업화멸신_피해카운터 = 0;
   state.업화멸신_발동수 = 0;
@@ -4056,6 +4339,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       { name: '통명묘화', tiers: [4, 6, 8], max: 3, label: '신통 심화피해' },
       { name: '태현잔화', tiers: [4, 6, 8], max: 3, label: '신통 입히는피해 기댓값 (0~2배 랜덤)' },
       { name: '유리현화', tiers: [5, 10, 15], max: 3, label: '신통 심화피해' },
+      { name: '진무절화', tiers: [16, 32, 48], max: 6, label: '신통 2개당 다음 신통 입히는피해 (트리거)' },
       { name: '진마성화', tiers: [1, 3, 3], max: 6, label: '신통 1회마다 심화피해/스택 (최대 10중첩)' },
     ];
     for (const m of 불씨Meta) {
@@ -4102,35 +4386,38 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   const simMaxTime = (opts && opts.maxTime) ? opts.maxTime : 180;
   const totalSec = simMaxTime;
   // === 인게임 검증 모델 (2026-04 기준, 영상 분석으로 확정) ===
-  // - 영압 대결 6초: cast 안 발사 (평타는 t=0 부터 1초 간격으로 발사됨)
-  // - 평타 3대 (t=6~8) 후 첫 cast at t=9
+  // - 영압 대결 10초: cast 도 평타도 안 나감 (전부 정지)
+  // - 영압대결 종료 (t=10) 후 평타 시작 — 1초 간격
+  // - 평타 3대 (t=10~12) 후 첫 cast at t=13
   // - 글로벌 CD: 3초 (cast 간 간격)
   // - 사이클 길이: 9 cast × 3초 = 24초 (cast 1 → cast 9)
   // - 사이클 텀: 6초 (cast 9 → cast 10), 자체쿨로 인해 더 길어질 수 있음
   // - 자체쿨: 신통/법보 모두 32초
-  // - 영역: 누적 10번째 cast 시 발동, 6초간 cast 정지, 재사용 180초
-  //   영역 종료 후 글로벌 3초 적용 → cast 11 = 영역 종료 + 3초
-  // 검증 (60s): cast 14 (cycle 2 cast 5) at t=59
-  // 검증 (120s): cast 28 t=109, cast 29 t=114, cast 30 (skill 3) t=117, cast 31 t=120
-  const 영압대결시간 = 6;
+  // - 영역: 누적 10번째 cast 시 발동, 5초간 cast 정지, 재사용 180초
+  //   영역 종료 직후 즉시 cast 재개 (글로벌 CD 없이)
+  const 영압대결시간 = 10;
   const 시작평타전대기 = 3;
   const 글로벌CD = 3;
   const 사이클길이 = order.length || 9;
   const 사이클텀 = 6;
   const 신통자체쿨 = 32;
   const 법보자체쿨 = 32;
-  const 영역_DUR = 6;
+  const 영역_DUR = 5;       // 영역 발동 (영역대결) 시전 차단 5초
   const 영역_CD = 180;
   const 영역_TRIGGER = 10;  // 누적 10번째 cast 시 발동
-  const 첫cast시점 = 영압대결시간 + 시작평타전대기; // = 12
+  const 첫cast시점 = 영압대결시간 + 시작평타전대기; // = 13
 
   // cast 이벤트: 글로벌 CD + 사이클 텀 + 자체쿨 enforce + 영역 메커니즘
+  // 영역 발동 (선택 시): 누적 10회 cast 마다, CD 180s 만족 시 6s 시전 정지 (영압대결과 유사)
   let castIdx = 0;
+  // 영역 발동 시점 기록 (UI 표시용 + sim post-cast 와 동기화)
+  const 영역발동시점 = []; // [{ t, name }]
   {
     let castNum = 0;
     let scheduled = 첫cast시점;
     let 영역_endT = -Infinity;
     let 영역_lastFire = -Infinity;
+    let 영역_castSinceFire = 0;
     const slotLast = {}; // slotKey → last fire time (자체쿨 enforce 용)
     let safety = 0;
     while (scheduled < totalSec + 0.001 && safety++ < 5000) {
@@ -4139,18 +4426,21 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       const slotCD = slot.kind === 'treasure' ? 법보자체쿨 : 신통자체쿨;
       const slotReady = (slotLast[slotKey] !== undefined) ? slotLast[slotKey] + slotCD : 0;
       let actualT = Math.max(scheduled, slotReady);
-      // 영역 진행 중이면 cast 정지, 영역 종료 후 글로벌 CD 적용
-      if (영역_endT > actualT) actualT = 영역_endT + 글로벌CD;
+      // 영역 진행 중이면 cast 정지, 영역 종료 직후 (글로벌 CD 없이) 즉시 cast 재개
+      if (영역_endT > actualT) actualT = 영역_endT;
       if (actualT >= totalSec + 0.001) break;
 
       events.push({ t: actualT, kind: slot.kind, idx: slot.idx });
       slotLast[slotKey] = actualT;
       castNum++;
+      영역_castSinceFire++;
 
-      // 영역 trigger (누적 10번째 cast, CD 체크)
-      if (castNum === 영역_TRIGGER && actualT >= 영역_lastFire + 영역_CD) {
+      // 영역 trigger (영역 옵션 선택 시 + 누적 10회 cast + CD 180s 만족)
+      if (CFG.영역 && 영역_castSinceFire >= 영역_TRIGGER && actualT >= 영역_lastFire + 영역_CD) {
         영역_endT = actualT + 영역_DUR;
         영역_lastFire = actualT;
+        영역_castSinceFire = 0;
+        영역발동시점.push({ t: actualT, name: CFG.영역, dur: 영역_DUR });
       }
 
       castIdx = (castIdx + 1) % order.length;
@@ -4162,18 +4452,24 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       }
     }
   }
+  // 영역 발동 시점은 후속 영역_틱 이 sim runtime 에 같은 시각에 호출되도록 storage
+  state._영역발동시점 = 영역발동시점;
   // 작열 틱 이벤트: 매 초, 부여 후 1초 뒤 첫 틱
   for (let sec = 1; sec < totalSec; sec++) {
     events.push({ t: sec, kind: '작열tick', pri: 1 });
   }
   // 평타 이벤트: 1초 간격, 영압 대결 종료 후부터 발사 (영압 동안 평타 안 나감)
-  // cast 시점과 같은 정수 초에는 cast 가 preempt → 평타 skip
-  const castTimeSet = new Set();
-  for (const ev of events) {
-    if (ev.kind === 'skill' || ev.kind === 'treasure') castTimeSet.add(ev.t);
+  // 영역대결 (영역 발동 후 영역_DUR 초간) 동안에도 평타 안 나감
+  // ※ cast 시점과 겹쳐도 평타는 발사 — 1초마다 꾸역꾸역 (cast 와 동시 발사 가능)
+  // 영역대결 차단 구간 (각 영역 발동 → 발동 + 영역_DUR 초 동안 평타 X)
+  function inYeokYeokDaeGyeol(t) {
+    for (const fire of 영역발동시점) {
+      if (t >= fire.t && t < fire.t + fire.dur) return true;
+    }
+    return false;
   }
   for (let t = 영압대결시간; t < totalSec; t += 1) {
-    if (!castTimeSet.has(t)) {
+    if (!inYeokYeokDaeGyeol(t)) {
       events.push({ t, kind: '평타', pri: 2 });
     }
   }
@@ -4193,9 +4489,39 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
       throw new Error(`simulateBuild timeout (${_SIM_TIMEOUT_MS}ms) — 무한 루프 가능성, 빌드 skip`);
     }
     state.t = ev.t;
+    // 계약합 만료 추적 (drift 방지용 STK 발생) — buff prune 전후 비교
+    const 계약전 = (typeof 계약합 === 'function') ? 계약합(state) : 0;
+    // buff prune — 모든 buff 가 개별 TTL stack (endTs 배열) 사용
+    for (const b of state.buffs) {
+      if (!b.endTs || !Array.isArray(b.endTs)) {
+        // legacy buff (endT 만 있음) — endTs 변환
+        b.endTs = [b.endT];
+      }
+      b.endTs = b.endTs.filter(et => et > state.t - 0.1);
+      b.stackCount = b.endTs.length;
+      b.endT = b.endTs.length > 0 ? Math.max(...b.endTs) : 0;
+    }
     state.buffs = state.buffs.filter(b => b.endT > state.t - 0.1);
-    // TTL 스택 만료 처리 (검세/뇌인/옥추 개별 20s)
+    // 계약합 변화 시 STK 트레이스 (UI lane 동기화용)
+    if (typeof 계약합 === 'function') {
+      const 계약후 = 계약합(state);
+      if (Math.abs(계약전 - 계약후) > 0.001) {
+        const delta = 계약후 - 계약전;
+        const sign = delta >= 0 ? '+' : '';
+        TRACE(state, 'STK', `계약 ${sign}${delta.toFixed(2)} → 현재 ${계약후.toFixed(2)}/20 (TTL 만료)`);
+      }
+    }
+    // 영역 차단 종료 시 영역 데미지 + 효과 발동 (이번 cast 이전에 입력)
+    // 영역대결 끝나는 시점 = state.t (이벤트 시간) → 영역 효과 입력 후 이번 cast 진행
+    영역_pendingFire(state);
+    // TTL 스택 만료 처리 (모든 stack 이 individual TTL 사용 — pruneStackTTL 은 legacy)
     pruneStackTTL(state);
+    // 모든 stack 의 individual TTL prune (개별 stack 만료)
+    뇌인_prune(state);
+    검세_prune(state);
+    옥추_prune(state);
+    신소_prune(state);
+    // 검심/진마성화 — TTL 없음, prune 불필요
     // 작열 개별 타이머 만료 처리
     prune작열(state);
     // 검심통명 플래그를 버프와 동기화 (10s 만료 시 자동 off)
@@ -4273,7 +4599,7 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (b.endT <= state.t) continue;
           if (b.defDebuff || b.crRes) before약화 += b.stackCount || 1;
         }
-        const beforeDebuffs = `작열=${state.stacks.작열||0}(부여카운터=${state.작열부여카운터||0}/6), 화상=${state.화상||0}, 독고=${beforeDokgo.toFixed(1)}, 계약=${before계약}, 약화디버프=${before약화}`;
+        const beforeDebuffs = `작열=${state.stacks.작열||0}(부여카운터=${state.작열부여_누적||0}/6), 화상=${state.화상||0}, 독고=${beforeDokgo.toFixed(1)}, 계약=${before계약}, 약화디버프=${before약화}`;
         // 헤더 (시전 시작, 시전 전 상태)
         TRACE(state, 'CST', `▶ ${sk.name}\n           [시전 전 자원] ${beforeRsrc}\n           [시전 전 대상] ${beforeDebuffs}`);
         state.castCounts = state.castCounts || {};
@@ -4496,17 +4822,20 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             if (b.branch === '진') {
               비술_발동_자기(state, b.master, b.branch);
             } else {
-              state.업화_누적공격 = (state.업화_누적공격 || 0) + 1;
-              if (state.업화_누적공격 >= 5) {
+              state.업화_누적 = (state.업화_누적 || 0) + 1;
+              if (state.업화_누적 >= 5) {
                 const fired = 비술_발동_자기(state, b.master, b.branch);
-                if (fired) state.업화_누적공격 = 0;
+                if (fired) state.업화_누적 = 0;
               }
             }
           }
-          // 식혼/탁천: 자기 발동 시 sim 한계로 효과 의미 없으나 (cast 후 발동)
-          if (b.master === '식혼' || b.master === '탁천') {
+          // 식혼: 사양 "신통/법보로 공격 후 사망할 때까지" — 첫 공격 후 발동 (sim 사망 미모델 → 매 cast trigger 시도, CD 160초 안에서 1회 발동)
+          if (b.master === '식혼') {
             비술_발동_자기(state, b.master, b.branch);
           }
+          // 탁천: 사양 "치명일격을 받았을 때" — sim 환경 자기 받는 피해 미모델 → 발동 X
+          // 로직만 유지 (PvP/대결 sim 도입 시 자기 HP 감소 로직 추가하면 자동 발동)
+          // if (b.master === '탁천') 비술_발동_자기(state, b.master, b.branch);
         }
         state._inMainCast = false;
         // 청명 유파: 임의 신통 명중 시 뇌인 1중첩 획득
@@ -4788,13 +5117,14 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
             }
           }
         }
-        // 불씨 진마성화: 신통 1 cast마다 amp 스택 +1 (max 10). 3개→1%/스택, 6개→3%/스택
+        // 불씨 진마성화: 신통 1 cast마다 amp 스택 +1 (cap 10, TTL 없음).
+        // 3개→1%/스택, 6개→3%/스택. 검심처럼 무기한 누적 (시뮬 종료까지 유지).
         const 진마성화Per = 불씨급수값(state, '진마성화', [1, 3, 3]);
         if (진마성화Per > 0) {
           const prev = state.진마성화스택 || 0;
           if (prev < 10) {
             state.진마성화스택 = prev + 1;
-            TRACE(state, 'STK', `진마성화 ${prev}→${state.진마성화스택}/10 (amp +${진마성화Per}%/스택 = 현재 +${state.진마성화스택 * 진마성화Per}%)`);
+            TRACE(state, 'STK', `진마성화 ${prev}→${state.진마성화스택}/10 (TTL 없음, cap 10, amp +${진마성화Per}%/stack = 현재 +${state.진마성화스택 * 진마성화Per}%)`);
           }
         }
         // 시전 후 상태 요약 (END 로그)
@@ -4807,37 +5137,54 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
           if (b.endT <= state.t) continue;
           if (b.defDebuff || b.crRes) after약화 += b.stackCount || 1;
         }
-        const afterDebuffs = `작열=${state.stacks.작열||0}(부여카운터=${state.작열부여카운터||0}/6), 화상=${state.화상||0}, 독고=${afterDokgo.toFixed(1)}, 계약=${after계약}, 약화디버프=${after약화}`;
+        const afterDebuffs = `작열=${state.stacks.작열||0}(부여카운터=${state.작열부여_누적||0}/6), 화상=${state.화상||0}, 독고=${afterDokgo.toFixed(1)}, 계약=${after계약}, 약화디버프=${after약화}`;
         TRACE(state, 'END', `◀ ${sk.name} 시전 완료 후\n           [시전 후 자원] ${afterRsrc}\n           [시전 후 대상] ${afterDebuffs}`);
         state._activeCast = null;
       }
     } else {
       const trName = treasures[ev.idx];
-      TRACE(state, 'CST', `📿 ${trName} 법보`);
-      state.castCounts = state.castCounts || {};
-      const trSrc = `법보:${trName}`;
-      state.castCounts[trSrc] = (state.castCounts[trSrc] || 0) + 1;
-      state._currentSource = trSrc;
-      state._activeCast = trSrc;
-      // SNAP 캡처용 — 법보 cast 도 첫 record 시점에 buff/stack 스냅샷 캡처되도록
-      state._inMainCast = true;
-      state._snapBuffsCaptured = false;
-      state._snapBuffsAtDmg = null;
-      state._snapStacksAtDmg = null;
-      TREASURES[trName].cast(state);
-      state._inMainCast = false;
-      // 법보 cast 후 SNAP TRACE emit — 활성 buff 히트맵에 법보 cast 칸도 표시
-      emitSnapTrace(state);
-      state._activeCast = null;
+      // 진원 체크 — 법보 1회 시전 시 진원 -15% 소모, 부족 시 발사 안 됨
+      const 소모량 = state.진원_법보소모 || 0.15;
+      const 현재진원 = state.진원_remaining ?? 1.0;
+      if (현재진원 < 소모량 - 0.001) {
+        TRACE(state, 'OPT', `📿 ${trName} 법보 시전 실패: 진원 ${(현재진원 * 100).toFixed(1)}% < ${(소모량 * 100)}% 필요 (시전 안 됨)`);
+        // 법보 시전 안 했으므로 castCounts 도 증가 X, 영역 카운터 증가 X, 법상 틱 호출 X
+        ev._castSkipped = true;
+      } else {
+        state.진원_remaining = 현재진원 - 소모량;
+        TRACE(state, 'CST', `📿 ${trName} 법보 (진원 -${(소모량 * 100)}% → ${(state.진원_remaining * 100).toFixed(1)}%)`);
+        state.castCounts = state.castCounts || {};
+        const trSrc = `법보:${trName}`;
+        state.castCounts[trSrc] = (state.castCounts[trSrc] || 0) + 1;
+        state._currentSource = trSrc;
+        state._activeCast = trSrc;
+        // SNAP 캡처용 — 법보 cast 도 첫 record 시점에 buff/stack 스냅샷 캡처되도록
+        state._inMainCast = true;
+        state._snapBuffsCaptured = false;
+        state._snapBuffsAtDmg = null;
+        state._snapStacksAtDmg = null;
+        TREASURES[trName].cast(state);
+        state._inMainCast = false;
+        // 법보 cast 후 SNAP TRACE emit — 활성 buff 히트맵에 법보 cast 칸도 표시
+        emitSnapTrace(state);
+        state._activeCast = null;
+      }
     }
-    // === 법상 (法相) 틱 — 매 신통/법보 cast 후 호출 ===
+    // === 법상 (法相) 틱 — 매 신통/법보 cast 후 호출 (법보 시전 실패 시 호출 X) ===
     // 빙의 트리거 / 빙의 active 효과 / 종료 cleanup 처리
-    if (CFG.법상 && CFG.법상.name) {
+    if (!ev._castSkipped && CFG.법상 && CFG.법상.name) {
       const prevSource = state._currentSource;
       const prevActiveCast = state._activeCast;
       법상_틱(state, opts);
       state._currentSource = prevSource;
       state._activeCast = prevActiveCast;
+    }
+    // === 영역 (法則) 틱 — 매 신통/법보 cast 후 호출 (법보 시전 실패 시 호출 X) ===
+    // 1) 자기 버프 (천위/심연) 활성 시 매 cast 후 추가 피해
+    // 2) 누적 10회 + CD 180초 만족 시 영역 발동 (4-hit + AOE + 자기 버프)
+    if (!ev._castSkipped && CFG.영역) {
+      영역_시전트리거(state);
+      영역_틱(state);
     }
     // nextCast는 dealDamage에서 consume 되므로 별도 post-cast 리셋 불필요.
     // cast 도중 현미·풍세·파정·성류 등 옵션이 state.nextCast.X += ... 로 설정하면

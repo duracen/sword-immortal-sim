@@ -56,15 +56,24 @@ function parseStkMsg(msg) {
   // "독고 +2.50 (요청 ...) → ..." — 4종 균등분포이므로 delta/4 씩 4개로 처리하지 않고 합계로 표시
   m = stripped.match(/^독고\s*\+(\d+(?:\.\d+)?)/);
   if (m) return { key: '독고', delta: parseFloat(m[1]), refresh: false };
-  // "작열 +1 [src] → 현재 3중첩..." 등 일반 +N 패턴
+  // "독고 -N [type] (TTL 만료) → 합계 X" — 자연 만료 (silent prune drift 방지)
+  m = stripped.match(/^독고\s*-(\d+(?:\.\d+)?)\s*\[[^\]]*\]\s*\(TTL 만료\)\s*→\s*합계\s*(\d+(?:\.\d+)?)/);
+  if (m) return { key: '독고', delta: -parseFloat(m[1]), refresh: false, absolute: parseFloat(m[2]) };
+  // "작열 +1 [src] → 현재 3중첩..." / "계약 +0.50 → 현재 12.50/20" — absolute 추출
+  m = stripped.match(/^([^\s+]+)\s*\+(\d+(?:\.\d+)?)\s*(?:\[[^\]]*\])?\s*→\s*현재\s*(\d+(?:\.\d+)?)/);
+  if (m) return { key: m[1], delta: parseFloat(m[2]), refresh: false, absolute: parseFloat(m[3]) };
+  // "계약 -0.50 → 현재 11.50/20 (TTL 만료)" — 부정 delta + absolute
+  m = stripped.match(/^([^\s]+)\s*-(\d+(?:\.\d+)?)\s*→\s*현재\s*(\d+(?:\.\d+)?)/);
+  if (m) return { key: m[1], delta: -parseFloat(m[2]), refresh: false, absolute: parseFloat(m[3]) };
+  // "key +N" 일반 패턴 (absolute 없음)
   m = stripped.match(/^([^\s+]+)\s*\+(\d+(?:\.\d+)?)/);
   if (m) return { key: m[1], delta: parseFloat(m[2]), refresh: false };
-  // "검세 1→2" / "검세 1→2 (TTL=20s reset)"
+  // "검세 1→2" / "검세 1→2 (TTL=20s reset)" — absolute 값 우선 (TTL 만료로 인한 sync drift 방지)
   m = stripped.match(/^([^\s]+)\s+(\d+(?:\.\d+)?)→(\d+(?:\.\d+)?)/);
-  if (m) return { key: m[1], delta: parseFloat(m[3]) - parseFloat(m[2]), refresh: false };
+  if (m) return { key: m[1], delta: parseFloat(m[3]) - parseFloat(m[2]), refresh: false, absolute: parseFloat(m[3]) };
   // "뇌인 4↻ (TTL=20s reset, 최대치 유지)" — 최대치 유지 중 TTL 갱신
   m = stripped.match(/^([^\s]+)\s+(\d+(?:\.\d+)?)↻/);
-  if (m) return { key: m[1], delta: 0, refresh: true };
+  if (m) return { key: m[1], delta: 0, refresh: true, absolute: parseFloat(m[2]) };
   return null;
 }
 
@@ -82,9 +91,12 @@ function parseEvents(events) {
   // 법상: 모두 20초 빙의
   const TRIG_DUR = { 천벌: 10, 염양: 10, 천검: 0, 열산: 10,
     분혼마주: 15, 악신마주: 15, 업화마주: 10,
-    탁천마주: 1, 식혼마주: 1, 혼원마주: 1,
+    탁천마주: 6,    // 진의 피해감면 6초 (1초 면역은 sim 미모델, 자기 효과 미발동)
+    식혼마주: 140,  // 진/허/무 모두 140초 (cr/감면/호신강기 흡수 buff)
+    혼원마주: 12,   // 허의 12초 신통/치명타 차단 (자기 효과)
     청교룡: 20, 적난새: 20, 청반룡: 20, 금오: 20,
-    청룡: 20, 주작: 20, 진룡: 20, 봉황: 20 };
+    청룡: 20, 주작: 20, 진룡: 20, 봉황: 20,
+    영역: 10 };     // 영역 발동 — 자기 버프 10초 지속
   // 같은 시각/종류 트리거는 합쳐서 count 누적 (×N 표시용)
   function pushTrigger(tg) {
     const last = triggers[triggers.length - 1];
@@ -147,8 +159,39 @@ function parseEvents(events) {
         const dur = TRIG_DUR[masterKey] || 1;
         pushTrigger({ t: ev.t + 0.4, kind: masterKey, label: `${masterKey}·${m[2]} ${dur}s`, dur, branch: m[2] });
       }
+    } else if (ev.tag === 'OPT' && /🌐영역 \[([^\]]+)\] 발동/.test(ev.msg)) {
+      // 영역 (법칙) 발동 — 누적 10회 시전 + CD 180s. 자기 버프 10초 지속
+      const m = ev.msg.match(/🌐영역 \[([^\]]+)\] 발동/);
+      if (m) {
+        const name = m[1];
+        pushTrigger({ t: ev.t, kind: '영역', label: `영역·${name} ${TRIG_DUR.영역}s`, dur: TRIG_DUR.영역, branch: name });
+      }
+    } else if (ev.tag === 'OPT' && /⚔️영역대결 \[([^\]]+)\]/.test(ev.msg)) {
+      // 영역대결 — 영역 발동 시 시전 차단 5초 (영압대결과 별도 lane, 동일 색/아이콘)
+      const m = ev.msg.match(/⚔️영역대결 \[([^\]]+)\]/);
+      if (m) {
+        pushTrigger({ t: ev.t, kind: '영역대결', label: `영역대결 5s`, dur: 5, count: 1 });
+      }
     }
     // 열산상태 / 검심통명 등 유파 효과 buff 는 BUF 이벤트에서 처리
+  }
+  // 영압대결 — 항상 0~10s (이벤트로 emit 안 되므로 강제 push)
+  triggers.unshift({ t: 0, kind: '영압대결', label: '영압 10s', dur: 10, count: 1 });
+  // 불씨 BUF 이벤트 → trigger lane 으로 승격 (별도 lane 제거됨)
+  // 형식: "🔼버프 [불씨 통명묘화] <label> +N% (cnt/max) (dur초)"
+  // <label> 은 괄호 포함 가능 (예: 태현잔화 "기댓값 (0~2배 랜덤)") → 끝에서 매칭
+  for (const ev of events) {
+    if (ev.tag !== 'BUF') continue;
+    const nameMatch = ev.msg.match(/\[불씨 ([가-힣]+)\]/);
+    if (!nameMatch) continue;
+    // 마지막 두 개의 () group 매칭: (cnt/cap) (dur초)
+    const tailMatch = ev.msg.match(/\((\d+)\/(\d+)\)\s*\((\d+(?:\.\d+)?)\s*초\)\s*$/);
+    if (!tailMatch) continue;
+    const name = nameMatch[1];   // 통명묘화/태현잔화/유리현화/진마성화 등
+    const cnt = tailMatch[1];    // 현재 장착 수
+    const cap = tailMatch[2];    // 최대
+    const dur = parseFloat(tailMatch[3]);
+    triggers.push({ t: ev.t, kind: '불씨', branch: name, label: `불씨·${name} ${cnt}/${cap}`, dur, count: 1 });
   }
   // STK 이벤트 → (1) cast 창에 매핑 (뱃지용), (2) 자원별 활성 구간 (막대용)
   const stackSpans = {};    // resource → [{start, end}] — 스택 > 0 인 구간
@@ -157,17 +200,27 @@ function parseEvents(events) {
     if (ev.tag !== 'STK') continue;
     const parsed = parseStkMsg(ev.msg);
     if (!parsed) continue;
-    // 1) cast 창 매핑 (뱃지)
+    // 1) cast 창 매핑 (뱃지) — TTL 만료/누적카운터 같이 cast 행동과 무관한 STK 는 제외
+    //    cast 본인의 add (acquire) 만 delta 로 표시
+    const isExpireOrCounter = /TTL 만료|뇌인_누적/.test(ev.msg);
     let idx = -1;
     for (let i = castRaws.length - 1; i >= 0; i--) {
       if (ev.t >= castRaws[i].t - 0.01) { idx = i; break; }
     }
-    if (idx >= 0) {
+    if (idx >= 0 && !isExpireOrCounter) {
       castRaws[idx].stks[parsed.key] = (castRaws[idx].stks[parsed.key] || 0) + parsed.delta;
     }
     // 2) 자원 활성 구간 (막대)
     const before = stackState[parsed.key] || 0;
-    const after = parsed.refresh ? before : before + parsed.delta;
+    // absolute 값이 있으면 우선 사용 (TTL 만료 silent prune 으로 인한 drift 방지)
+    let after;
+    if (parsed.absolute !== undefined) {
+      after = parsed.absolute;
+    } else if (parsed.refresh) {
+      after = before;
+    } else {
+      after = before + parsed.delta;
+    }
     stackState[parsed.key] = Math.max(0, after);
     if (!stackSpans[parsed.key]) stackSpans[parsed.key] = [];
     const arr = stackSpans[parsed.key];
@@ -277,8 +330,8 @@ function parseEvents(events) {
   for (const ev of events) {
     if (typeof ev.t === 'number') maxT = Math.max(maxT, ev.t);
   }
-  // 3초 단위 올림 (cast 글로벌 CD 가 3초) + 1초 버퍼
-  maxT = Math.ceil((maxT + 1) / 3) * 3;
+  // 3초 단위 올림 (cast 글로벌 CD 가 3초) + 5초 버퍼 (마지막 cast 의 버프/트리거 표시 여유)
+  maxT = Math.ceil((maxT + 5) / 3) * 3;
   if (maxT < 10) maxT = 10;
   // buff/stack/trigger 의 end 시간은 maxT 로 clip
   for (const [, spans] of buffMap) {
@@ -294,13 +347,12 @@ function parseEvents(events) {
 
   // 유파 효과 (트리거 lane 에 별도 표시) — 버프 lane 에서 제외
   const FAMILY_EFFECT_KEYS = new Set(['열산상태', '열산']);
-  // buffs 배열로 변환 — 불씨/유파효과/일반 분리
+  // buffs 배열로 변환 — 불씨는 trigger lane 으로 통합, 유파효과/일반 분리
   const buffs = [];
-  const bulssi = [];
   for (const [key, spans] of buffMap) {
     for (const s of spans) {
       const item = { key, start: s.start, end: s.end, rawKey: s.rawKey, isThisCastOnly: s.isThisCastOnly, maxStack: s.maxStack || 1, stackCap: s.stackCap || 1, fires: s.fires || 1, deltaSum: s.deltaSum || 0, isPostDmg: !!s.isPostDmg };
-      if (s.rawKey && s.rawKey.startsWith('불씨 ')) bulssi.push(item);
+      if (s.rawKey && s.rawKey.startsWith('불씨 ')) continue; // 불씨는 trigger lane 으로 통합 (별도 emit)
       else if (FAMILY_EFFECT_KEYS.has(key)) continue; // 유파 효과 lane 에서 처리
       else buffs.push(item);
     }
@@ -338,7 +390,7 @@ function parseEvents(events) {
   }
   stacks.sort((a, b) => a.key.localeCompare(b.key) || a.start - b.start);
 
-  return { casts, buffs, bulssi, triggers, stacks, maxT };
+  return { casts, buffs, triggers, stacks, stackSpans, maxT };
 }
 
 // 자원별 색상
@@ -377,6 +429,14 @@ const TRIGGER_STYLE = {
   주작:   { bg: 'bg-rose-600', icon: '🦅', ring: 'ring-rose-300' },
   진룡:   { bg: 'bg-cyan-400', icon: '🐉', ring: 'ring-cyan-300' },
   봉황:   { bg: 'bg-rose-500', icon: '🦅', ring: 'ring-rose-300' },
+  // 영역 (법칙) — 보라계열 + 🌐 아이콘
+  영역:   { bg: 'bg-violet-700', icon: '🌐', ring: 'ring-violet-300' },
+  // 영압대결 — 전투 시작 0~6초간 cast 발사 불가 (평타만)
+  영압대결: { bg: 'bg-violet-500', icon: '⚔️', ring: 'ring-violet-300' },
+  // 영역대결 — 영역 발동 시 시전 차단 3초 (같은 보라색 + ⚔️)
+  영역대결: { bg: 'bg-violet-600', icon: '⚔️', ring: 'ring-violet-300' },
+  // 불씨 — 분홍계열 + 🔥 아이콘 (이전 별도 lane 색상 유지)
+  불씨:   { bg: 'bg-pink-600', icon: '🔥', ring: 'ring-pink-300' },
 };
 const DEFAULT_TRIGGER_STYLE = { bg: 'bg-slate-500', icon: '✨', ring: 'ring-slate-300' };
 
@@ -403,11 +463,14 @@ function assignLanes(buffs) {
 
 // 트리거 lane 배정 — 같은 종류는 같은 lane (천검=lane 0, 천벌=lane 1, 염양=2, 열산상태=3 ...)
 function assignTriggerLanes(triggers) {
-  const kindLane = {};
+  // 같은 kind+branch 는 같은 lane (예: 불씨·통명묘화 끼리만 lane 공유, 영역·제왕의 정 끼리만 lane 공유)
+  // kind 만 다른 (천검/천벌/염양 등) 은 자체 kind 가 lane key
+  const laneKey = {};
   let nextLane = 0;
   for (const tg of triggers) {
-    if (!(tg.kind in kindLane)) kindLane[tg.kind] = nextLane++;
-    tg.lane = kindLane[tg.kind];
+    const key = tg.branch ? `${tg.kind}·${tg.branch}` : tg.kind;
+    if (!(key in laneKey)) laneKey[key] = nextLane++;
+    tg.lane = laneKey[key];
   }
   return nextLane;
 }
@@ -426,19 +489,27 @@ const CAT_COLOR = {
 };
 
 export default function CastTimelineSummary({ events }) {
-  const { casts, buffs, bulssi, triggers, stacks, maxT } = useMemo(() => parseEvents(events), [events]);
+  const { casts, buffs, triggers, stacks, stackSpans, maxT } = useMemo(() => parseEvents(events), [events]);
   const laneCount = useMemo(() => assignLanes(buffs), [buffs]);
   const stackLaneCount = useMemo(() => assignLanes(stacks), [stacks]);
-  const bulssiLaneCount = useMemo(() => assignLanes(bulssi), [bulssi]);
   const triggerLaneCount = useMemo(() => assignTriggerLanes(triggers), [triggers]);
   // 활성 버프 수치 hover tooltip — overflow-x-auto 안에서 빠져나오기 위해 portal 로 렌더
   const [snapTip, setSnapTip] = useState(null);
 
   if (!events || events.length === 0) return null;
 
-  // 그리드 눈금 (3초 간격, cast 글로벌 CD 와 동일)
+  // 그리드 눈금 — 실제 cast 시점에 맞춤 (3초 고정 간격이 아니라 신통/법보 시전 시각)
+  // 0s 시작 + 각 cast 시점 (중복 제거 + 너무 가까운 라벨 dedupe)
+  // maxT 끝점은 last cast 와 너무 가까우면 생략 (라벨 겹침 방지)
+  const tickRaw = [0, ...casts.map((c) => Math.round(c.t * 10) / 10)];
+  tickRaw.sort((a, b) => a - b);
+  // 인접 tick 간 거리가 2초 미만이면 후자 제외 (라벨 겹침 방지)
   const ticks = [];
-  for (let t = 0; t <= maxT; t += 3) ticks.push(t);
+  for (const t of tickRaw) {
+    if (ticks.length === 0 || t - ticks[ticks.length - 1] >= 2.0) ticks.push(t);
+  }
+  // maxT 는 마지막 tick 이 maxT-2 이상이면 추가 X (겹침 방지)
+  if (ticks.length === 0 || maxT - ticks[ticks.length - 1] >= 2.0) ticks.push(maxT);
 
   return (
     <div className="bg-slate-900 rounded-xl p-2 sm:p-4 border border-slate-700">
@@ -455,7 +526,7 @@ export default function CastTimelineSummary({ events }) {
       {/* 모바일에서 가로 스크롤 가능하도록 overflow-x-auto + min-width */}
       <div className="overflow-x-auto -mx-2 sm:mx-0">
         <div className="relative bg-slate-950 rounded-lg p-3 min-w-[760px] mx-2 sm:mx-0">
-        {/* 시간축 라벨 */}
+        {/* 시간축 라벨 — cast 시점 기준, 정수면 정수 표시 / 소수점 있으면 소수점 1자리 */}
         <div className="relative h-5 mb-1 border-b border-slate-700">
           {ticks.map((t) => (
             <div
@@ -463,7 +534,7 @@ export default function CastTimelineSummary({ events }) {
               className="absolute text-[11px] text-slate-300 font-mono"
               style={{ left: `${(t / maxT) * 100}%`, transform: 'translateX(-50%)' }}
             >
-              {t}s
+              {Number.isInteger(t) ? t : t.toFixed(1)}s
             </div>
           ))}
         </div>
@@ -479,31 +550,14 @@ export default function CastTimelineSummary({ events }) {
           ))}
         </div>
 
-        {/* 영압 대결 (전투 시작 0~6초): cast 가 발사 안 되는 구간 */}
-        {maxT >= 6 && (
-          <div className="relative mb-1" style={{ height: '20px' }}>
-            <div
-              className="absolute top-0 bottom-0 rounded bg-gradient-to-r from-violet-700/60 to-violet-500/60 border border-violet-400/70 flex items-center justify-center"
-              style={{
-                left: '0%',
-                width: `${(6 / maxT) * 100}%`,
-                minWidth: '50px',
-              }}
-              title="영압 대결: 전투 시작 후 6초간 cast 발사 불가 (평타만 발사)"
-            >
-              <span className="text-[11px] text-white font-semibold whitespace-nowrap px-1 truncate">
-                ⚔️ 영압 6s
-              </span>
-            </div>
-          </div>
-        )}
+        {/* 영압 대결은 효과 (trigger) lane 으로 이동 (영압대결 trigger) */}
 
-        {/* 시전 마커 (상단) — stack 뱃지가 많을 수 있어 동적 높이 (각 cast 의 최대 stack 수 기준) */}
+        {/* 시전 마커 (상단) — dot+시간+이름만 (스택 뱃지는 별도 lane 으로 분리) */}
         <div
           className="relative mb-2"
           style={{
-            // 시전 마커: dot+시간+이름 ≈ 36px + stack 뱃지당 18px (line-height + gap-0.5) + 하단 여유 12px
-            height: `${48 + Math.max(0, ...casts.map((c) => Object.entries(c.stks || {}).filter(([, v]) => v !== 0).length)) * 18}px`,
+            // 시전 마커: dot+시간+이름 ≈ 48px (고정)
+            height: `48px`,
           }}
         >
           {casts.map((c, i) => {
@@ -519,65 +573,177 @@ export default function CastTimelineSummary({ events }) {
             return (
               <div
                 key={i}
-                className="absolute flex flex-col items-start group cursor-help hover:z-[200]"
+                className="absolute flex flex-col items-start hover:z-[200]"
                 style={{ left: `${leftPct}%` }}
               >
-                <div className={`w-2 h-2 rounded-full ${color} ring-2 ring-slate-900`} />
-                <div className="text-[10px] text-slate-300 font-mono mt-0.5">
-                  {c.t.toFixed(0)}s
-                </div>
-                <div className="text-[11px] text-slate-200 mt-0.5 whitespace-nowrap">
-                  {c.isTreasure ? '📿' : ''}{c.name}
-                </div>
-                {stkEntries.length > 0 && (
-                  <div className="mt-0.5 flex flex-col gap-0.5 items-center">
-                    {stkEntries.map(([k, v]) => (
-                      <span
-                        key={k}
-                        className={`text-[10px] px-1 rounded font-mono ${
-                          v > 0
-                            ? 'bg-sky-900/70 text-sky-200 border border-sky-700/60'
-                            : 'bg-rose-900/70 text-rose-200 border border-rose-700/60'
-                        }`}
-                      >
-                        {k}{v > 0 ? '+' : ''}{v}
-                      </span>
-                    ))}
+                {/* 시전 마커 (dot+time+name) — 자체 group/cast, hover 시 신통 툴팁 */}
+                <div className="relative group/cast cursor-help flex flex-col items-start">
+                  <div className={`w-2 h-2 rounded-full ${color} ring-2 ring-slate-900`} />
+                  <div className="text-[10px] text-slate-300 font-mono mt-0.5">
+                    {c.t.toFixed(0)}s
                   </div>
-                )}
-                {/* 시전 툴팁 */}
-                {(treasureDesc || skillOpts) && (
-                  <div
-                    className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-6 z-[200] w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none`}
-                  >
-                    <div className="text-xs font-bold text-yellow-300 mb-1">
-                      {c.isTreasure ? '📿' : '▶'} {c.name}
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono mb-2">
-                      ⏱ {c.t.toFixed(1)}s 시전
-                    </div>
-                    {treasureDesc && (
-                      <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
-                        {treasureDesc}
-                      </div>
-                    )}
-                    {skillOpts && Object.keys(skillOpts).length > 0 && (
-                      <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
-                        {Object.entries(skillOpts).map(([opt, d]) => (
-                          <div key={opt}>
-                            <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
-                            <span className="text-slate-300">{d}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                  <div className="text-[11px] text-slate-200 mt-0.5 whitespace-nowrap">
+                    {c.isTreasure ? '📿' : ''}{c.name}
                   </div>
-                )}
+                  {/* 시전 툴팁 — dot/time/name hover 시에만 표시 (stack 뱃지는 별도 group) */}
+                  {(treasureDesc || skillOpts) && (
+                    <div
+                      className={`hidden group-hover/cast:block group-focus-within/cast:block absolute ${tooltipSide} top-6 z-[200] w-96 p-3 bg-slate-950 border border-yellow-600 rounded-lg shadow-xl pointer-events-none`}
+                    >
+                      <div className="text-xs font-bold text-yellow-300 mb-1">
+                        {c.isTreasure ? '📿' : '▶'} {c.name}
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono mb-2">
+                        ⏱ {c.t.toFixed(1)}s 시전
+                      </div>
+                      {treasureDesc && (
+                        <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                          {treasureDesc}
+                        </div>
+                      )}
+                      {skillOpts && Object.keys(skillOpts).length > 0 && (
+                        <div className="text-[13px] text-slate-200 leading-relaxed space-y-1">
+                          {Object.entries(skillOpts).map(([opt, d]) => (
+                            <div key={opt}>
+                              <span className="font-bold text-yellow-200">[{opt}]</span>{' '}
+                              <span className="text-slate-300">{d}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
 
+        {/* 스택 누적 heatmap — cast 시점별 각 stack 의 누적 수치, 활성 버프 수치 와 동일 형식 */}
+        {(() => {
+          // 1) 각 cast 시점별 stack 누적 수 계산 (stackSpans 의 counts 사용)
+          // cumByCast[castIdx][stackKey] = count
+          const cumByCast = casts.map(() => ({}));
+          const stackKeySet = new Set();
+          for (const key in stackSpans) {
+            for (const span of stackSpans[key]) {
+              for (let ci = 0; ci < casts.length; ci++) {
+                const t = casts[ci].t;
+                if (t < span.start || t >= span.end) continue;
+                // Find latest count entry where entry.t <= t
+                let count = 0;
+                for (const c of span.counts) {
+                  if (c.t <= t + 0.001) count = c.n;
+                  else break;
+                }
+                if (count > 0) {
+                  cumByCast[ci][key] = (cumByCast[ci][key] || 0) + count;
+                  stackKeySet.add(key);
+                }
+              }
+            }
+          }
+          const stackKeys = Array.from(stackKeySet);
+          // 자원 스택 정렬 우선순위 (자기 자원 → 적 디버프)
+          const order = ['검세', '검심', '뇌인', '옥추', '신소', '계약', '진마성화스택', '작열', '화상', '독고'];
+          stackKeys.sort((a, b) => {
+            const ai = order.indexOf(a); const bi = order.indexOf(b);
+            if (ai === -1 && bi === -1) return a.localeCompare(b);
+            if (ai === -1) return 1;
+            if (bi === -1) return -1;
+            return ai - bi;
+          });
+          if (stackKeys.length === 0) return null;
+          // 각 stack 의 max 값 (색 농도 정규화)
+          const stackMax = {};
+          for (const k of stackKeys) {
+            let m = 0;
+            for (const cb of cumByCast) {
+              if ((cb[k] || 0) > m) m = cb[k];
+            }
+            stackMax[k] = m;
+          }
+          // stack 별 색상 (rgb)
+          const STACK_RGB = {
+            검세: '14, 165, 233',  // sky
+            검심: '6, 182, 212',  // cyan
+            뇌인: '168, 85, 247',  // purple
+            옥추: '139, 92, 246',  // violet
+            신소: '20, 184, 166',  // teal
+            계약: '236, 72, 153',  // pink
+            진마성화스택: '244, 114, 182',  // pink-rose
+            작열: '249, 115, 22',  // orange
+            화상: '239, 68, 68',  // red
+            독고: '34, 197, 94',  // emerald
+          };
+          return (
+            <div
+              className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
+              style={{ height: `${stackKeys.length * 16 + 8}px` }}
+            >
+              <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
+                스택 (누적)
+              </div>
+              {stackKeys.map((k, ki) => {
+                const rgb = STACK_RGB[k] || '148, 163, 184';
+                return (
+                  <div
+                    key={k}
+                    className="absolute left-0 right-0"
+                    style={{ top: `${ki * 16 + 4}px`, height: '14px' }}
+                  >
+                    {casts.map((c, ci) => {
+                      const v = cumByCast[ci][k] || 0;
+                      if (!v) return null;
+                      const delta = (c.stks && c.stks[k]) || 0;
+                      const startT = c.t;
+                      const endT = casts[ci + 1] ? casts[ci + 1].t : maxT;
+                      const leftPct = (startT / maxT) * 100;
+                      const widthPct = ((endT - startT) / maxT) * 100;
+                      const intensity = v / (stackMax[k] || 1);
+                      const opacity = 0.25 + intensity * 0.65;
+                      const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
+                      const fmt = (n) => typeof n === 'number' && n % 1 !== 0 ? n.toFixed(1) : n;
+                      const displayText = delta !== 0 ? `${fmt(v)}(${delta > 0 ? '+' : ''}${fmt(delta)})` : `${fmt(v)}`;
+                      return (
+                        <div
+                          key={ci}
+                          className="absolute top-0 bottom-0 rounded-sm flex items-center justify-center cursor-help font-mono text-[10px] text-white border border-slate-900/40 hover:ring-1 hover:ring-white/40 group/stack"
+                          style={{
+                            left: `${leftPct}%`,
+                            width: `${widthPct}%`,
+                            backgroundColor: `rgba(${rgb}, ${opacity})`,
+                          }}
+                        >
+                          {displayText}
+                          {STACK_DESCS[k] && (
+                            <div
+                              className={`hidden group-hover/stack:block absolute ${tooltipSide} top-4 z-[300] w-72 p-3 bg-slate-950 border border-sky-600 rounded-lg shadow-xl pointer-events-none`}
+                            >
+                              <div className="text-xs font-bold text-sky-300 mb-1">
+                                🔷 {k} ({c.t.toFixed(1)}s 시점 누적 {fmt(v)}중첩{delta !== 0 ? `, 이번 cast ${delta > 0 ? '+' : ''}${fmt(delta)}` : ''})
+                              </div>
+                              <div className="text-[12px] text-slate-200 leading-relaxed whitespace-pre-wrap">
+                                {STACK_DESCS[k]}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {/* 좌측 라벨 overlay */}
+                    <div
+                      className="absolute left-0 top-0 bottom-0 flex items-center text-[10px] text-slate-100 font-semibold pointer-events-none z-10 px-1.5"
+                      style={{ background: 'linear-gradient(to right, rgba(2,6,23,0.95) 70%, rgba(2,6,23,0))' }}
+                    >
+                      {k}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
 
         {/* 효과 (유파 트리거 + 비술 발동 등) — 종류별 lane 분리 */}
         {triggers.length > 0 && (
@@ -591,7 +757,11 @@ export default function CastTimelineSummary({ events }) {
             {triggers.map((tg, i) => {
               const style = TRIGGER_STYLE[tg.kind] || DEFAULT_TRIGGER_STYLE;
               const dur = tg.dur || 0;
-              const desc = TRIGGER_DESCS[tg.kind] || '';
+              // 영역/불씨/비술 같이 branch (특정 영역/마주명) 가 있는 trigger 는 branch 별 desc 우선 lookup
+              const desc =
+                (tg.branch && TRIGGER_DESCS[`${tg.kind}·${tg.branch}`]) ||
+                (tg.branch && TRIGGER_DESCS[tg.branch]) ||
+                TRIGGER_DESCS[tg.kind] || '';
               const leftPct = (tg.t / maxT) * 100;
               const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
               const laneTop = (tg.lane || 0) * 22 + 2;
@@ -611,7 +781,7 @@ export default function CastTimelineSummary({ events }) {
                     }}
                   >
                     <span className="text-[11px] text-white font-semibold truncate">
-                      {style.icon} {tg.kind}{tg.branch ? `·${tg.branch}` : ''}{countLabel} ·{dur}s
+                      {style.icon} {tg.kind}{tg.branch ? `·${tg.branch}` : ''}{countLabel} ·{Math.round(dur)}s
                     </span>
                     <div
                       className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-orange-600 rounded-lg shadow-xl pointer-events-none`}
@@ -620,7 +790,7 @@ export default function CastTimelineSummary({ events }) {
                         {style.icon} {tg.kind}{tg.branch ? `·${tg.branch}` : ''}{count > 1 ? ` ×${count}회 발동` : ''}
                       </div>
                       <div className="text-[11px] text-slate-400 font-mono mb-2">
-                        ⏱ {tg.t.toFixed(1)}s 발동 · 지속 {dur}초
+                        ⏱ {tg.t.toFixed(1)}s 발동 · 지속 {Math.round(dur)}초
                       </div>
                       {desc && (
                         <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
@@ -680,11 +850,12 @@ export default function CastTimelineSummary({ events }) {
             {stacks.map((s, i) => {
               const width = ((s.end - s.start) / maxT) * 100;
               const style = STACK_STYLE[s.key] || 'bg-slate-600/70 border-slate-500 text-slate-100';
-              // buff 유래 디버프는 lookupOption 으로 옵션 설명 조회 (저주/둔검 등)
-              // 일반 stack 디버프는 STACK_DESCS 에서 (작열/화상/독고)
+              // STACK_DESCS 우선 (스택 자체 설명) → 없으면 lookupOption (옵션 설명)
+              // 헤더는 stack key 기준 (둔검/파세/검흔 등) — 신통 출처 표시 안 함
               const lookup = s.rawKey ? lookupOption(s.rawKey) : null;
-              const baseHeader = lookup?.skill ? `${lookup.skill} [${lookup.option}]` : s.key;
-              const desc = lookup?.desc || STACK_DESCS[s.key] || '';
+              const stackDesc = STACK_DESCS[s.key];
+              const baseHeader = stackDesc ? s.key : (lookup?.skill ? `${lookup.skill} [${lookup.option}]` : s.key);
+              const desc = stackDesc || lookup?.desc || '';
               const leftPct = (s.start / maxT) * 100;
               const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
               const trajectory = (s.counts || [])
@@ -711,7 +882,7 @@ export default function CastTimelineSummary({ events }) {
                       🔷 {baseHeader} (최대 {typeof s.peak === 'number' && s.peak % 1 !== 0 ? s.peak.toFixed(2) : s.peak}중첩)
                     </div>
                     <div className="text-[11px] text-slate-400 font-mono mb-2">
-                      ⏱ {s.start.toFixed(1)}s ~ {s.end.toFixed(1)}s · {(s.end - s.start).toFixed(1)}초
+                      ⏱ {s.start.toFixed(1)}s ~ {s.end.toFixed(1)}s · {(s.end - s.start).toFixed(0)}초
                     </div>
                     {desc && (
                       <div className="text-[13px] text-slate-200 leading-relaxed mb-2 whitespace-pre-wrap">
@@ -730,62 +901,7 @@ export default function CastTimelineSummary({ events }) {
           </div>
         )}
 
-        {/* 불씨 세트 효과 */}
-        {bulssi.length > 0 && (
-          <div
-            className="relative mb-2 border-t border-dashed border-slate-700 pt-2"
-            style={{ height: `${Math.max(1, bulssiLaneCount) * 20 + 8}px` }}
-          >
-            <div className="absolute -top-[9px] left-0 text-[10px] text-slate-300 bg-slate-950 px-1">
-              불씨
-            </div>
-            {bulssi.map((b, i) => {
-              const realDur = b.end - b.start;
-              const width = (realDur / maxT) * 100;
-              const lookup = lookupOption(b.rawKey);
-              const header = lookup?.skill ? `${lookup.skill} [${lookup.option}]` : b.key;
-              const leftPct = (b.start / maxT) * 100;
-              const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
-              return (
-                <div
-                  key={i}
-                  className={`absolute h-[16px] rounded transition-colors cursor-help group hover:z-[200] ${
-                    b.isThisCastOnly
-                      ? 'bg-pink-500/60 border border-pink-400/70 border-dashed hover:bg-pink-400/70'
-                      : 'bg-pink-600/70 border border-pink-400/80 hover:bg-pink-500/80'
-                  }`}
-                  style={{
-                    left: `${leftPct}%`,
-                    width: `${width}%`,
-                    top: `${b.lane * 20 + 4}px`,
-                    minWidth: '20px',
-                  }}
-                >
-                  <span className="text-[11px] text-white font-mono pl-1 truncate block leading-[16px]">
-                    🔥 {b.key}{b.isThisCastOnly ? ' *' : ` ·${realDur.toFixed(0)}s`}
-                  </span>
-                  <div
-                    className={`hidden group-hover:block group-focus-within:block absolute ${tooltipSide} top-5 z-[200] w-72 p-3 bg-slate-950 border border-pink-600 rounded-lg shadow-xl pointer-events-none`}
-                  >
-                    <div className="text-xs font-bold text-pink-300 mb-1">🔥 {header}</div>
-                    <div className="text-[11px] text-slate-400 font-mono mb-2">
-                      {b.isThisCastOnly
-                        ? `⏱ ${b.start.toFixed(1)}s (본 신통 한정)`
-                        : `⏱ ${b.start.toFixed(1)}s ~ ${b.end.toFixed(1)}s · ${realDur.toFixed(1)}초`}
-                    </div>
-                    {lookup?.desc ? (
-                      <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
-                        {lookup.desc}
-                      </div>
-                    ) : (
-                      <div className="text-[11px] text-slate-300 italic">불씨 설명 없음</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {/* 불씨는 효과 (trigger) lane 으로 통합됨 — 별도 lane 제거 */}
 
         {/* 버프 간트 바들 */}
         <div
@@ -839,7 +955,7 @@ export default function CastTimelineSummary({ events }) {
                   <div className="text-[11px] text-slate-400 font-mono mb-2">
                     {b.isThisCastOnly
                       ? `⏱ ${b.start.toFixed(1)}s (본 신통 한정)`
-                      : `⏱ ${b.start.toFixed(1)}s ~ ${b.end.toFixed(1)}s · ${realDur.toFixed(1)}초`}
+                      : `⏱ ${b.start.toFixed(1)}s ~ ${b.end.toFixed(1)}s · ${realDur.toFixed(0)}초`}
                   </div>
                   {lookup?.desc ? (
                     <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-wrap">
