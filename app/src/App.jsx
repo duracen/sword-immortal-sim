@@ -30,6 +30,10 @@ export default function App() {
               </a>
             </div>
           </div>
+          <div className="flex items-center gap-2 mb-3 text-[11px]">
+            <span className="text-amber-300 font-bold">💛 Special Thanks</span>
+            <span className="text-slate-300">— 연하님 (제작 도움)</span>
+          </div>
           <div className="space-y-1 text-[11px] text-slate-300">
             <div>
               ※ 본 사이트는 게임 <span className="text-slate-400">"검선귀환(劍仙歸還)"</span> 의 신통/법보/불씨 조합을

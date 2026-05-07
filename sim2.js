@@ -27,6 +27,7 @@ const CFG = {
   lowHPProb: 0.5,   // (임시) targetHPRatio 기반 모델 리팩터 전까지 유지
   // ---- 방어력 감산 (공식 비공개 → 단순 근사, 리팩터 시 적용 예정) ----
   defReduction: 0.7,   // 일반피해는 원피해의 70%만 적용 (30% 감산). 확정피해(백족)는 우회.
+  기본방어감소: 10,     // 기본 방어력 -10% (default state — 펫/길드/장비 등 누적 보정)
   targetMaxHP: 25_000_000_000, // 250억 HP (호신강기 별도 90억)
   호신강기대상확률: 0.5, // 환음요탑: 대상이 호신강기 보유 확률
   자신호신강기확률: 0.9, // 오염혁선: 자신 호신강기 활성 확률 (90억 풀이라 거의 항상 활성)
@@ -627,7 +628,7 @@ function _작열tickDmg(s, basePct) {
   let dmg = rawBase * (1 + atkBuff / 100) * (1 + totalDmgPct / 100) * (1 + finalPct / 100);
   // 방어 감면 (적 상태)
   let defMult = CFG.defReduction;
-  let 감소 = 0;
+  let 감소 = CFG.기본방어감소 || 0;  // 기본 방어력 감소 (default state)
   if ((s.catSlots.화염 || 0) >= 2) {
     prune화상(s);
     감소 += (s.화상 || 0) * 2;
@@ -924,7 +925,7 @@ function dealDamage(state, base, opts = {}) {
   let defMult = 1;
   if (!opts.absolute && !opts.bypassDef) {
     defMult = CFG.defReduction;
-    let 감소 = 0;
+    let 감소 = CFG.기본방어감소 || 0;  // 기본 방어력 감소 (default state)
     if ((state.catSlots.화염 || 0) >= 2) {
       prune화상(state);
       감소 += (state.화상 || 0) * 2;

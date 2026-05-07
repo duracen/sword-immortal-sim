@@ -94,15 +94,21 @@ function TabButton({ active, onClick, children }) {
 
 /* ─────────────────  자동 탐색  ───────────────── */
 function AutoSearch({ targetLawBody, setTargetLawBody }) {
-  const MARKER_TIMES = [34, 60, 120, 180];
-  const MARKER_LABELS = ['34초 (1사이클)', '60초', '120초', '180초'];
-  const [markerIdx, setMarkerIdx] = useState(0);  // 34초 (1사이클) 기본
+  const MARKER_TIMES = [41, 60, 120, 180];
+  const MARKER_LABELS = ['41초 (1사이클)', '60초', '120초', '180초'];
+  const [markerIdx, setMarkerIdx] = useState(0);  // 41초 (1사이클) 기본
   // 기본은 아무것도 선택 안 된 빈 상태. 사용자가 직접 "전체 선택" 또는 카테고리/유파별로 추가.
   const [pool, setPool] = useState(() => new Set());
   // requiredLawBody: null (무필터) | 'any' (아무거나 4+) | '영검'/'화염'/'뇌전'/'백족' (특정)
   const [requiredLawBody, setRequiredLawBody] = useState('any');
-  const [fixedTreasures, setFixedTreasures] = useState(false);
+  // 법보 위치 레이아웃: 'free' (9! 미고정) | '789' (7/8/9 위치) | '189' (1/8/9 위치)
+  const [treasureLayout, setTreasureLayout] = useState('free');
   const [fixedTreasureOrder, setFixedTreasureOrder] = useState(false);
+  // 호환성: 기존 fixedTreasures boolean 유지 (treasureLayout !== 'free' 일 때 true)
+  const fixedTreasures = treasureLayout !== 'free';
+  function setFixedTreasures(on) {
+    setTreasureLayout(on ? '789' : 'free');
+  }
   const [treasures, setTreasures] = useState([]);
   const [searchMode, setSearchMode] = useState('fast');  // 'fast' | 'exhaustive'
   // 자동 탐색 전체에 동일 불씨 세트 적용 — 실 인게임에서 불씨는 고정됨
@@ -129,7 +135,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   }, [selected]);
   const { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase } = useRanking();
 
-  const sortBy = ['34', '60', '120', '180'][markerIdx];
+  const sortBy = ['41', '60', '120', '180'][markerIdx];
 
   function handleStart() {
     setSelected(null);
@@ -139,6 +145,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       requiredLawBody,
       fixedTreasures,
       fixedTreasureOrder,
+      treasureLayout,
       // 선택된 법보 풀 — 고정 시 여기서만 C(N,3) 조합 탐색
       // 사용자가 선택한 법보 풀 — 고정 시 C(N,3) 조합 / 미고정 시도 동일하게 선택된 풀 내에서만 탐색
       treasurePool: treasures.length >= 3 ? treasures : null,
@@ -181,38 +188,53 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
           ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 +{CFG.합체기보너스 || 0} · 반허기 +{CFG.반허기보너스 || 0} · 인간계 +{CFG.인간계보너스 || 0}).
           <br />
-          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억.
+          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억 · 방어력 -{CFG.기본방어감소 || 0}% (기본).
         </div>
         <SkillPoolPicker pool={pool} onChange={setPool} />
       </section>
 
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">2. 법보 풀 선택</h2>
-        <div className="flex items-center gap-3 mb-2 flex-wrap">
-          <label
-            className="flex items-center gap-2 text-xs text-slate-300 select-none cursor-pointer"
-            title="체크 시: 법보가 시전 순서의 7/8/9번(후순위)에 위치 고정됩니다. 신통 6! × 법보 3! = 4,320회 시뮬 — 법보 미고정(9!=362,880) 대비 약 84배 빠름."
-          >
-            <input
-              type="checkbox"
-              checked={fixedTreasures}
-              onChange={(e) => {
-                const on = e.target.checked;
-                setFixedTreasures(on);
-                // 체크 시 아무 법보도 선택 안 됐으면 기본 세팅 (탑/호/검) 자동 선택
-                if (on && treasures.length === 0) {
-                  setTreasures(['환음요탑', '유리옥호', '참원선검']);
-                }
-              }}
-            />
-            <span className="font-semibold">법보 위치 고정</span>
-            <span className="text-[11px] text-slate-300">
-              (체크 시 법보는 7/8/9번 위치만 사용 · 법보 순서는 전수탐색 → 신통 6! × 법보 3! = 4,320 / 미고정 9!=362,880 대비 84배 빠름)
-            </span>
-          </label>
+        <div className="flex flex-col gap-2 mb-2">
+          <div className="flex items-center gap-3 flex-wrap text-xs">
+            <span className="text-slate-300 font-semibold">법보 위치 레이아웃:</span>
+            <label className="flex items-center gap-1 cursor-pointer text-slate-300">
+              <input
+                type="radio"
+                name="treasureLayout"
+                checked={treasureLayout === 'free'}
+                onChange={() => setTreasureLayout('free')}
+              />
+              <span>자유 <span className="text-slate-400">(9! = 362,880)</span></span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer text-slate-300">
+              <input
+                type="radio"
+                name="treasureLayout"
+                checked={treasureLayout === '789'}
+                onChange={() => {
+                  setTreasureLayout('789');
+                  if (treasures.length === 0) setTreasures(['환음요탑', '유리옥호', '참원선검']);
+                }}
+              />
+              <span>7/8/9 고정 <span className="text-slate-400">(6!×3! = 4,320)</span></span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer text-slate-300">
+              <input
+                type="radio"
+                name="treasureLayout"
+                checked={treasureLayout === '189'}
+                onChange={() => {
+                  setTreasureLayout('189');
+                  if (treasures.length === 0) setTreasures(['환음요탑', '유리옥호', '참원선검']);
+                }}
+              />
+              <span>1/8/9 고정 <span className="text-slate-400">(opener+closer)</span></span>
+            </label>
+          </div>
           <label
             className={`flex items-center gap-2 text-xs select-none ${fixedTreasures ? 'text-slate-300 cursor-pointer' : 'text-slate-500 cursor-not-allowed'}`}
-            title={fixedTreasures ? '체크 시: 법보를 사용자가 선택한 순서 그대로 시전. 법보 순서 탐색 X → 신통 6! = 720회 (법보 위치 고정 + 순서 고정 시).' : '법보 위치 고정 활성 시에만 사용 가능'}
+            title={fixedTreasures ? '체크 시: 법보를 사용자가 선택한 순서 그대로 시전 (1번/8번/9번 또는 7/8/9번 슬롯에 순서대로 배치). 법보 순서 탐색 X → 신통 6! = 720회.' : '법보 위치 고정 활성 시에만 사용 가능'}
           >
             <input
               type="checkbox"
@@ -222,10 +244,13 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
             />
             <span className="font-semibold">법보 순서 고정</span>
             <span className="text-[11px] text-slate-300">
-              (체크 시 법보는 사용자 선택 순서 그대로 → 신통 6! × 법보 1 = 720, 법보 위치 고정 대비 6배 빠름)
+              (체크 시 법보는 사용자 선택 순서 그대로 → 신통 6! × 법보 1 = 720)
             </span>
           </label>
-          <div className="text-xs text-slate-400">※ 법보 순서 미고정 시 알고리즘이 법보끼리 순서를 자동 결정합니다</div>
+          <div className="text-xs text-slate-400">
+            ※ <b>1/8/9 고정</b>: 1번 슬롯(opener) + 8/9번 슬롯(closer) 에 법보 배치. 신통 6개는 2~7번에 자유 배치
+            · 순서 고정 시: 사용자 선택 순서대로 1/8/9번 배치 (앞→뒤)
+          </div>
         </div>
         <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={fixedTreasureOrder} maxSelect={4} minSelect={3} />
       </section>
@@ -602,8 +627,8 @@ function SplitRankings({ results, sortBy, markerTime, onRowClick }) {
 }
 
 /* ─────────────────  수동 시뮬  ───────────────── */
-const MANUAL_MARKER_TIMES = [34, 60, 120, 180];
-const MANUAL_MARKER_LABELS = ['34초 (1사이클)', '60초', '120초', '180초'];
+const MANUAL_MARKER_TIMES = [41, 60, 120, 180];
+const MANUAL_MARKER_LABELS = ['41초 (1사이클)', '60초', '120초', '180초'];
 
 function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [skillSel, setSkillSel] = useState({});
@@ -611,7 +636,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [treasures, setTreasures] = useState([]);
   const [order, setOrder] = useState(null);
   const [showLog, setShowLog] = useState(false);
-  const [markerIdx, setMarkerIdx] = useState(0); // 34초 (1사이클) 기본
+  const [markerIdx, setMarkerIdx] = useState(0); // 41초 (1사이클) 기본
   const [randomCrit, setRandomCrit] = useState(false);
   // 불씨 세트 장착 (총 9 슬롯). 개수별 최대 급수 효과 적용.
   const [불씨, set불씨] = useState({
@@ -729,7 +754,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
           ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 +{CFG.합체기보너스 || 0} · 반허기 +{CFG.반허기보너스 || 0} · 인간계 +{CFG.인간계보너스 || 0}).
           <br />
-          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억.
+          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억 · 방어력 -{CFG.기본방어감소 || 0}% (기본).
         </div>
         <SkillPicker skillSel={skillSel} onChange={setSkillSel} maxTotal={6} />
       </section>

@@ -126,7 +126,7 @@ function defaultOrder() {
 
 let FIXED_TREASURES = ['환음요탑', '유리옥호', '참원선검'];
 let G_TREASURE_POOL = null;  // fixedTreasures ON + user-selected pool (array of names, size >=3)
-const MARKER_TIME = [34, 60, 120, 180];
+const MARKER_TIME = [41, 60, 120, 180];
 function getMaxTime(markerIdx) { return MARKER_TIME[markerIdx]; }
 
 let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
@@ -135,6 +135,7 @@ let G_BISUL = null;      // 비술 (start 시 세팅)
 let G_BEOPSANG = null;   // 법상 (start 시 세팅)
 let G_YEOK = null;       // 영역 (법칙) (start 시 세팅)
 let G_FIXED_TR_ORDER = false;  // 법보 순서 고정 (체크 시 user 입력 순서 그대로)
+let G_TR_LAYOUT = '789';  // '789' (default 후순위) | '189' (1번 opener + 8/9번 closer)
 function simOptsFor(markerIdx) {
   const o = { maxTime: getMaxTime(markerIdx) };
   if (G_TARGET_LAW) o.targetLawBody = G_TARGET_LAW;
@@ -179,10 +180,22 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
     const treasureSlots = [0, 1, 2].map((i) => ({ kind: 'treasure', idx: i }));
     // 법보 순서 고정 시: 사용자 입력 순서 그대로 사용 (단일 perm)
     const trPermList = fixedTreasureOrder ? [treasureSlots] : Array.from(permutations(treasureSlots));
+    // 레이아웃에 따른 슬롯 배치 함수
+    // '789': skills (slots 0~5) + treasures (slots 6~8 = 7/8/9번)
+    // '189': treasure[0] (slot 0 = 1번) + skills (slots 1~6 = 2~7번) + treasure[1,2] (slots 7~8 = 8/9번)
+    const layout = G_TR_LAYOUT;
+    function arrangeSlots(skPerm, trPerm) {
+      if (layout === '189') {
+        // 1번 = trPerm[0], 2~7번 = skPerm 6개, 8/9번 = trPerm[1], trPerm[2]
+        return [trPerm[0]].concat(skPerm).concat([trPerm[1], trPerm[2]]);
+      }
+      // default '789': skills + treasures
+      return skPerm.concat(trPerm);
+    }
     for (const skPerm of permutations(skillSlots)) {
       for (const trPerm of trPermList) {
         if (isCancelled()) return { topResults, cancelled: true };
-        const full = skPerm.concat(trPerm);
+        const full = arrangeSlots(skPerm, trPerm);
         const sc = simulateBuild(build, treasures, full, skillsOverride, simOpts).cumByMarker[markerIdx];
         consider(sc, full);
         counter++;
@@ -229,7 +242,13 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
 async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasures, isCancelled, onOrderProgress, mode = 'fast') {
   const simOpts = simOptsFor(markerIdx);
   const trTail = [0, 1, 2].map((i) => ({ kind: 'treasure', idx: i }));
+  const layout = G_TR_LAYOUT;
   const swapRange = fixedTreasures ? 6 : 9;
+  // skill swap이 차지할 인덱스 범위 (treasure 위치는 swap 대상에서 제외)
+  // '789': skill 인덱스 0~5 (treasures at 6~8)
+  // '189': skill 인덱스 1~6 (treasures at 0, 7, 8)
+  const skillIdxStart = (fixedTreasures && layout === '189') ? 1 : 0;
+  const skillIdxEnd = skillIdxStart + swapRange; // exclusive
   const config = mode === 'strong'
     ? { numSeeds: 10, numKicks: 8, use3Opt: true, estTotal: 10000 }
     : mode === 'triage'
@@ -245,7 +264,12 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
   // === Seed 생성 ===
   const skillIdx = skills.map((sk, i) => ({ idx: i, main: SK[sk.name]?.main ?? 0 }));
   function buildOrder(skillOrder) {
-    return skillOrder.map((x) => ({ kind: 'skill', idx: x.idx })).concat(trTail);
+    const skillSlots = skillOrder.map((x) => ({ kind: 'skill', idx: x.idx }));
+    if (fixedTreasures && layout === '189') {
+      // 1번 = trTail[0], 2~7번 = skillSlots, 8/9번 = trTail[1], trTail[2]
+      return [trTail[0]].concat(skillSlots).concat([trTail[1], trTail[2]]);
+    }
+    return skillSlots.concat(trTail);
   }
   function shuffleSeed() {
     const r = skillIdx.slice();
@@ -262,6 +286,11 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
   while (seeds.length < config.numSeeds) seeds.push(shuffleSeed());
 
   // === Combined local search ===
+  // 189 layout: skill 인덱스는 1~6 (skillIdxStart=1, skillIdxEnd=7)
+  // 789 layout: skill 인덱스는 0~5 (skillIdxStart=0, skillIdxEnd=6)
+  // 미고정: 인덱스 0~8 (swapRange=9)
+  const swapStart = skillIdxStart;
+  const swapEnd = skillIdxEnd;
   async function localSearch(startOrder) {
     let bestOrder = startOrder;
     let bestScore = simulate(bestOrder);
@@ -271,8 +300,8 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
       if (isCancelled && isCancelled()) return { order: bestOrder, score: bestScore, cancelled: true };
       improved = false;
       // 2-swap
-      for (let i = 0; i < swapRange; i++) {
-        for (let j = i + 1; j < swapRange; j++) {
+      for (let i = swapStart; i < swapEnd; i++) {
+        for (let j = i + 1; j < swapEnd; j++) {
           const newOrder = bestOrder.slice();
           [newOrder[i], newOrder[j]] = [newOrder[j], newOrder[i]];
           const sc = simulate(newOrder);
@@ -280,8 +309,8 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
         }
       }
       // Or-opt: 한 element 다른 위치로 삽입
-      for (let from = 0; from < swapRange; from++) {
-        for (let to = 0; to < swapRange; to++) {
+      for (let from = swapStart; from < swapEnd; from++) {
+        for (let to = swapStart; to < swapEnd; to++) {
           if (Math.abs(from - to) <= 1) continue;
           const newOrder = bestOrder.slice();
           const [el] = newOrder.splice(from, 1);
@@ -292,8 +321,8 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
       }
       // 3-opt (strong only): 부분서열 [i,j] 역순으로 뒤집기
       if (config.use3Opt) {
-        for (let i = 0; i < swapRange - 1; i++) {
-          for (let j = i + 2; j < swapRange; j++) {
+        for (let i = swapStart; i < swapEnd - 1; i++) {
+          for (let j = i + 2; j < swapEnd; j++) {
             const newOrder = bestOrder.slice();
             const sub = newOrder.slice(i, j + 1).reverse();
             for (let k = 0; k < sub.length; k++) newOrder[i + k] = sub[k];
@@ -309,27 +338,29 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
   }
 
   // === ILS kick: 랜덤 4 위치 cyclic shift (또는 strong 시 double-bridge) ===
+  // skill 인덱스 범위 [swapStart, swapEnd) 내에서만 perturbation (treasure 위치 보존)
   function kick(order) {
     const newOrder = order.slice();
     if (config.use3Opt && Math.random() < 0.5) {
       // Double-bridge (TSP 표준): 4개 cut point 로 4 segment 재배열 → 큰 perturbation
       const cuts = [];
       while (cuts.length < 3) {
-        const p = 1 + Math.floor(Math.random() * (swapRange - 1));
+        const p = swapStart + 1 + Math.floor(Math.random() * (swapEnd - swapStart - 1));
         if (!cuts.includes(p)) cuts.push(p);
       }
       cuts.sort((a, b) => a - b);
-      const seg1 = newOrder.slice(0, cuts[0]);
+      const head = newOrder.slice(0, swapStart);
+      const seg1 = newOrder.slice(swapStart, cuts[0]);
       const seg2 = newOrder.slice(cuts[0], cuts[1]);
       const seg3 = newOrder.slice(cuts[1], cuts[2]);
-      const seg4Plus = newOrder.slice(cuts[2], swapRange);
-      const tail = newOrder.slice(swapRange);
-      return seg1.concat(seg3, seg2, seg4Plus, tail);
+      const seg4 = newOrder.slice(cuts[2], swapEnd);
+      const tail = newOrder.slice(swapEnd);
+      return head.concat(seg1, seg3, seg2, seg4, tail);
     }
-    // 기본 kick: 4 위치 cyclic shift
+    // 기본 kick: 4 위치 cyclic shift (skill 범위 내에서만)
     const positions = [];
     while (positions.length < 4) {
-      const p = Math.floor(Math.random() * swapRange);
+      const p = swapStart + Math.floor(Math.random() * (swapEnd - swapStart));
       if (!positions.includes(p)) positions.push(p);
     }
     const elements = positions.map((p) => newOrder[p]);
@@ -578,7 +609,7 @@ async function evaluateSkillCombo(bd, markerIdx, fixedTreasures, isCancelled, op
       treasuresArr: tr || [],
       orderArr: t.ord,
       orderRank: idx + 1,   // 이 신통 조합 내에서 몇 번째 우수 순서인지
-      s34: markerIdx === 0 ? cum[0] : null,
+      s41: markerIdx === 0 ? cum[0] : null,
       s60: markerIdx === 1 ? cum[1] : null,
       s120: markerIdx === 2 ? cum[2] : null,
       s180: markerIdx === 3 ? cum[3] : null,
@@ -612,6 +643,7 @@ async function handleMessage(e) {
     법상 = null,
     영역 = null,
     fixedTreasureOrder = false,
+    treasureLayout = '789',
   } = msg.config || {};
   G_TARGET_LAW = targetLawBody;
   G_BULSSI = 불씨;
@@ -619,6 +651,7 @@ async function handleMessage(e) {
   G_BEOPSANG = (법상 && 법상.name) ? 법상 : null;
   G_YEOK = 영역 || null;
   G_FIXED_TR_ORDER = !!fixedTreasureOrder;
+  G_TR_LAYOUT = (treasureLayout === '189') ? '189' : '789';
   if (fixedTreasures && Array.isArray(fixedTreasureList) && fixedTreasureList.length === 3) {
     FIXED_TREASURES = fixedTreasureList.slice();
   }
@@ -727,7 +760,7 @@ async function handleMessage(e) {
             treasuresArr: t.bestTr || [],
             orderArr: t.ord,
             orderRank: idx + 1,
-            s34: markerIdx === 0 ? cum[0] : null,
+            s41: markerIdx === 0 ? cum[0] : null,
             s60: markerIdx === 1 ? cum[1] : null,
             s120: markerIdx === 2 ? cum[2] : null,
             s180: markerIdx === 3 ? cum[3] : null,
