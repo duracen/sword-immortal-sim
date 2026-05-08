@@ -45,7 +45,7 @@ export default function App() {
               본 시뮬레이터의 결과와는 차이가 있을 수 있습니다.
             </div>
             <div>
-              ※ 모든 수치는 <span className="text-slate-400">신통 최대 강화 · 공격력 1.6억 · 치명타율 30% · 치명타 배율 200%</span>
+              ※ 모든 수치는 <span className="text-slate-400">신통 최대 강화 · 공격력 2.0억 · 치명타율 40% · 치명타 배율 150%</span>
               {' '}기준의 이론값이며, 기본은 <span className="text-slate-400">기댓값 모드</span>
               {' '}(모든 확률 기반 효과 — 치명타·태현잔화·유뢰법체 조건·crit 트리거류 등 — 을 확률 × 값으로 스케일 계산) 입니다.
             </div>

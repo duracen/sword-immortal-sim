@@ -133,6 +133,9 @@ let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
 let G_BULSSI = null;     // 불씨 세트 (start 시 세팅)
 let G_BISUL = null;      // 비술 (start 시 세팅)
 let G_BEOPSANG = null;   // 법상 (start 시 세팅)
+let G_DEFENSE_TREASURES = null;  // 방어법보 (호신강기 결정)
+let G_ATTACK_SET = '단독';   // 공격법보 세트 모드 ('단독'|'천강'|'현명')
+let G_DEFENSE_SET = '단독';  // 방어법보 세트 모드 ('단독'|'천강'|'현명')
 let G_YEOK = null;       // 영역 (법칙) (start 시 세팅)
 let G_FIXED_TR_ORDER = false;  // 법보 순서 고정 (체크 시 user 입력 순서 그대로)
 let G_TR_LAYOUT = '789';  // '789' (default 후순위) | '189' (1번 opener + 8/9번 closer)
@@ -143,6 +146,9 @@ function simOptsFor(markerIdx) {
   if (G_BISUL) o.bisul = G_BISUL;
   if (G_BEOPSANG) o.법상 = G_BEOPSANG;
   if (G_YEOK) o.영역 = G_YEOK;
+  if (G_DEFENSE_TREASURES) o.defenseTreasures = G_DEFENSE_TREASURES;
+  if (G_ATTACK_SET && G_ATTACK_SET !== '단독') o.attackSetMode = G_ATTACK_SET;
+  if (G_DEFENSE_SET && G_DEFENSE_SET !== '단독') o.defenseSetMode = G_DEFENSE_SET;
   return o;
 }
 
@@ -644,12 +650,18 @@ async function handleMessage(e) {
     영역 = null,
     fixedTreasureOrder = false,
     treasureLayout = '789',
+    defenseTreasures = null,
+    attackSetMode = '단독',
+    defenseSetMode = '단독',
   } = msg.config || {};
   G_TARGET_LAW = targetLawBody;
   G_BULSSI = 불씨;
   G_BISUL = (bisul && (bisul.self?.length || bisul.enemy?.length)) ? bisul : null;
   G_BEOPSANG = (법상 && 법상.name) ? 법상 : null;
   G_YEOK = 영역 || null;
+  G_DEFENSE_TREASURES = (Array.isArray(defenseTreasures) && defenseTreasures.length > 0) ? defenseTreasures.slice() : null;
+  G_ATTACK_SET = (attackSetMode === '천강' || attackSetMode === '현명') ? attackSetMode : '단독';
+  G_DEFENSE_SET = (defenseSetMode === '천강' || defenseSetMode === '현명') ? defenseSetMode : '단독';
   G_FIXED_TR_ORDER = !!fixedTreasureOrder;
   G_TR_LAYOUT = (treasureLayout === '189') ? '189' : '789';
   if (fixedTreasures && Array.isArray(fixedTreasureList) && fixedTreasureList.length === 3) {

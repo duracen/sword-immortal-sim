@@ -2,6 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import SkillPicker from '../components/simulator/SkillPicker.jsx';
 import SkillPoolPicker from '../components/simulator/SkillPoolPicker.jsx';
 import TreasurePicker from '../components/simulator/TreasurePicker.jsx';
+import DefenseTreasurePicker from '../components/simulator/DefenseTreasurePicker.jsx';
+import TreasureSetPicker from '../components/simulator/TreasureSetPicker.jsx';
 import OrderEditor from '../components/simulator/OrderEditor.jsx';
 import BulssiPicker from '../components/simulator/BulssiPicker.jsx';
 import BisulPicker from '../components/simulator/BisulPicker.jsx';
@@ -110,6 +112,11 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
     setTreasureLayout(on ? '789' : 'free');
   }
   const [treasures, setTreasures] = useState([]);
+  // 방어법보 (max 3개) — 호신강기 합산 결정
+  const [defenseTreasures, setDefenseTreasures] = useState([]);
+  // 세트 모드 ('단독' | '천강' | '현명') — 공격법보/방어법보 각각 분리
+  const [attackSetMode, setAttackSetMode] = useState('단독');
+  const [defenseSetMode, setDefenseSetMode] = useState('단독');
   const [searchMode, setSearchMode] = useState('fast');  // 'fast' | 'exhaustive'
   // 자동 탐색 전체에 동일 불씨 세트 적용 — 실 인게임에서 불씨는 고정됨
   const [불씨, set불씨] = useState({
@@ -155,6 +162,9 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       bisul,
       법상,
       영역,
+      defenseTreasures,
+      attackSetMode,
+      defenseSetMode,
     });
   }
 
@@ -188,13 +198,14 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
           ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 +{CFG.합체기보너스 || 0} · 반허기 +{CFG.반허기보너스 || 0} · 인간계 +{CFG.인간계보너스 || 0}).
           <br />
-          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억 · 방어력 -{CFG.기본방어감소 || 0}% (기본).
+          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 진원 {(CFG.base진원 / 1e8).toFixed(0)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 <span className="text-cyan-400">방어법보 선택에 따라 결정</span> · 방어 {Math.round((1 - (CFG.defReduction || 0.7)) * 100)}% 감산.
         </div>
         <SkillPoolPicker pool={pool} onChange={setPool} />
       </section>
 
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">2. 법보 풀 선택</h2>
+        <h3 className="text-base font-bold mb-3 text-amber-400">2-1. 공격법보 <span className="text-xs text-slate-400 font-normal">(시전 순서 + 공격 효과)</span></h3>
         <div className="flex flex-col gap-2 mb-2">
           <div className="flex items-center gap-3 flex-wrap text-xs">
             <span className="text-slate-300 font-semibold">법보 위치 레이아웃:</span>
@@ -252,7 +263,12 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
             · 순서 고정 시: 사용자 선택 순서대로 1/8/9번 배치 (앞→뒤)
           </div>
         </div>
+        <TreasureSetPicker value={attackSetMode} onChange={setAttackSetMode} label="공격법보 세트 모드" accentColor="amber" />
         <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={fixedTreasureOrder} maxSelect={4} minSelect={3} />
+
+        <h3 className="text-base font-bold mt-6 mb-3 text-cyan-400">2-2. 방어법보 <span className="text-xs text-slate-400 font-normal">(최대 3개 — 호신강기 합산 결정)</span></h3>
+        <TreasureSetPicker value={defenseSetMode} onChange={setDefenseSetMode} label="방어법보 세트 모드" accentColor="cyan" />
+        <DefenseTreasurePicker selected={defenseTreasures} onChange={setDefenseTreasures} maxSelect={3} />
       </section>
 
       <section>
@@ -261,7 +277,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       </section>
 
       <section>
-        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(자기/상대 각 최대 3개, 각 마주 무·허·진 1갈래)</span></h2>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(최대 3개, 각 마주 무·허·진 1갈래)</span></h2>
         <BisulPicker value={bisul} onChange={setBisul} />
       </section>
 
@@ -634,6 +650,11 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [skillSel, setSkillSel] = useState({});
   // 법보는 기본 미선택 — 사용자가 직접 3개 선택해야 시뮬 실행 가능
   const [treasures, setTreasures] = useState([]);
+  // 방어법보 (max 3개)
+  const [defenseTreasures, setDefenseTreasures] = useState([]);
+  // 세트 모드 ('단독' | '천강' | '현명')
+  const [attackSetMode, setAttackSetMode] = useState('단독');
+  const [defenseSetMode, setDefenseSetMode] = useState('단독');
   const [order, setOrder] = useState(null);
   const [showLog, setShowLog] = useState(false);
   const [markerIdx, setMarkerIdx] = useState(0); // 41초 (1사이클) 기본
@@ -713,6 +734,9 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
     const snapshot = {
       build,
       treasures: [...treasures],
+      defenseTreasures: [...defenseTreasures],
+      attackSetMode,
+      defenseSetMode,
       order: rawOrder,
       skills: selectedSkills,
       maxTime: MANUAL_MARKER_TIMES[markerIdx],
@@ -729,6 +753,9 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
     run({
       build: snapshot.build,
       treasures: snapshot.treasures,
+      defenseTreasures: snapshot.defenseTreasures,
+      attackSetMode: snapshot.attackSetMode,
+      defenseSetMode: snapshot.defenseSetMode,
       order: snapshot.order,
       skills: snapshot.skills,
       trials: 1,
@@ -754,14 +781,20 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <div className="text-xs text-slate-400 mb-2 leading-relaxed">
           ※ 신통 최대 강화 기준입니다. 피해 수치는 노강 에서 일괄적으로 +{CFG.신통계수보너스 || 0} 를 더한 수치입니다 (합체기 +{CFG.합체기보너스 || 0} · 반허기 +{CFG.반허기보너스 || 0} · 인간계 +{CFG.인간계보너스 || 0}).
           <br />
-          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 {(CFG.baseShield / 1e8).toFixed(0)}억 · 방어력 -{CFG.기본방어감소 || 0}% (기본).
+          ※ 기준 스탯 — 공격력 {(CFG.baseATK / 1e8).toFixed(1)}억 · 진원 {(CFG.base진원 / 1e8).toFixed(0)}억 · 치명타율 {CFG.baseCR}% · 치명타 배율 {CFG.baseCD}% · 체력 {(CFG.baseHP / 1e8).toFixed(0)}억 · 호신강기 <span className="text-cyan-400">방어법보 선택에 따라 결정</span> · 방어 {Math.round((1 - (CFG.defReduction || 0.7)) * 100)}% 감산.
         </div>
         <SkillPicker skillSel={skillSel} onChange={setSkillSel} maxTotal={6} />
       </section>
 
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">2. 법보 선택</h2>
+        <h3 className="text-base font-bold mb-3 text-amber-400">2-1. 공격법보</h3>
+        <TreasureSetPicker value={attackSetMode} onChange={setAttackSetMode} label="공격법보 세트 모드" accentColor="amber" />
         <TreasurePicker selected={treasures} onChange={setTreasures} />
+
+        <h3 className="text-base font-bold mt-6 mb-3 text-cyan-400">2-2. 방어법보 <span className="text-xs text-slate-400 font-normal">(최대 3개 — 호신강기 합산 결정)</span></h3>
+        <TreasureSetPicker value={defenseSetMode} onChange={setDefenseSetMode} label="방어법보 세트 모드" accentColor="cyan" />
+        <DefenseTreasurePicker selected={defenseTreasures} onChange={setDefenseTreasures} maxSelect={3} />
       </section>
 
       <section>
@@ -770,7 +803,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       </section>
 
       <section>
-        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(자기/상대 각 최대 3개)</span></h2>
+        <h2 className="text-lg font-bold mb-3 text-amber-400">4. 비술 선택 <span className="text-xs text-slate-400 font-normal">(최대 3개)</span></h2>
         <BisulPicker value={bisul} onChange={setBisul} />
       </section>
 

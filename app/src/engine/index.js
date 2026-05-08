@@ -23,6 +23,9 @@ export const {
   SK,
   FAMILIES,
   TREASURES,
+  DEFENSE_TREASURES,
+  ALL_DEFENSE_TREASURES,
+  TREASURE_SETS,
   simulateBuild,
   selectSkillsForBuild,
 } = m.exports;
@@ -41,3 +44,4 @@ export const FAMILIES_BY_CAT = CATEGORIES.reduce((acc, c) => {
   return acc;
 }, {});
 export const TREASURE_NAMES = Object.keys(TREASURES);
+export const DEFENSE_TREASURE_NAMES = Object.keys(DEFENSE_TREASURES || {});

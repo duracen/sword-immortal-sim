@@ -88,11 +88,11 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
             <HoverTooltip
               key={tr}
               className="border-yellow-600"
-              maxWidth={288}
+              maxWidth={420}
               content={desc ? (
                 <>
                   <div className="text-xs font-bold text-yellow-300 mb-1">📿 {tr}</div>
-                  <div className="text-[13px] text-slate-200 leading-relaxed">{desc}</div>
+                  <div className="text-[13px] text-slate-200 leading-relaxed whitespace-pre-line">{desc}</div>
                 </>
               ) : null}
             >
