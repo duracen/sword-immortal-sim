@@ -11,7 +11,6 @@ import BeopsangPicker from '../components/simulator/BeopsangPicker.jsx';
 import YeokPicker from '../components/simulator/YeokPicker.jsx';
 import ResultSummary from '../components/simulator/ResultSummary.jsx';
 import RankingTable from '../components/ranking/RankingTable.jsx';
-import WinnerPodium from '../components/ranking/WinnerPodium.jsx';
 import BattleLogPanel from '../components/battlelog/BattleLogPanel.jsx';
 import { useSimulation } from '../hooks/useSimulation';
 import { useRanking } from '../hooks/useRanking';
@@ -529,7 +528,6 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
 
       {results.length > 0 && (
         <>
-          <WinnerPodium results={results} sortBy={sortBy} />
           {(!requiredLawBody || requiredLawBody === 'any') ? (
             <SplitRankings
               results={results}

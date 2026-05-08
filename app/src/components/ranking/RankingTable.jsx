@@ -8,6 +8,8 @@ const CAT_BADGE = {
   백족: 'bg-emerald-600',
 };
 
+const MEDALS = ['🥇', '🥈', '🥉'];
+
 export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }) {
   const key = `s${sortBy}`;
   const sorted = useMemo(() => [...results].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)), [results, key]);
@@ -36,7 +38,10 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                 key={(r.skills?.slice().sort().join(',') || r.label) + '|' + r.treasures + '|' + (r.orderArr?.map((o) => (o.kind === 'skill' ? 's' + o.idx : 't' + o.idx)).join('>') || '')}
                 className="border-b border-slate-800 hover:bg-slate-800/50"
               >
-                <td className="py-2 px-2 font-bold text-amber-400 align-top">{i + 1}</td>
+                <td className="py-2 px-2 font-bold text-amber-400 align-top whitespace-nowrap">
+                  {MEDALS[i] && <span className="mr-1">{MEDALS[i]}</span>}
+                  {i + 1}
+                </td>
                 <td className="py-2 px-2">
                   <div>
                     <span className={`inline-block text-xs px-2 py-0.5 rounded text-white mr-2 ${CAT_BADGE[r.cat] || 'bg-slate-600'}`}>
@@ -83,7 +88,10 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
             className="bg-slate-800/60 border border-slate-700 rounded-lg p-3"
           >
             <div className="flex items-center gap-2 mb-1">
-              <span className="font-bold text-amber-400 text-sm">#{i + 1}</span>
+              <span className="font-bold text-amber-400 text-sm whitespace-nowrap">
+                {MEDALS[i] && <span className="mr-0.5">{MEDALS[i]}</span>}
+                #{i + 1}
+              </span>
               <span className={`text-[11px] px-1.5 py-0.5 rounded text-white ${CAT_BADGE[r.cat] || 'bg-slate-600'}`}>
                 {r.cat}
               </span>
