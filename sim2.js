@@ -848,6 +848,7 @@ function dealDamage(state, base, opts = {}) {
   const type = opts.type || (opts.absolute ? '법보절대' : (opts.noSkillMult ? '기타' : '신통'));
   const isShintong = (type === '신통');
   // 신통 본 피해 계수 보너스 (CFG.신통계수보너스) — 본 신통 기본 피해에만 덧셈 적용
+  // 분신 (_isClone) 은 base 가 raw 로 들어옴 → 보너스 적용 (본체와 동일 계수)
   // _skipShintongBonus: 멀티히트 decay emit 의 hit 2+ 에서 보너스 중복 방지
   if (isShintong && !opts._skipShintongBonus) {
     if (CFG.신통계수보너스) base = base + CFG.신통계수보너스;
@@ -862,11 +863,13 @@ function dealDamage(state, base, opts = {}) {
     }
   }
 
-  // 분신 (악신마주) 는 본체 finalResult × N% 단순 비율로 처리됨 (아래 분신 트리거 블록 참조).
-  // 따라서 dealDamage 본체 흐름은 항상 본체 stat 사용 (baseATK/baseCR/baseCD).
-  const _baseATK = CFG.baseATK;
-  const _baseCR = CFG.baseCR;
-  const _baseCD = CFG.baseCD;
+  // === 분신 (_isClone): 본체의 N% stat 모델 — baseATK/baseCR/baseCD 만 N% 로 스케일 ===
+  // buff 들 (atkM, shintongM, cr buffs, cd buffs) 은 본체와 동일하게 적용
+  // 결과: 분신 데미지 = base × (baseATK × N%) × atkM × ... × cMult(cr×N%, cd×N%) × defMult
+  const _clonePct = opts._isClone ? (state.악신Pct || 0) : 0;
+  const _baseATK = opts._isClone ? (CFG.baseATK * _clonePct / 100) : CFG.baseATK;
+  const _baseCR = opts._isClone ? (CFG.baseCR * _clonePct / 100) : CFG.baseCR;
+  const _baseCD = opts._isClone ? (CFG.baseCD * _clonePct / 100) : CFG.baseCD;
 
   // === 공격력 (scope: 모든 피해 — 단, opts.noAtkBuff=true 면 atk buff 미적용) ===
   // noAtkBuff: 진원 기반 법보 피해 (환음요탑/유리옥호/오염혁선 본체, 참원선검 본체) 에서 사용 —
@@ -1059,23 +1062,34 @@ function dealDamage(state, base, opts = {}) {
     isLaw: !!opts._isLawDamage,
   };
 
-  // === 악신 분신: 본체 데미지 × N% (단순 비율) ===
-  // 사용자 사양: "분신은 원본 피해의 N%"
-  // 본체 cr/buff/finalDmg/defMult 가 모두 적용된 finalResult 에 그대로 N% 곱함
+  // === 악신 분신: 본체의 N% stat (atk/cr/cd 만 N% 스케일, buff 는 본체와 동일) ===
+  // 스펙: "분신의 속성은 본체의 N%" — baseATK/baseCR/baseCD 만 N% 로 스케일
   // 분신은 본체 "신통/법보" 사용을 모방 — 천뢰/낙뢰/작열/평타/cascade trigger 에선 발동 X
   const _isCloneTrigger = isShintong || (type === '법보절대');
   if (!opts._isClone && _isCloneTrigger && state.악신EndT > state.t && state.악신Pct > 0 && !opts._isLawDamage) {
-    let cloneFinal = finalResult * (state.악신Pct / 100);
+    // _isClone 으로 dealDamage 재호출 → baseATK/baseCR/baseCD 가 N% 로 스케일된 값으로 재계산
+    const mainBd = state._lastBreakdown;
+    // 본체 trace 용 cr/cd/isCrit 보존 — 재귀 호출이 분신 값으로 덮어쓰는 것을 막음
+    const savedLastCR = state._lastCR;
+    const savedLastCD = state._lastCD;
+    const savedLastIsCrit = state._lastIsCrit;
+    let cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
     // 악신·진 의 호신강기 피해 심화 +33% — 분신이 호신강기 hit 시 데미지 추가
     // (sim 에선 호신강기 hit 여부 정확히 못 추적 → 호신강기 active 가정 시 ×1.33 적용)
     if (state.악신_호신심화 > 0 && (state.shieldRem || 0) > 0 && !opts.bypassShield) {
       cloneFinal = cloneFinal * (1 + state.악신_호신심화 / 100);
     }
     state._cloneBdPending = {
+      ...state._lastBreakdown,
       clonePct: state.악신Pct,
       mainAmount: finalResult,
       cloneAmount: cloneFinal,
     };
+    state._lastBreakdown = mainBd; // 본체 breakdown 복원
+    // 본체 trace 값 복원 — 직후 record() 의 DMG 라인에 본체 cr/cd 가 표시되도록
+    state._lastCR = savedLastCR;
+    state._lastCD = savedLastCD;
+    state._lastIsCrit = savedLastIsCrit;
     state._cloneDmgPending = (state._cloneDmgPending || 0) + cloneFinal;
   }
 
