@@ -201,6 +201,8 @@ export default function DamageBreakdown({ dmgEvents }) {
       const 비술Match = s.match(/^(분혼|식혼|탁천|악신|혼원|업화)마주·([무허진])(?:·(분신))?/);
       // 법상 매칭 — "법상·{name}(...)" 형식
       const 법상Match = s.match(/^법상·([가-힣]+)\((.+)\)$/);
+      // 영역 매칭 — "영역(제왕의 정)" / "영역(제왕의 정)·천위" / "영역(제왕의 정)·AOE" → 모두 같은 영역 그룹으로 통합
+      const 영역Match = s.match(/^영역\(([^)]+)\)(?:·(.+))?$/);
       // 유파/법체 효과 — 신통 옵션이 아닌 패시브·트리거 (cast 무관 항상 동일 그룹)
       const isFamilyEffect = !is천검Skill && !비술Match && (
         s === '천검' || s.includes('천검') ||
@@ -220,6 +222,9 @@ export default function DamageBreakdown({ dmgEvents }) {
         const lawName = 법상Match[1];
         const isYong = ['청교룡', '청반룡', '청룡', '진룡'].includes(lawName);
         parent = `${isYong ? '🐉' : '🦅'} 법상·${lawName}`;
+      } else if (영역Match) {
+        // 영역(제왕의 정) / 영역(제왕의 정)·천위 / 영역(제왕의 정)·AOE 등 — 영역명별로 통합
+        parent = `🌐 영역·${영역Match[1]}`;
       } else if (is천검Skill) {
         parent = 천검부모신통;
       } else if (isFamilyEffect) {
@@ -264,6 +269,9 @@ export default function DamageBreakdown({ dmgEvents }) {
       } else if (법상Match) {
         // 법상: src='법상·청룡(실체)' → child='[실체]' (tier)
         child = `[${법상Match[2]}]`;
+      } else if (영역Match) {
+        // 영역: '영역(제왕의 정)' → '[메인]', '영역(제왕의 정)·천위' → '[천위]', '영역(제왕의 정)·AOE' → '[AOE]'
+        child = 영역Match[2] ? `[${영역Match[2]}]` : '[메인]';
       } else {
         child = formatChild(s, parent);
       }
