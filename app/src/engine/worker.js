@@ -149,6 +149,9 @@ function simOptsFor(markerIdx) {
   if (G_DEFENSE_TREASURES) o.defenseTreasures = G_DEFENSE_TREASURES;
   if (G_ATTACK_SET && G_ATTACK_SET !== '단독') o.attackSetMode = G_ATTACK_SET;
   if (G_DEFENSE_SET && G_DEFENSE_SET !== '단독') o.defenseSetMode = G_DEFENSE_SET;
+  // worker 의 sweep 시 simulateBuild 결과는 cumByMarker 만 사용 → lite 모드로 dmgEvents/buffs 등 GC 힌트
+  // (main thread BattleLogPanel 의 simulateBuild 는 별개라 영향 X)
+  o.lite = true;
   return o;
 }
 
@@ -255,11 +258,25 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
   // '189': skill 인덱스 1~6 (treasures at 0, 7, 8)
   const skillIdxStart = (fixedTreasures && layout === '189') ? 1 : 0;
   const skillIdxEnd = skillIdxStart + swapRange; // exclusive
+  // ILS max simCount 정확 계산 (safety cap 25 기준):
+  //   per_iter   = 2-swap C(N,2) + or-opt (N²−N−2(N−1)) + 3-opt(strong) C(N,2)
+  //   per_localSearch = 1 + 25 × per_iter
+  //   total_max  = numSeeds × (1 + numKicks) × per_localSearch
+  // ILS 는 9! 전수가 아닌 heuristic 이라 max 가 9! 보다 훨씬 작음 — 진행률 0~100% 자연 표시
+  function calcMaxSimCount(numSeeds, numKicks, N, use3Opt) {
+    const opt2 = (N * (N - 1)) / 2;
+    const optOr = N * N - N - 2 * (N - 1);
+    const opt3 = use3Opt ? (N * (N - 1)) / 2 : 0;
+    const simsPerIter = opt2 + optOr + opt3;
+    const simsPerLs = 1 + 25 * simsPerIter; // safety = 25
+    return numSeeds * (1 + numKicks) * simsPerLs;
+  }
+  const N = swapRange; // 9 (미고정) 또는 6 (고정)
   const config = mode === 'strong'
-    ? { numSeeds: 10, numKicks: 8, use3Opt: true, estTotal: 10000 }
+    ? { numSeeds: 10, numKicks: 8, use3Opt: true, estTotal: calcMaxSimCount(10, 8, N, true) }
     : mode === 'triage'
-    ? { numSeeds: 2, numKicks: 0, use3Opt: false, estTotal: 300 }
-    : { numSeeds: 3, numKicks: 3, use3Opt: false, estTotal: 1500 };
+    ? { numSeeds: 2, numKicks: 0, use3Opt: false, estTotal: calcMaxSimCount(2, 0, N, false) }
+    : { numSeeds: 3, numKicks: 3, use3Opt: false, estTotal: calcMaxSimCount(3, 3, N, false) };
   let simCount = 0;
 
   function simulate(order) {
@@ -337,6 +354,7 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
           }
         }
       }
+      // estTotal = PERM_TOTAL (전수조사 max) → simCount 절대 초과 X. UI 진행률 = simCount/PERM_TOTAL.
       if (onOrderProgress) onOrderProgress(simCount, config.estTotal, bestScore);
       await new Promise((r) => setTimeout(r, 0));
     }
@@ -403,7 +421,8 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
     // strong 모드: 3 seed 연속 향상 없으면 일찍 종료 (시간 절약)
     if (mode === 'strong' && consecutiveNoImprove >= 3 * config.numKicks) break;
   }
-  if (onOrderProgress) onOrderProgress(config.estTotal, config.estTotal, globalBestScore);
+  // 빌드 끝 시 final progress — simCount/simCount = 100% 표시 (ILS 가 safety cap 25 까지 다 안 가고 수렴 → 빌드 완료 시점에 진행률 100%)
+  if (onOrderProgress) onOrderProgress(simCount, simCount, globalBestScore);
   return { bestOrd: globalBestOrder, bestScore: globalBestScore };
 }
 

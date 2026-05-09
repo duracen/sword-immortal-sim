@@ -116,7 +116,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   // 세트 모드 ('단독' | '천강' | '현명') — 공격법보/방어법보 각각 분리
   const [attackSetMode, setAttackSetMode] = useState('단독');
   const [defenseSetMode, setDefenseSetMode] = useState('단독');
-  const [searchMode, setSearchMode] = useState('fast');  // 'fast' | 'exhaustive'
+  const [searchMode, setSearchMode] = useState('exhaustive');  // 'fast' | 'exhaustive' (빠른 탐색 UI 숨김 — 메모리 안정성 검증 후 복원 예정)
   // 자동 탐색 전체에 동일 불씨 세트 적용 — 실 인게임에서 불씨는 고정됨
   const [불씨, set불씨] = useState({
     통명묘화: 0, 진무절화: 0, 태현잔화: 0, 유리현화: 0, 진마성화: 0,
@@ -340,41 +340,26 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           </div>
         </div>
 
-        {/* 탐색 모드 (경고 문구 공간 확보 위해 별도 행) */}
+        {/* 탐색 모드 — 정밀 탐색만 사용 (빠른 탐색은 메모리 안정성 검증 중) */}
         <div>
           <label className="block text-xs text-slate-400 mb-1">탐색 방식</label>
           <div className="flex gap-1">
-            {[
-              { key: 'fast', label: '⚡ 빠른 탐색 (추천)', hint: '대략적인 순서를 휴리스틱으로 빠르게 찾고, 상위 50개만 정밀 재검증합니다. 오차 약 1%, 신통 풀이 커도 몇 분 내 완료.' },
-              { key: 'exhaustive', label: '🔬 정밀 탐색', hint: '모든 시전 순서 전수탐색 (법보 위치 고정 시 6!×3!=4,320 / 미고정 시 9!=362,880, 법보조합당). 진행 중 Top 10 실시간 갱신.' },
-            ].map((o) => (
-              <button
-                key={o.key}
-                onClick={() => setSearchMode(o.key)}
-                title={o.hint}
-                className={`px-3 py-1.5 rounded text-sm ${
-                  searchMode === o.key
-                    ? (o.key === 'fast' ? 'bg-emerald-500 text-slate-950 font-bold' : 'bg-amber-500 text-slate-950 font-bold')
-                    : 'bg-slate-700'
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
+            <button
+              className="px-3 py-1.5 rounded text-sm bg-amber-500 text-slate-950 font-bold cursor-default"
+              disabled
+            >
+              🔬 정밀 탐색
+            </button>
           </div>
           <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-            {searchMode === 'fast'
-              ? '빠른 탐색: 휴리스틱으로 전체 빌드를 1차 평가 → 상위 50개 빌드만 정밀 재검증. 결과 오차 약 1% 이내, 시간 효율 최고.'
-              : '정밀 탐색: 모든 빌드 × 모든 시전 순서를 전수탐색. 유파 1슬롯에서 시너지가 필수인 신통 15개 (예: 균천·진악, 주술·제율 등) 는 자동 제외 (단, 풀이 10개 이하면 그대로 포함).'}
+            정밀 탐색: 모든 빌드 × 모든 시전 순서를 전수탐색. 유파 1슬롯에서 시너지가 필수인 신통 15개 (예: 균천·진악, 주술·제율 등) 는 자동 제외 (단, 풀이 10개 이하면 그대로 포함).
           </div>
-          {searchMode === 'exhaustive' && (
-            <div className="text-[11px] text-amber-400 mt-1 leading-relaxed bg-amber-950/20 border border-amber-700/40 rounded p-2">
-              ⚠ <strong>정밀 탐색은 매우 오래 걸립니다</strong> (9! = 362,880 순열 × 법보 조합).<br />
-              · 신통 6개 선택: 약 10~15분 (1 빌드 × 1,451,520회 시뮬)<br />
-              · 신통 풀이 커질수록 시간이 기하급수적으로 증가<br />
-              · 권장: 신통 풀을 6~12개로 좁혀서 사용. 그 외엔 빠른 탐색을 추천.
-            </div>
-          )}
+          <div className="text-[11px] text-amber-400 mt-1 leading-relaxed bg-amber-950/20 border border-amber-700/40 rounded p-2">
+            ⚠ <strong>정밀 탐색은 매우 오래 걸립니다</strong> (9! = 362,880 순열 × 법보 조합).<br />
+            · 신통 6개 + 법보 3개 선택: 1 빌드 × 9! = 362,880회 시뮬<br />
+            · 신통 풀이 커질수록 시간이 기하급수적으로 증가<br />
+            · 권장: 신통 풀을 6~12개로 좁혀서 사용.
+          </div>
         </div>
 
         {/* 기댓값 모드 안내 (확률·랜덤 효과 처리 방식) */}

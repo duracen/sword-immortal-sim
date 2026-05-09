@@ -29,7 +29,7 @@ const CFG = {
   // ---- 방어력 감산 (공식 비공개 → 단순 근사, 리팩터 시 적용 예정) ----
   // 기본 30% 감산 (defReduction 0.7)
   defReduction: 0.7,
-  debugDealDamage: true,    // [DEBUG] 환음요탑 본 피해 디버그 로그 출력   // 일반피해는 원피해의 60%만 적용 (40% 감산). 확정피해(백족)는 우회.
+  debugDealDamage: false,   // [DEBUG] 본 피해 디버그 로그 — 켜면 매 sim 마다 console.log 누적 (browser devtools 메모리 폭발) → 디버그 시에만 true.
   기본방어감소: 0,       // 추가 감소 (defReduction 에 이미 +10% 반영됨 — 0 으로 둠)
   targetMaxHP: 33_000_000_000, // 330억 HP (호신강기 별도 90억)
   호신강기대상확률: 0.5, // 환음요탑: 대상이 호신강기 보유 확률
@@ -5802,6 +5802,14 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   const cumByMarker = markers.map(m =>
     (state.dmgEvents || []).filter(e => e.t < m + 0.001).reduce((a, e) => a + e.amt, 0)
   );
+  // lite 모드 (opts.lite === true): dmgEvents 등 큰 객체 안 반환 → 메모리 누적 방지 (worker sweep 시 사용)
+  if (opts && opts.lite) {
+    // state 내부의 큰 배열도 명시적으로 비워 GC 힌트
+    state.dmgEvents = null;
+    state.buffs = null;
+    state.castCounts = null;
+    return { cumByMarker, dmgEvents: [], castCounts: {} };
+  }
   return { cumByMarker, dmgEvents: state.dmgEvents || [], castCounts: state.castCounts || {} };
 }
 
