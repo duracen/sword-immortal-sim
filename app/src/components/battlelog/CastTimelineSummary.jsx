@@ -172,7 +172,10 @@ function parseEvents(events) {
       if (m) {
         // 적 비술 (msg "(적)" 포함) 은 trigger lane 표시 X — mirror 모델이라 자기 비술과 동일 시점 발동, 표시 중복 회피
         const isEnemyBisul = ev.msg.includes('(적)');
-        if (isEnemyBisul) continue;
+        // sim 결과 영향 없는 자기 효과 (자기 HP/받는 피해 미모델 갈래 — 탁천 무/진, 식혼 무/허 등) — trigger lane 표시 X (사용자 정의)
+        // 메시지에 "결과 영향 X" 명시된 자기 발동 (sim2.js OPT trace) 만 필터.
+        const isNoEffectSelf = /결과 영향\s*X/.test(ev.msg) || /DPS 영향\s*없음/.test(ev.msg);
+        if (isEnemyBisul || isNoEffectSelf) continue;
         const masterKey = `${m[1]}마주`;
         // 식혼 = cr buff 가 buff lane 에 별도 140초 표시되므로 trigger lane 에선 발동 순간 (1초) 만
         const dur = m[1] === '식혼' ? 1 : (TRIG_DUR[masterKey] || 1);
