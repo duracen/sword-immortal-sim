@@ -118,14 +118,29 @@ function parseEvents(events) {
       const tr = ev.msg.match(/^📿\s*([^\s\n]+)/);
       castRaws.push({ t: ev.t, name: m ? m[1] : (tr ? tr[1] : '?'), isTreasure: !!tr, stks: {}, snap: null });
     } else if (ev.tag === 'SNAP') {
-      // 직전 CST 와 같은 t 에 매핑
+      // SNAP src (cast 이름) 와 매칭하여 정확한 cast 에 붙임 (시각만으로 매핑하면 cast 사이 dead-time 에 emit 되어 1칸 밀림)
       try {
         const snap = JSON.parse(ev.msg);
-        // 가장 가까운 이전 CST 에 붙임
-        for (let i = castRaws.length - 1; i >= 0; i--) {
-          if (Math.abs(castRaws[i].t - ev.t) < 0.05) {
-            castRaws[i].snap = snap;
-            break;
+        let matched = false;
+        if (snap.src) {
+          // src 매칭 가능한 cast 중 cast.t <= snap.t 인 가장 늦은 cast 매핑
+          // (마지막부터 거꾸로만 검색하면 같은 이름의 cast 가 여러 개일 때 더 미래 cast 에 매핑됨)
+          let bestIdx = -1, bestT = -1;
+          for (let i = 0; i < castRaws.length; i++) {
+            if (!castRaws[i].name || castRaws[i].snap) continue;
+            if (!snap.src.includes(castRaws[i].name)) continue;
+            if (castRaws[i].t > ev.t + 0.05) continue;
+            if (castRaws[i].t > bestT) { bestIdx = i; bestT = castRaws[i].t; }
+          }
+          if (bestIdx >= 0) { castRaws[bestIdx].snap = snap; matched = true; }
+        }
+        // fallback: 시각 기반 (직전 CST 0.05s 안)
+        if (!matched) {
+          for (let i = castRaws.length - 1; i >= 0; i--) {
+            if (Math.abs(castRaws[i].t - ev.t) < 0.05) {
+              castRaws[i].snap = snap;
+              break;
+            }
           }
         }
       } catch (_) { /* ignore */ }
@@ -155,8 +170,12 @@ function parseEvents(events) {
       // 시각상 cast 라인보다 살짝 뒤(+0.4s)에 표시 (염양/법상 패턴)
       const m = ev.msg.match(/🔮(분혼|식혼|탁천|악신|혼원|업화)마주·([무허진])/);
       if (m) {
+        // 적 비술 (msg "(적)" 포함) 은 trigger lane 표시 X — mirror 모델이라 자기 비술과 동일 시점 발동, 표시 중복 회피
+        const isEnemyBisul = ev.msg.includes('(적)');
+        if (isEnemyBisul) continue;
         const masterKey = `${m[1]}마주`;
-        const dur = TRIG_DUR[masterKey] || 1;
+        // 식혼 = cr buff 가 buff lane 에 별도 140초 표시되므로 trigger lane 에선 발동 순간 (1초) 만
+        const dur = m[1] === '식혼' ? 1 : (TRIG_DUR[masterKey] || 1);
         pushTrigger({ t: ev.t + 0.4, kind: masterKey, label: `${masterKey}·${m[2]} ${dur}s`, dur, branch: m[2] });
       }
     } else if (ev.tag === 'OPT' && /🌐영역 \[([^\]]+)\] 발동/.test(ev.msg)) {
@@ -278,7 +297,19 @@ function parseEvents(events) {
       // 메시지에 "N초" 없음 = 본 신통 한정 버프 (applyBuff 아닌 nextCast 류)
       // 시각상 짧은 바(2초)로 표시, 실제 지속시간 개념 없음
       const isThisCastOnly = !durMatch;
-      const dur = durMatch ? parseFloat(durMatch[1]) : 2;  // 본 신통 한정이면 2초 시각
+      let dur = durMatch ? parseFloat(durMatch[1]) : 2;
+      if (isThisCastOnly) {
+        // 메시지에 "다음 신통" 포함 = nextCast 류 (현미/풍세 등) — 다음 신통 cast (▶) 까지 (= 발동될 때까지)
+        // 그 외 = 본 cast 한정 (통백 등) — 다음 cast (법보 포함) 까지
+        const isNextShintongBuff = /다음\s*신통/.test(ev.msg);
+        const nextCastEv = events.find(e =>
+          e.t > ev.t + 0.05 && e.tag === 'CST' && e.msg &&
+          (isNextShintongBuff ? e.msg.startsWith('▶') : true)
+        );
+        if (nextCastEv) {
+          dur = Math.max(0.5, nextCastEv.t - ev.t + 0.3);
+        }
+      }
       // [post] 플래그: 본 cast 의 dealDamage 후 부여 — 본 cast 영향 X, 다음 cast 부터 적용
       // 염양 트리거처럼 +0.4s 살짝 offset 시켜 시각적으로 "post-cast" 임을 표현
       const isPostDmg = ev.msg.includes('[post]');
@@ -488,7 +519,7 @@ const CAT_COLOR = {
   법보: 'bg-amber-500',
 };
 
-export default function CastTimelineSummary({ events }) {
+export default function CastTimelineSummaryV2({ events }) {
   const { casts, buffs, triggers, stacks, stackSpans, maxT } = useMemo(() => parseEvents(events), [events]);
   const laneCount = useMemo(() => assignLanes(buffs), [buffs]);
   const stackLaneCount = useMemo(() => assignLanes(stacks), [stacks]);
@@ -1018,7 +1049,14 @@ export default function CastTimelineSummary({ events }) {
                     const v = c.snap[label.key];
                     const vShin = label.shintongKey ? (c.snap[label.shintongKey] || 0) : 0;
                     if (!v || Math.abs(v) < 0.01) return null;
+                    // nextCast 류 stat 은 신통 cast 만 적용 (법보는 ncFinalDmg 안 받음, snap 잔여값 무시)
+                    const isNextCastStatCheck = (label.key === 'finalDmg' || label.key === 'finalCR' || label.key === 'finalCD');
+                    if (isNextCastStatCheck && c.isTreasure) return null;
                     const startT = c.t;
+                    // nextCast 류 stat (finalDmg/finalCR/finalCD) 은 다음 신통 cast 까지만 색칠 (1회 소비 후 종료)
+                    // 다른 stat (atk/cr/cd 등 시간 buff) 은 다음 cast 까지 (cast 간격)
+                    // nextCast 류 stat (finalDmg/finalCR/finalCD) — 받은 cast 시점에만 표시. 1회 적용 후 끝 → width = 다음 cast 까지
+                    // 다른 stat (atk/cr/cd 등 시간 buff) — 다음 cast 까지 (cast 간격)
                     const endT = casts[ci + 1] ? casts[ci + 1].t : maxT;
                     const leftPct = (startT / maxT) * 100;
                     const widthPct = ((endT - startT) / maxT) * 100;
@@ -1125,4 +1163,10 @@ export default function CastTimelineSummary({ events }) {
       )}
     </div>
   );
+}
+
+
+// HMR: 변경 시 페이지 강제 reload (한국 path 환경에서 React Refresh 불안정 회피)
+if (import.meta.hot) {
+  import.meta.hot.accept(() => { import.meta.hot.invalidate(); });
 }

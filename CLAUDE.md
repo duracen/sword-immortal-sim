@@ -337,3 +337,91 @@ state.식혼_atk (식혼)                   // 식혼 buff
 state.법상_빙의시작T, state.법상_빙의종료T   // 법상 빙의 active
 state.영역_pendingFireT                  // 영역 발동 예약
 ```
+
+
+---
+
+# ⚠️ UI/시뮬 디버깅 절차 (강제)
+
+사용자가 `화면이 이상하다` `여전해` `동일하다` 라고 할 때 — **추측 금지, 직접 검증.**
+
+## 1. 절대 하지 말 것
+
+- ❌ `캐시 문제` `HMR 미반영` `React Refresh 안 됨` 같은 추측을 먼저 들이대지 말 것
+- ❌ `Vite 재시작 / 페이지 reload 한 번만 해줘` 라고 사용자에게 떠넘기지 말 것 — Claude Preview 인스턴스 1개라 사용자 화면 = 내 화면이고, reload 하면 사용자 시뮬 결과까지 같이 사라짐
+- ❌ 사용자가 같은 문제를 2번 이상 지적 → 추가 변경 시도 X. **검증 먼저.**
+- ❌ `location.reload()` `preview_stop / preview_start` `vite restart` 를 명시적 요청 없이 시도하지 말 것
+
+## 2. 검증 절차 (이 순서대로)
+
+### Step 1 — 사용자 의도 정확히 정리
+- 사양 원문 (`신통_정리.md` / 사용자 메시지) 인용
+- 어떤 셀/위치/길이가 어떻게 되어야 하는지 명확히 (예: `약영의 현미 +45 → 받은 cast(붕산) 셀에만 표시 → width = 다음 cast 까지`)
+
+### Step 2 — 디스크/Vite 코드 적용 여부 확인
+```js
+// preview_eval 로:
+await import('/@fs/<absolute-path>/file.jsx?raw&t=' + Date.now())
+  .then(m => m.default.includes('checkString'))
+```
+
+### Step 3 — React 가 실제 사용 중인 코드 확인
+```js
+// fiber 통해 현재 사용 중인 컴포넌트 함수 source 직접 추출
+let fiber = element[Object.keys(element).find(k => k.startsWith('__reactFiber\$'))];
+while (fiber) {
+  if (fiber.type?.name === 'ComponentName') return fiber.type.toString().includes('checkString');
+  fiber = fiber.return;
+}
+```
+
+### Step 4 — 직접 시뮬 실행 (사용자 부담 없이)
+```js
+const m = await import('/src/engine/index.js?t=' + Date.now());
+const { simulateBuild, CFG, SK } = m;
+const events = [];
+CFG.trace = (t, tag, msg) => events.push({ t, tag, msg });
+// skillsOverride 는 객체 배열 ([{ name, fam }]):
+const skills = skillNames.map(n => ({ name: n, fam: SK[n].fam }));
+simulateBuild(build, treasures, null, skills, { maxTime: 70, ...opts });
+CFG.trace = null;
+// SNAP events 추출해서 cast 별 finalDmg/매핑 검증
+```
+
+### Step 5 — useMemo 결과 / casts 배열 직접 검사
+```js
+// fiber.memoizedState 의 hooks linked list 순회 → useMemo 결과 추출
+let hook = fiber.memoizedState;
+while (hook) {
+  if (Array.isArray(hook.memoizedState) && hook.memoizedState[0]?.casts) {
+    return hook.memoizedState[0].casts;  // 매핑된 snap 까지 포함
+  }
+  hook = hook.next;
+}
+```
+
+## 3. 핵심 원칙
+
+- **로직 자체를 먼저 의심.** 캐시/HMR 은 마지막 의심.
+- 변경 후 **반드시 직접 검증** (Step 2~5) 후 사용자에게 결과 제시
+- 사용자가 같은 문제 2번 지적 → 추가 변경 X, 검증 raisé
+- `simulateBuild` 직접 호출 가능 — 사용자 시뮬 부담 없이 events 받아 분석
+- React 컴포넌트의 `useMemo` 결과는 events deps 가 같으면 캐시 — events 가 새 reference 인지 확인
+- `Claude Preview` 인스턴스는 사용자 화면과 동일. `preview_eval` 의 reload 명령은 사용자 화면도 같이 reset
+
+## 4. emitSnapTrace 흐름 (sim2.js)
+
+각 cast 종료 시 호출. `snap.finalDmg` 가 어디서 push 되는지 흐름:
+
+| Push | Source | 의미 | 사용자 의도 (현재 사양) |
+|------|--------|------|---------|
+| `nc.finalDmg` | 부여한 cast 의 다음 nextCast 값 | 부여 직후 셀 표시 | **제거됨** (부여한 cast 셀 X) |
+| `ncSnap.consumedSources` | 받은 cast 가 소비한 nextCast | 받은 cast 셀 표시 | **유지** (받은 cast 셀 ✓) |
+| `ncSnap.finalDmg` (else) | 받은 cast 의 ncFinalDmg fallback | consumedSources 가 없을 때 | 제거됨 |
+| `ncSnap.localFinalDmg` | 본 cast 한정 (예: 통백 +20) | 그 cast 자체 한정 buff | 제거됨 (단순화) |
+
+## 5. CastTimelineSummary 셀 width 룰
+
+- nextCast 류 stat (finalDmg/finalCR/finalCD): width = `다음 cast 시점까지` (= 1회 적용 후 끝)
+- 시간 기반 buff (atk/cr/cd 등): width = `다음 cast 시점까지` (cast 간격)
+- `다음 신통 cast` 가 아닌 `다음 cast` (법보 포함) — 받은 buff 는 그 cast 자체에 1회 적용 후 끝나므로

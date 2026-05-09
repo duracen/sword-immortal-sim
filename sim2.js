@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // 검선귀환 정교화 시뮬레이션 (sim2.js)
 // ----------------------------------------------------------------------------
 // 0.5초 틱 기반 이벤트 드리븐 시뮬. 자원·버프·트리거를 실시간 추적.
@@ -15,7 +15,7 @@ const CFG = {
   baseShield: 9_000_000_000, // 호신강기 90억
   base진원: 2_200_000_000, // 진원 22억 (법보 데미지 계산용 — 환음요탑/참원선검/오염혁선 등 진원 % 기반 데미지)
   baseCR: 40,         // 기본 치명타율 (%)
-  baseCD: 150,        // 기본 치명타 피해 (%)
+  baseCD: 185,        // 기본 치명타 피해 (%)
   baseDodge: 5,       // 기본 회피 (%)
   // ---- 시뮬 구조 ----
   casts: 9,           // 사이클당 캐스트 수 (신통6 + 법보3, 5s 공통쿨 순차)
@@ -27,8 +27,9 @@ const CFG = {
   totalCycles: 5,
   lowHPProb: 0.5,   // (임시) targetHPRatio 기반 모델 리팩터 전까지 유지
   // ---- 방어력 감산 (공식 비공개 → 단순 근사, 리팩터 시 적용 예정) ----
-  // 기본 30% 감산 + 사용자 보정 +10% = 총 40% 감산 (defReduction 0.6)
-  defReduction: 0.6,   // 일반피해는 원피해의 60%만 적용 (40% 감산). 확정피해(백족)는 우회.
+  // 기본 30% 감산 (defReduction 0.7)
+  defReduction: 0.7,
+  debugDealDamage: true,    // [DEBUG] 환음요탑 본 피해 디버그 로그 출력   // 일반피해는 원피해의 60%만 적용 (40% 감산). 확정피해(백족)는 우회.
   기본방어감소: 0,       // 추가 감소 (defReduction 에 이미 +10% 반영됨 — 0 으로 둠)
   targetMaxHP: 33_000_000_000, // 330억 HP (호신강기 별도 90억)
   호신강기대상확률: 0.5, // 환음요탑: 대상이 호신강기 보유 확률
@@ -745,8 +746,11 @@ function consume작열(s, n) {
 
 // 크리 기댓값 배율
 function critMult(cr, cd) {
+  // 기댓값 모드: cMult = (1 - cr%) × 1배 + cr% × 크리배수
+  // cd 는 `치명타 배율` — 절대 배수 (cd=150% → 크리 = 일반의 1.5배)
+  // 사양: 치명타 배율 100% 일 때 크리/일반 동일 (메리트 X), 150% 일 때 크리 1.5배
   cr = Math.max(0, Math.min(100, cr));
-  return (100 - cr) / 100 * 1 + cr / 100 * (1 + cd / 100);
+  return (100 - cr) / 100 * 1 + cr / 100 * (cd / 100);
 }
 
 // 랜덤 크리 모드용 확률 스케일 헬퍼
@@ -939,12 +943,10 @@ function dealDamage(state, base, opts = {}) {
     cMult = critMult(cr, cd);
   }
 
-  // === CONSUME nextCast (신통 시전만) ===
-  if (isShintong && !ncSkip) {
-    if (state._nextCastSources && state._nextCastSources.length > 0) {
-      state._consumedNextCastSources = state._nextCastSources.slice();
-      state._nextCastSources = [];
-    }
+  // === CONSUME nextCast (신통 시전만) — _isClone 재귀 호출은 본체가 이미 consume 했으므로 skip ===
+  if (isShintong && !ncSkip && !opts._isClone) {
+    state._consumedNextCastSources = (state._nextCastSources && state._nextCastSources.length > 0) ? state._nextCastSources.slice() : [];
+    state._nextCastSources = [];
     state.nextCast.cr = 0;
     state.nextCast.finalCR = 0;
     state.nextCast.cd = 0;
@@ -1040,6 +1042,12 @@ function dealDamage(state, base, opts = {}) {
   const typeM = 1;              // 흡수됨
   const finalResult = attackerDmg * defMult;
 
+  // [DEBUG] 환음요탑 디버그 — ×1.94 곱 추적
+  if (CFG.debugDealDamage && (type === '법보절대' || type === '영역')) {
+    const tag = state._currentSource || type;
+    console.log(`[DBG][${tag}] type=${type} base=${base.toFixed(0)} | atkM=${atkM.toFixed(3)} dmgM=${dmgM.toFixed(3)} ampM=${ampM.toFixed(3)} cMult=${cMult.toFixed(3)} fmM=${fmM.toFixed(3)} defMult=${defMult.toFixed(3)} | atkBuff=${atkBuff.toFixed(1)} dealtPct=${dealtPct.toFixed(1)} shintongPct=${shintongPct.toFixed(1)} typePct=${typePct.toFixed(1)} attrPct=${attrPct.toFixed(1)} ampPct=${ampPct.toFixed(1)} finalPct=${finalPct.toFixed(1)} | localFinalDmg=${(opts.localFinalDmg||0).toFixed(1)} | cr=${cr.toFixed(1)} cd=${cd.toFixed(1)} | attackerDmg=${attackerDmg.toFixed(0)} finalResult=${finalResult.toFixed(0)}`);
+  }
+
   // breakdown (record()가 DMG 이후 출력)
   state._lastBreakdown = {
     base, type,
@@ -1073,12 +1081,10 @@ function dealDamage(state, base, opts = {}) {
     const savedLastCR = state._lastCR;
     const savedLastCD = state._lastCD;
     const savedLastIsCrit = state._lastIsCrit;
-    let cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
-    // 악신·진 의 호신강기 피해 심화 +33% — 분신이 호신강기 hit 시 데미지 추가
-    // (sim 에선 호신강기 hit 여부 정확히 못 추적 → 호신강기 active 가정 시 ×1.33 적용)
-    if (state.악신_호신심화 > 0 && (state.shieldRem || 0) > 0 && !opts.bypassShield) {
-      cloneFinal = cloneFinal * (1 + state.악신_호신심화 / 100);
-    }
+    const cloneFinal = dealDamage(state, base, { ...opts, _isClone: true });
+    // 악신·진 호신강기 피해 심화 +33% 는 record() 안 분신 처리 단계에서 분혼·허 와 동일 패턴 적용:
+    //   - 호신강기/HP 분배 시 호신강기 부분에 amp +33% 합산 (사양 verbatim "호신강기에 대한 피해 심화 +33%")
+    //   - cloneFinal 자체엔 +33% 미반영 — _cloneBdPending.ampPct 와 state.악신_호신심화 로 record() 가 비율 계산.
     state._cloneBdPending = {
       ...state._lastBreakdown,
       clonePct: state.악신Pct,
@@ -1450,9 +1456,8 @@ function record(state, amount, source) {
   const activeCast = state._activeCast || null;
   // === 자기 비술: 분혼 허 — 봉인 종료 후 호신강기 피해 심화 +18% (10초) ===
   // (악신 분신은 위 dealDamage 에서 별도 계산되어 state._cloneDmgPending 에 저장됨 — 아래에서 별도 emit)
-  if (state.분혼허_심화End > state.t && (state.shieldRem || 0) > 0) {
-    amount = amount * 1.18;
-  }
+  // 사양: "호신강기에 대한 피해 심화 +18%" → amp% 카테고리 합산. 호신강기 hit 부분에만 적용.
+  // 처리는 호신강기 분배 로직 (아래 line ~1500) 안에서 amount × shieldRatio 로 확장 후 HP overflow 부분만 원본 amount 기준으로 환원.
   // === 자기 비술: 업화 진 — 업화 멸신 active 동안 record 마다 카운터 +1, 15회마다 발동 (최대 10회) ===
   // 자기 자신 발동 (업화마주·진·멸신) 은 카운터 X — 무한 루프 방지
   if (state.업화멸신End > state.t && (state.업화멸신_발동수 || 0) < 10
@@ -1468,7 +1473,10 @@ function record(state, amount, source) {
   // 호신강기/HP 모두 defMult (방어 + defDebuff) 적용된 amount 그대로 사용
   // (사용자 요청: 방어막에도 데미지 감소 동일 적용 — 본 피해 = 호신강기 차감 = HP 차감)
   const bd = state._lastBreakdown;
-  // 자기 비술 분혼 봉인 active 동안 → bypassShield 강제
+  // 자기 비술 분혼 봉인 active 동안 → 호신강기 수치 없는 것처럼 취급 (사용자 정의)
+  //   - hit 시 호신강기 우회 (bypassShield: HP 직접 차감)
+  //   - shield rem / destroyed 는 변경 X (봉인 종료 후 원래 수치로 복귀)
+  //   - 방어법보 자체는 살아있어 옵션/buff 정상 동작 (set 보너스, 천창홍고 max+15%, applyBuff 영구 active 등)
   const 봉인active = (state.봉인EndT || 0) > state.t;
   const bypassShield = 봉인active || isBypassShield(state, bd);
   // shieldOnly: 호신강기에만 적용되는 추가 피해 (예: 환음요탑/유리옥호/오염혁선의 호신강기 추가 피해)
@@ -1486,11 +1494,23 @@ function record(state, amount, source) {
   } else {
     // 호신강기 흡수: 방어법보별 개별 풀 순차 소진 (성해천경 active 시 +15% 보너스)
     // applyShieldDamage 내부에서 파괴 처리 + 효과 발동
-    const { absorbed, remaining: overflow } = applyShieldDamage(state, amount, { type: bd && bd.type });
+    // === 분혼·허 호신강기 심화 +18% (amp 합산) ===
+    // 사양: "호신강기에 대한 피해 심화 +18%" — amp% 카테고리 합산.
+    //   amount 는 dealDamage 가 (1+amp%) 곱한 결과 → 호신강기 부분만 (1+amp%+18) 로 확장 = amount × shieldRatio
+    //   shieldRatio = (100 + ampPct + 18) / (100 + ampPct)
+    //   호신강기 흡수 cap 도달 시 흡수된 양은 amount × shieldRatio 단위. HP overflow 는 원본 amount 단위로 환원 (overflow / shieldRatio).
+    let shieldRatio = 1;
+    let amountForShield = amount;
+    if (state.분혼허_심화End > state.t && (state.shieldRem || 0) > 0 && bd) {
+      const ampPct = bd.ampPct || 0;
+      shieldRatio = (100 + ampPct + 18) / (100 + ampPct);
+      amountForShield = amount * shieldRatio;
+    }
+    const { absorbed, remaining: overflow } = applyShieldDamage(state, amountForShield, { type: bd && bd.type });
     shieldHit = absorbed;
-    // 호신강기 흘러넘친 잉여 → HP 차감 (동일 단위 — defMult 적용된 amount)
+    // 호신강기 흘러넘친 잉여 → HP 차감 (분혼·허 active 시 원본 amount 단위로 환원)
     if (overflow > 0) {
-      hpHit = overflow;
+      hpHit = overflow / shieldRatio;
       state.hpRem = Math.max(0, (state.hpRem || 0) - hpHit);
     }
     // === 자기 비술: 분혼·진 — 호신강기 입힌 25% HP 추가 감소 (15초 active) ===
@@ -1518,6 +1538,37 @@ function record(state, amount, source) {
       state['_' + b.master + '_fired'] = true;
       비술_발동_적(state, b.master, b.branch);
     }
+  }
+  // === 자기 탁천 발동 hook — 사양 "치명 일격을 받았을 때 (= HP 0 도달 시점)"
+  // mirror 가정: 자기 ↔ 적 동일 → 적 HP 0 도달 = 자기 치명일격 시점
+  // 흐름 (사용자 정의):
+  //   1. 마스터 발동 시도 (CD 170s 검사). 발동 시 ① applyBuff + ② 즉시 1회 광역 + 차회광역 buff 생성 (비술_발동_자기 안에서 처리).
+  //   2. 마스터 발동 X (CD 미경과) + 차회광역 buff 있으면 → 광역 1회 emit + buff 소진 (다음 HP 0 시 처리).
+  //   → 한 cycle 당 총 2회 (마스터 발동 시점 1회 + 다음 HP 0 시 1회)
+  if (!state._탁천허광역_처리중 && (state.hpRem || 0) <= 0) {
+    state._탁천허광역_처리중 = true;
+    const selfBisulTakcheon = (CFG.bisul && CFG.bisul.self) || [];
+    let 마스터발동됨 = false;
+    for (const b of selfBisulTakcheon) {
+      if (!b || b.master !== '탁천' || !b.branch) continue;
+      const beforeT = state.bisul_lastFireT && state.bisul_lastFireT['탁천'];
+      비술_발동_자기(state, b.master, b.branch);
+      const afterT = state.bisul_lastFireT && state.bisul_lastFireT['탁천'];
+      if (beforeT !== afterT) 마스터발동됨 = true;
+    }
+    // 마스터 발동 X (CD 안) + 차회광역 buff 있으면 사용
+    if (!마스터발동됨 && state.탁천허_차회광역) {
+      state.탁천허_차회광역 = false;
+      const hpDmg2 = (CFG.baseHP || 0) * 0.09;
+      const atkCap2 = (CFG.baseATK || 0) * 16.20;
+      const dmg2 = Math.min(hpDmg2, atkCap2);
+      const prevSrc2 = state._currentSource;
+      state._currentSource = `탁천마주·허·광역(2/2)`;
+      TRACE(state, 'OPT', `🔮탁천마주·허 ② 차회광역 buff 발동 (HP 0 재도달, 2/2): ${(dmg2/1e8).toFixed(2)}억 = min(maxHP×9%, atk×1620%) [buff 소진]`);
+      record(state, dmg2, `탁천마주·허·광역(2/2)`);
+      state._currentSource = prevSrc2;
+    }
+    state._탁천허광역_처리중 = false;
   }
   // 히트 카운터 tick (기본 1히트, 멀티히트 스킬은 _recordHits에 설정)
   // 법상 damage 는 noSkillMult=true 라 type='기타' → hit counter 는 동작 (신통 type 만 일부 트리거)
@@ -1553,20 +1604,49 @@ function record(state, amount, source) {
   const poolRemStr = ` (shield=${((state.shieldRem||0)/1e8).toFixed(2)}억, hp=${((state.hpRem||0)/1e8).toFixed(2)}억)`;
   TRACE(state, 'DMG', `[${src}] +${displayDmg.toFixed(0)}${critStr}  (누적 ${state.totalDmg.toFixed(0)})${poolStr}${poolRemStr}${activeStr}${breakdownStr}`);
   // === 악신 분신: 본체 데미지 × N% (모든 buff/stack 동일하게 받은 후 N% 비율) ===
+  // 호신강기/HP 분배 (분혼·허와 동일 패턴) — 악신·진 의 "호신강기에 대한 피해 심화 +33%" 는 호신강기 부분에 amp 합산.
   if (state._cloneDmgPending && state._cloneDmgPending > 0) {
     const cloneAmt = state._cloneDmgPending;
     const branch = state.악신_branch || '?';
     const trigger = activeCast || src || '?';
-    state.totalDmg = (state.totalDmg || 0) + cloneAmt;
-    state.dmgEvents.push({ t: state.t, amt: cloneAmt, src: `악신마주·${branch}·분신(${trigger})`, activeCast });
     const cloneBd = state._cloneBdPending;
+    // 호신강기/HP 분배
+    let cloneShield = 0, cloneHp = 0;
+    if (bypassShield) {
+      cloneHp = cloneAmt;
+      state.hpRem = Math.max(0, (state.hpRem || 0) - cloneHp);
+    } else {
+      // 악신·진 호신강기 심화 +33% — amp 합산 (호신강기 부분에만 적용, HP overflow 는 원본 amount 단위)
+      let cloneShieldRatio = 1;
+      let cloneAmountForShield = cloneAmt;
+      if (state.악신_호신심화 > 0 && (state.shieldRem || 0) > 0 && cloneBd) {
+        const ampPct = cloneBd.ampPct || 0;
+        cloneShieldRatio = (100 + ampPct + state.악신_호신심화) / (100 + ampPct);
+        cloneAmountForShield = cloneAmt * cloneShieldRatio;
+      }
+      const cloneShieldRes = applyShieldDamage(state, cloneAmountForShield, { type: cloneBd && cloneBd.type });
+      cloneShield = cloneShieldRes.absorbed;
+      const cloneOverflow = cloneShieldRes.remaining;
+      if (cloneOverflow > 0) {
+        cloneHp = cloneOverflow / cloneShieldRatio;
+        state.hpRem = Math.max(0, (state.hpRem || 0) - cloneHp);
+      }
+    }
+    const cloneTotal = cloneShield + cloneHp;
+    state.totalDmg = (state.totalDmg || 0) + cloneTotal;
+    state.dmgEvents.push({ t: state.t, amt: cloneTotal, src: `악신마주·${branch}·분신(${trigger})`, activeCast });
     let cloneBreakdownStr = '';
     if (cloneBd) {
       const pct = cloneBd.clonePct || state.악신Pct;
       const 본체dmg = cloneBd.mainAmount || 0;
       cloneBreakdownStr = `\n           └ 분신 식: 본체 데미지 ${(본체dmg/1e8).toFixed(2)}억 × ${pct}% (분신 = 본체 stat 의 ${pct}%) = ${(cloneAmt/1e8).toFixed(2)}억`;
     }
-    TRACE(state, 'DMG', `[🔮악신마주·${branch}·분신←${trigger}] +${cloneAmt.toFixed(0)}  (누적 ${state.totalDmg.toFixed(0)})${cloneBreakdownStr}`);
+    let clonePoolStr = '';
+    if (bypassShield) clonePoolStr = ` [HP직접 -${(cloneHp/1e8).toFixed(2)}억]`;
+    else if (cloneShield > 0 && cloneHp > 0) clonePoolStr = ` [호신강기 -${(cloneShield/1e8).toFixed(2)}억 / HP -${(cloneHp/1e8).toFixed(2)}억]`;
+    else if (cloneShield > 0) clonePoolStr = ` [호신강기 -${(cloneShield/1e8).toFixed(2)}억]`;
+    else if (cloneHp > 0) clonePoolStr = ` [HP -${(cloneHp/1e8).toFixed(2)}억]`;
+    TRACE(state, 'DMG', `[🔮악신마주·${branch}·분신←${trigger}] +${cloneTotal.toFixed(0)}${clonePoolStr}  (누적 ${state.totalDmg.toFixed(0)})${cloneBreakdownStr}`);
     state._cloneDmgPending = 0;
     state._cloneBdPending = null;
   }
@@ -1770,6 +1850,8 @@ SK['복룡·약영'] = {
     // 부여(nextCast.finalDmg 설정) 는 record 후에 해야 자기 record 가 소비하지 않고 다음 cast 가 받음.
     if (현미발동) {
       TRACE(s, 'OPT', `🟠약영·현미 발동: HP ${hpPct}% ≤ 60% → 다음 신통 최종피해 +45%`);
+      // BUF trace — buff lane 에 표시 (다음 신통 cast 까지 무한 TTL)
+      TRACE(s, 'BUF', `🔼버프 [복룡·약영 → 현미] 다음 신통 최종피해 +45%`);
       addNextCast(s, 'finalDmg', 45);
       pushNextCastSource(s, { key: '약영·현미', pct: 45, field: 'finalDmg', msg: `HP ${hpPct}% ≤ 60% → 다음 신통 최종피해 +45%` });
     }
@@ -3007,6 +3089,7 @@ SK['신소·환뢰'] = {
     if (호탕val > 0) applyBuff(s, '신소환뢰_호탕', { defDebuff: 호탕val }, 10); // def-50% 10s — 후속 신통에 적용
     // [풍세] 다음 신통 최종 피해 +20% (max tier) — record 후 설정
     TRACE(s, 'OPT', `🟠환뢰·풍세 발동: 다음 신통 최종피해 +20%`);
+    TRACE(s, 'BUF', `🔼버프 [신소·환뢰 → 풍세] 다음 신통 최종피해 +20%`);
     addNextCast(s, 'finalDmg', 20);
     pushNextCastSource(s, { key: '환뢰·풍세', pct: 20, field: 'finalDmg', msg: '다음 신통 최종피해 +20%' });
   }
@@ -3541,7 +3624,7 @@ SK['사해·명화'] = {
 const BISUL_MASTERS = {
   탁천: { name: '탁천마주', trigger: '치명일격 (HP 0 도달)', cd: 170 },
   분혼: { name: '분혼마주', trigger: '신통/법보 첫 cast', cd: 160 },
-  식혼: { name: '식혼마주', trigger: '공격 후 사망', cd: 160 },
+  식혼: { name: '식혼마주', trigger: '신통/법보로 공격 후 (지속: 사망 때까지, 흡수 최대 1개)', cd: 160 },
   악신: { name: '악신마주', trigger: '방어법보 파괴 (호신강기 0 또는 4회 공격)', cd: 170 },
   혼원: { name: '혼원마주', trigger: '방어법보 파괴 시 (정확 spec — 무 90% / 허 60% / 진 76% 평균값 기준 보호막 복구, 너프 적용 2026-05-09)', cd: 160 },
   업화: { name: '업화마주', trigger: '신통/법보 5회 공격마다', cd: 160 },
@@ -3553,23 +3636,33 @@ const BISUL_MASTERS = {
 // 업화: 5회 공격마다 DoT
 // 자기 비술 발동 — return true (발동 됨) / false (CD 미경과로 skip)
 function 비술_발동_자기(state, master, branch) {
-  // 모든 비술 재사용 시간 160초 통일 (사용자 정책)
-  const BISUL_CD = 160;
+  // 비술별 재사용 시간 (사양 verbatim — 신통_정리.md):
+  //   탁천 170s, 분혼 160s, 식혼 160s, 악신 170s, 혼원 160s, 업화 160s
+  const BISUL_CD = (BISUL_MASTERS[master] && BISUL_MASTERS[master].cd) || 160;
   state.bisul_lastFireT = state.bisul_lastFireT || {};
   const lastT = state.bisul_lastFireT[master];
   if (lastT !== undefined && state.t - lastT < BISUL_CD) return false;
   state.bisul_lastFireT[master] = state.t;
 
   if (master === '분혼') {
-    // 봉인 = 호신강기 무시 (state.봉인EndT)
+    // 사양 (신통_정리.md:768/771/774):
+    //   무: "15초간 대상의 방어법보를 봉인하며, 대상을 4회 공격하여 총 공격력 1000.00%의 피해"
+    //   허: "10초간 대상의 방어법보를 봉인하며, 봉인 종료 후 10초간 18.00%의 호신강기에 대한 피해 심화. 추가로 4회 공격하여 총 공격력 1000.00%의 피해"
+    //   진: "15초간 자신을 강화시키며, 호신강기에 입히는 피해의 25.00%만큼 추가로 대상의 생명력을 감소. 대상을 4회 공격하여 총 공격력 800.00%의 피해"
+    // 봉인 정의 (사용자): 호신강기 수치가 없는 것으로 취급. 방어법보 destroyed X, 방어법보 buff 정상 동작.
+    //   sim 구현: state.봉인EndT 설정 → record() 안에서 hit 가 호신강기 우회 (HP 직접 차감), shield rem 보존.
     const dur = branch === '진' ? 0 : (branch === '허' ? 10 : 15);
     if (dur > 0) state.봉인EndT = state.t + dur;
-    // 4회 공격 추가 데미지 (총 1000% 무/허, 800% 진)
+    // 사양: "대상을 4회 공격하여 총 공격력 N%" — 4 hit × (N/4)% (멀티히트)
     const totalDmg = branch === '진' ? 800 : 1000;
-    TRACE(state, 'OPT', `🔮분혼마주·${branch} 발동: ${dur}초 호신강기 봉인 + ${totalDmg}% 추가 데미지 (4회)`);
+    const hitCount = 4;
+    const perHit = totalDmg / hitCount; // 무/허 = 250%, 진 = 200%
+    TRACE(state, 'OPT', `🔮분혼마주·${branch} 발동: ${dur}초 호신강기 봉인 + 총 ${totalDmg}% (${hitCount} hit × ${perHit}%)`);
     const prev = state._currentSource;
-    state._currentSource = `분혼마주·${branch}`;
-    record(state, dealDamage(state, totalDmg, { noSkillMult: true, bypassShield: dur > 0 }));
+    for (let i = 0; i < hitCount; i++) {
+      state._currentSource = `분혼마주·${branch}(${i + 1}/${hitCount})`;
+      record(state, dealDamage(state, perHit, { noSkillMult: true, bypassShield: dur > 0 }));
+    }
     state._currentSource = prev;
     if (branch === '허') {
       // 봉인 종료 후 10초간 호신강기 피해 심화 +18%
@@ -3580,30 +3673,68 @@ function 비술_발동_자기(state, master, branch) {
       state.분혼진_hp추가End = state.t + 15;
     }
   } else if (master === '악신') {
-    // 분신 소환 — 본체 N% 속성 → 매 record() 때 별도 분신 데미지 추가 (15초간)
+    // 사양 (신통_정리.md:791-798):
+    //   무: "적의 모든 방어법보가 파괴되면 ... 분신 본체의 39.00%이며, 어떠한 피해도 받지 않는다."
+    //   허: "자신의 모든 방어법보가 파괴되면 ... 분신 본체의 20.00%이며, 그중 생명력 속성은 150.00%까지 증가하지만 입는 피해를 받는다. 분신 지속 시간 동안 수련자가 받는 피해의 26.00%가 분신에게 전이된다."
+    //   진: "4회 공격 후 ... 분신 본체의 30.00%이며, 호신강기에 대한 피해 심화를 33.00% 획득하고 분신은 어떠한 피해도 받지 않는다."
+    // sim 적용: 본체 N% 속성 분신 데미지 + 진의 호신강기 심화 +33% (record() 분신 처리)
+    // applyBuff 등록 — 허의 "생명력 150% / 26% 전이", 무/진의 "분신 무피격" 도 buff 등록 (sim dispatch 미사용)
     const pct = branch === '무' ? 39 : (branch === '허' ? 20 : 30);
     state.악신EndT = state.t + 15;
     state.악신Pct = pct;
     state.악신_branch = branch;
     if (branch === '진') state.악신_호신심화 = 33; // 호신강기 피해 심화 +33% — record() 에서 적용
     else state.악신_호신심화 = 0;
-    TRACE(state, 'OPT', `🔮악신마주·${branch} 발동: 15초간 분신 추가 데미지 (본체 ${pct}% 속성)${branch === '진' ? ' + 호신강기 심화 +33%' : ''}`);
+    // 갈래별 buff 등록 (15초간 분신 active)
+    if (branch === '무') {
+      applyBuff(state, '악신무_분신무피격', { 분신무피격: true }, 15);
+    } else if (branch === '허') {
+      applyBuff(state, '악신허_분신생명력', { 분신생명력배율: 1.5 }, 15);
+      applyBuff(state, '악신허_분신피격', { 분신피격: true }, 15);
+      applyBuff(state, '악신허_분신피해전이', { 자기피해전이: 26 }, 15);
+    } else if (branch === '진') {
+      applyBuff(state, '악신진_분신무피격', { 분신무피격: true }, 15);
+    }
+    const 허_extra = branch === '허' ? ' + 생명력 150% / 분신 입는 피해 받음 / 자기 받는 피해 26% 전이 (applyBuff 등록, sim 자기 HP/분신 HP 미모델 → 결과 영향 X)' : '';
+    const 무진_extra = (branch === '무' || branch === '진') ? ' + 분신 어떠한 피해도 받지 않음 (applyBuff 등록)' : '';
+    TRACE(state, 'OPT', `🔮악신마주·${branch} 발동: 15초간 분신 추가 데미지 (본체 ${pct}% 속성)${branch === '진' ? ' + 호신강기 심화 +33%' : ''}${허_extra}${무진_extra}`);
   } else if (master === '식혼') {
-    // 사양: 첫 공격 시 발동, 140초간 자기 방어법보 1개 흡수 → 자기 HP +N억 (호신강기 총합 × 76/46/47%).
-    // 흡수 대상: **마지막 순서의 방어법보** (사용자 명시 — equipment 마지막 슬롯)
-    // mirror 모델: 자기 = 더미 동일 → state.shields[last].destroyed = true 처리
+    // 사양 (신통_정리.md:780/783/786): "신통 또는 법보로 공격 후 사망할 때까지 자신의 방어법보를 1개 흡수한다(최대 1개). 140초간 모든 방어법보의 호신강기 총합의 N%에 해당하는 생명력 및 최대 생명력을 획득"
+    //   "사망할 때까지" = 효과 지속 구간 (영구). 트리거는 "공격 후" → 첫 cast.
+    //   흡수 대상: 마지막 순서 방어법보 (사용자 명시 — equipment 마지막 슬롯).
+    //   mirror 모델: 자기 = 더미 동일 → state.shields[last].destroyed 처리.
     if (branch === '진') {
+      // 사양: "치명타율이 9.00%~19.00% 증가하며, 자신의 현재 생명력 백분율이 낮을수록 치명타율이 증가한다(생명력 백분율이 25.00%일 시 최대값을 적용)"
+      // sim 적용: cr buff (HP 비율 따라 9~19% 스케일)
       const cr값 = selfHpScale(state, 9, 19, 0.25);
       applyBuff(state, '식혼진_cr', { cr: cr값 }, 140);
       TRACE(state, 'OPT', `🔮식혼마주·진 발동 (자기): cr +${cr값.toFixed(1)}% 140초 (자기 HP ${(selfHpRatio(state)*100).toFixed(0)}% 기준, 사양 9~19%)`);
-    } else {
-      TRACE(state, 'OPT', `🔮식혼마주·${branch} 발동 (자기): 자기 호신강기 흡수/피해감면 — sim 미모델, 효과 없음`);
+    } else if (branch === '무') {
+      // 사양: "140초간 모든 방어법보의 호신강기 총합의 76.00%에 해당하는 생명력 및 최대 생명력을 획득"
+      // applyBuff 등록 — sim dispatch 미사용 (자기 HP 변화 X) 이지만 buff 자체는 사양대로 active.
+      const shieldSum = state.shields ? state.shields.reduce((s, sh) => s + sh.max, 0) : 0;
+      const hpGain = shieldSum * 0.76;
+      applyBuff(state, '식혼무_HP회복', { selfHpGain: hpGain, selfMaxHpGain: hpGain }, 140);
+      TRACE(state, 'OPT', `🔮식혼마주·무 발동 (자기): 호신강기 총합 ${(shieldSum/1e8).toFixed(2)}억 × 76% = HP/max HP +${(hpGain/1e8).toFixed(2)}억 (140초, applyBuff 등록 — sim 자기 HP 미모델 → 결과 영향 X)`);
+    } else if (branch === '허') {
+      // 사양: "140초간 모든 방어법보의 호신강기 총합의 46.00%에 해당하는 생명력 및 최대 생명력을 획득. 지속 기간 동안 피해 감면이 7.00%~12.00% 증가 (HP 25% 시 최대)"
+      // applyBuff 등록 — (1) HP 회복 (selfHpGain) (2) 피해 감면 +7~12% (자기 받는 피해 감면). 둘 다 sim dispatch 미사용.
+      const shieldSum = state.shields ? state.shields.reduce((s, sh) => s + sh.max, 0) : 0;
+      const hpGain = shieldSum * 0.46;
+      const reductionVal = selfHpScale(state, 7, 12, 0.25);
+      applyBuff(state, '식혼허_HP회복', { selfHpGain: hpGain, selfMaxHpGain: hpGain }, 140);
+      applyBuff(state, '식혼허_자기감면', { 자기감면: reductionVal }, 140);
+      TRACE(state, 'OPT', `🔮식혼마주·허 발동 (자기): 호신강기 총합 × 46% = HP/max HP +${(hpGain/1e8).toFixed(2)}억 + 자기 피해 감면 +${reductionVal.toFixed(1)}% (140초, applyBuff 등록 — sim 자기 HP/받는 피해 미모델 → 결과 영향 X)`);
     }
     // 자기 방어법보 1개 흡수 (mirror — 마지막 순서의 방어법보 destroy 처리)
+    // 흡수 정의 (사용자 명시): "파괴와 비슷한 처리, 해당 기능이 동작을 안 함"
+    //   - destroyed = true → 호신강기 hit 안 들어감, 옵션 비활성 (파괴와 동일 효과)
+    //   - state.shieldRem 갱신에서 제외
+    //   - 다른 시스템의 destroyed 검사 (모든방어법보파괴 등) 에서 흡수 = 파괴 카운트 → 악신·허/무 트리거 발동 가능
+    //   - 단 방어법보_파괴효과() 호출 X — "흡수" 는 식혼 자체의 별개 메커니즘 (자기 HP 회복용으로 흡수, 혼원 트리거 같은 부수 효과는 발동 X)
     if (state.shields && state.shields.length > 0) {
       const lastSh = state.shields[state.shields.length - 1];
       if (lastSh && !lastSh.destroyed) {
-        // 마지막 순서 법보 강제 흡수 (destroy)
         const absorbedMax = lastSh.max;
         lastSh.destroyed = true;
         lastSh.destroyedT = state.t;
@@ -3611,8 +3742,7 @@ function 비술_발동_자기(state, master, branch) {
         state.shieldRem = state.shields.reduce((s, x) => s + (x.destroyed ? 0 : x.rem), 0);
         // 흡수된 max 값 저장 (적측 식혼이 HP 회복 계산용으로 사용)
         state._식혼_absorbedMax = absorbedMax;
-        TRACE(state, 'OPT', `   └ 식혼: 자기 방어법보 [${lastSh.name}] 흡수 (마지막 순서, max ${(absorbedMax/1e8).toFixed(2)}억) — 영구 destroy`);
-        // 흡수로 인해 파괴 효과 발동 X (사양: "흡수" 는 별도 메커니즘)
+        TRACE(state, 'OPT', `   └ 식혼: 자기 방어법보 [${lastSh.name}] 흡수 (마지막 순서, max ${(absorbedMax/1e8).toFixed(2)}억) — destroy 처리 (= 파괴와 비슷, 기능 비활성)`);
       }
     }
   } else if (master === '업화') {
@@ -3640,14 +3770,55 @@ function 비술_발동_자기(state, master, branch) {
       state.업화DoT단위_절대 = tickDmg;  // 절대값 (buff/defMult 미적용)
       state.업화DoT브랜치 = branch;
       if (branch === '허') {
-        applyBuff(state, '업화허_적약화', { defDebuff: 11 }, 10);
+        // 사양 (신통_정리.md:822): "또한 10초간 대상의 피해 심화/감면을 11.00%만큼 추가 감소시킨다."
+        // 두 디버프 모두 applyBuff 등록 — sim 결과 영향 여부와 무관하게 buff/debuff 자체는 사양대로 등록.
+        // (1) "대상의 피해 심화 -11%" = 적의 amp stat (적이 입히는 피해 증가) -11%
+        //     sim dispatch: 미사용 (sim 은 자기가 적에게 입히는 데미지만 추적, 적의 amp 는 자기 받는 피해에만 영향)
+        //     → buff 등록만, sim 결과 영향 X
+        applyBuff(state, '업화허_적심화감소', { 적amp: -11 }, 10);
+        // (2) "대상의 피해 감면 -11%" = 적의 reduction stat (적이 받는 피해 감면) -11%
+        //     sim dispatch: defDebuff 매핑 (defMult = 0.7 + 0.3 × (감소/100) → 적 데미지 통과율 증가)
+        applyBuff(state, '업화허_적감면감소', { defDebuff: 11 }, 10);
+        TRACE(state, 'OPT', `   └ 업화·허: 10초간 적 피해 심화 -11% (sim 자기 받는 피해 미모델 → 결과 영향 X) + 적 받는 피해 감면 -11% (defDebuff 매핑)`);
       }
     }
   } else if (master === '탁천') {
-    // 자기 탁천: 치명일격 받았을 때 발동 — sim 자기 받는 피해 모델 X
-    // 회복 효과 (자기 hp 회복 + 면역) 의미 없음. 진의 6초 피해 감면도 sim 의미 X.
-    // 단 분기 추가 — 사용자가 자기 비술로 선택해도 예외 없이.
-    TRACE(state, 'OPT', `🔮탁천마주·${branch} 발동 (자기): 자기 받는 피해 미모델 — 효과 없음`);
+    // 자기 탁천: 사양 "치명 일격을 받았을 때 (= HP 0 도달 시점)" — 적 HP 0 도달 시 발동 (mirror 가정)
+    // applyBuff 등록 — sim dispatch 미사용 (자기 HP/받는 피해 변화 X) 이지만 buff 자체는 사양대로 active.
+    if (branch === '무') {
+      // 사양: "최대 생명력의 29.00%만큼 회복하며, 1초 동안 모든 피해를 면역"
+      const hpGain = (CFG.baseHP || 0) * 0.29;
+      applyBuff(state, '탁천무_HP회복', { selfHpGain: hpGain }, 0.001);  // 즉시 회복 (지속시간 X, 사양 명시 X)
+      applyBuff(state, '탁천무_면역', { 자기면역: true }, 1);  // 1초 면역
+      TRACE(state, 'OPT', `🔮탁천마주·무 발동 (자기): max HP 29% (+${(hpGain/1e8).toFixed(2)}억) 회복 + 1초 면역 (applyBuff 등록 — sim 자기 HP/받는 피해 미모델 → 결과 영향 X)`);
+    } else if (branch === '허') {
+      // 사양: ① max HP 18% 회복 + 1초 면역 (sim 미모델) ② 주변 최대 3명 (1:1 sim → 1명) 에게 max HP 9% 확정 피해 (atk 1620% 상한), 최대 2회 발동
+      // ① 자기 HP/받는 피해 미모델 → 효과 없음
+      // ② 데미지 공식: min(maxHP × 9%, atk × 1620%). lifetime cap 2회 (state.탁천허_발동수)
+      // ① 자기 HP 18% 회복 + 1초 면역 — applyBuff 등록 (sim dispatch 미사용)
+      const hpGain허 = (CFG.baseHP || 0) * 0.18;
+      applyBuff(state, '탁천허_HP회복', { selfHpGain: hpGain허 }, 0.001);
+      applyBuff(state, '탁천허_면역', { 자기면역: true }, 1);
+      // ② 광역 즉시 1회 발동 (마스터 발동 시점)
+      const hpDmg광역 = (CFG.baseHP || 0) * 0.09;
+      const atkCap광역 = (CFG.baseATK || 0) * 16.20;
+      const dmg광역 = Math.min(hpDmg광역, atkCap광역);
+      const prevSrc광역 = state._currentSource;
+      state._currentSource = `탁천마주·허·광역(1/2)`;
+      TRACE(state, 'OPT', `🔮탁천마주·허 발동 (자기): ① HP 18% (+${(hpGain허/1e8).toFixed(2)}억) 회복 + 1초 면역 (applyBuff 등록) / ② 광역 즉시 1회 ${(dmg광역/1e8).toFixed(2)}억 = min(maxHP×9%, atk×1620%) + 차회광역 buff 생성 (다음 HP 0 시 1회)`);
+      record(state, dmg광역, `탁천마주·허·광역(1/2)`);
+      state._currentSource = prevSrc광역;
+      // ② 차회광역 buff — 다음 HP 0 도달 시 광역 1회 더 발동
+      state.탁천허_차회광역 = true;
+    } else if (branch === '진') {
+      // 사양: "최대 생명력의 21.00%만큼 회복하며 1초 동안 모든 피해를 면역. 6초간 피해 감면을 24.00%만큼 증가시킨다"
+      // applyBuff 등록 — (1) HP 21% 회복 (2) 1초 면역 (3) 6초 자기 피해 감면 +24%
+      const hpGain진 = (CFG.baseHP || 0) * 0.21;
+      applyBuff(state, '탁천진_HP회복', { selfHpGain: hpGain진 }, 0.001);
+      applyBuff(state, '탁천진_면역', { 자기면역: true }, 1);
+      applyBuff(state, '탁천진_자기감면', { 자기감면: 24 }, 6);
+      TRACE(state, 'OPT', `🔮탁천마주·진 발동 (자기): max HP 21% (+${(hpGain진/1e8).toFixed(2)}억) 회복 + 1초 면역 + 6초 자기 피해 감면 +24% (applyBuff 등록 — sim 자기 HP/받는 피해 미모델 → 결과 영향 X)`);
+    }
   }
   return true;
 }
@@ -3696,6 +3867,51 @@ function 비술_발동_적(state, master, branch) {
   }
 }
 
+// 비술 트리거 검사 — 사양 verbatim "신통 또는 법보로 ..." → 신통/법보 cast 둘 다 호출
+// 신통 cast / 법보 cast 종료 후 (record() 후) 호출. cast 카운터 +1 + 마스터별 발동 조건 검사.
+function 비술_트리거검사(state) {
+  state._castCountTotal = (state._castCountTotal || 0) + 1;
+  const selfBisul = (CFG.bisul && CFG.bisul.self) || [];
+  for (const b of selfBisul) {
+    if (!b || !b.master || !b.branch) continue;
+    // 분혼: 사양 "신통 또는 법보로 공격 시" — 매 cast 후 발동 시도 (CD 안에서 1회)
+    if (b.master === '분혼') {
+      비술_발동_자기(state, b.master, b.branch);
+    }
+    // 악신·진: 사양 "신통 또는 법보로 4회 공격 후" — 누적 4회마다
+    if (b.master === '악신' && b.branch === '진' && state._castCountTotal % 4 === 0) {
+      비술_발동_자기(state, b.master, b.branch);
+    }
+    // 악신·허: 사양 "자신의 모든 방어법보가 파괴되면" — mirror 모델 (자기 = 더미 동일)
+    if (b.master === '악신' && b.branch === '허' && 모든방어법보파괴(state)) {
+      비술_발동_자기(state, b.master, b.branch);
+    }
+    // 악신·무: 사양 "적의 모든 방어법보가 파괴되면"
+    if (b.master === '악신' && b.branch === '무' && 모든방어법보파괴(state)) {
+      비술_발동_자기(state, b.master, b.branch);
+    }
+    // 업화: 진 = 매 cast 후 / 무·허 = 사양 "5회 공격할 때마다"
+    if (b.master === '업화') {
+      if (b.branch === '진') {
+        비술_발동_자기(state, b.master, b.branch);
+      } else {
+        state.업화_누적 = (state.업화_누적 || 0) + 1;
+        if (state.업화_누적 >= 5) {
+          const fired = 비술_발동_자기(state, b.master, b.branch);
+          if (fired) state.업화_누적 = 0;
+        }
+      }
+    }
+    // 식혼: 사양 "신통/법보로 공격 후 사망할 때까지 ... 흡수한다" — "사망할 때까지" 는 효과 지속 구간 (영구)
+    // 트리거는 "공격 후" → 첫 cast 시 발동 + CD 160초
+    if (b.master === '식혼') {
+      비술_발동_자기(state, b.master, b.branch);
+    }
+    // 탁천: 사양 "치명 일격을 받았을 때 (= HP 0 도달 시점)" — record() (sim2.js:1530-1538) 에서 적 HP 0 도달 시 발동 (mirror 가정)
+    //   cast 시 발동 X — 트리거가 cast 가 아니라 HP 0 임계 도달이기 때문
+  }
+}
+
 // ======================== 영역 (法則) ========================
 // 발동: 신통/법보 누적 10회 시전마다 발동 (CD 180초)
 // 발동 시: 4-hit 2100% + AOE 900% (1:1 sim 에선 2100% 만 record) + 자기 버프 + 적 디버프
@@ -3740,15 +3956,17 @@ function 영역_pendingFire(s) {
   if (!s.영역_pendingFireT || s.t < s.영역_pendingFireT - 0.001) return;
   const name = s.영역_pendingName;
   const fireT = s.영역_pendingFireT;
-  // state.t 를 영역 발동 시각으로 일시 조정 (record 의 t 정확히 표시)
+  // 명중 모델 — 발동 시점 (fireT) buff 가 적용. 다른 모든 데미지와 통일.
   const savedT = s.t;
   s.t = fireT;
   const prevSrc = s._currentSource;
   s._currentSource = `영역(${name})`;
   TRACE(s, 'OPT', `🌐영역 [${name}] 발동: 4타 총 2100% + AOE 900% (영역대결 종료 시점)`);
-  // 4-hit damage (총 2100%) — 한 번에 record
   record(s, dealDamage(s, 2100, { type: '영역' }));
-  // AOE 900% — 1:1 sim 이라 무시
+  // AOE 900% — 1:1 sim 이라도 dummy 에게 적용 (광역 효과가 단일 대상 포함)
+  s._currentSource = `영역(${name})·AOE`;
+  record(s, dealDamage(s, 900, { type: '영역' }));
+  s._currentSource = `영역(${name})`;
   // === 자기 버프 ===
   if (name === '진양화련') {
     applyBuff(s, '영역_열반_조건부', { dmgMult: 10, cat: 'inc', _condHpBelow70: true }, 10);
@@ -3771,12 +3989,13 @@ function 영역_pendingFire(s) {
 function 영역_시전트리거(s) {
   if (!CFG.영역) return;
   const name = CFG.영역;
+  if (CFG.debugDealDamage) console.log(`[DBG][영역_시전트리거] t=${s.t.toFixed(2)} name=${name} 천위End=${(s.영역_천위End||0).toFixed(2)} 심연End=${(s.영역_심연End||0).toFixed(2)} 천위active=${s.t < (s.영역_천위End||0)} 심연active=${s.t < (s.영역_심연End||0)}`);
   if (name === '제왕의 정' && s.t < (s.영역_천위End || 0)) {
     // 천위: 70% × 2~4회 (기댓값 3회) = 210% (확정 피해 → noSkillMult, type='호무')
     const prevSrc = s._currentSource;
-    s._currentSource = '천위(영역)';
+    s._currentSource = `영역(${name})·천위`;
     TRACE(s, 'OPT', `🌐영역 [천위] 트리거: 70% × 3회 (기댓값) = 210% 확정`);
-    record(s, dealDamage(s, 210, { noSkillMult: true, type: '호무' }));
+    record(s, dealDamage(s, 210, { type: '영역' }));
     s._currentSource = prevSrc;
   } else if (name === '사해 마관' && s.t < (s.영역_심연End || 0)) {
     // 심연: 적 max HP 1.5% (캡 atk 300%) — 진원 = baseHP, 1.5% = 0.015 × baseHP
@@ -3784,9 +4003,9 @@ function 영역_시전트리거(s) {
     // 캡: atk 300% (= dealDamage(s, 300, ...))
     // 우선 단순화: 항상 atk 300% 발동 (캡 가까운 케이스 가정)
     const prevSrc = s._currentSource;
-    s._currentSource = '심연(영역)';
+    s._currentSource = `영역(${name})·심연`;
     TRACE(s, 'OPT', `🌐영역 [심연] 트리거: 적 max HP 1.5% 또는 atk 300% (캡)`);
-    record(s, dealDamage(s, 300, { noSkillMult: true, type: '호무' }));
+    record(s, dealDamage(s, 300, { type: '영역' }));
     s._currentSource = prevSrc;
   }
 }
@@ -4410,8 +4629,13 @@ function 방어법보_파괴효과(state, name) {
       applyBuff(state, '혼원허_치명타차단', { crRes: 48 }, 12);
       TRACE(state, 'OPT', `   └ 혼원·허 추가: 자기 신통 차단 12초 + cr 차단 48% 12초`);
     } else if (b.branch === '진') {
-      // 미파괴 효과 모든 방어법보 파괴까지 유지 — 단순화: TRACE 만
-      TRACE(state, 'OPT', `   └ 혼원·진 추가: 모든 방어법보 파괴까지 미파괴 효과 유지 (sim 단순화)`);
+      // 사양 (신통_정리.md:812): "자신의 모든 방어법보의 미파괴 효과는 모든 방어법보가 파괴될 때까지 유지됩니다."
+      //   = 마지막 1개 방어법보 살아있을 때까지 destroyed 된 법보들의 효과/buff 가 active 유지
+      // sim 적용: 방어법보 효과/buff 는 newState 시 applyBuff 영구 active 라 destroyed 와 무관 — sim 결과 변경 없음
+      //   shield reduction (명공현주 -15%, 성해천경 -10%, 경화령도) 도 destroyed 시 hit 자체 안 들어가니 적용 X (rem 0 → 흡수 0)
+      // → applyBuff 등록만 (사양 표시용, sim dispatch 미사용 — 결과 영향 X)
+      applyBuff(state, '혼원진_미파괴효과유지', { 미파괴효과: true }, 1e9);
+      TRACE(state, 'OPT', `   └ 혼원·진 추가: 모든 방어법보 파괴까지 미파괴 효과 유지 (applyBuff 등록 — sim 결과 영향 X: 방어법보 buff 는 newState 영구 active, shield rem 0 = 흡수 0)`);
     }
     state._혼원_lastT = state.t;
     break; // 한 발동만
@@ -4577,7 +4801,7 @@ function emitSnapTrace(state) {
     if (nc.cd) pushBuff('cdShintong', 'nextCast (다음)', nc.cd);
     if (nc.finalCR) pushBuff('finalCR', 'nextCast (다음)', nc.finalCR);
     if (nc.finalCD) pushBuff('finalCD', 'nextCast (다음)', nc.finalCD);
-    if (nc.finalDmg) pushBuff('finalDmg', 'nextCast (다음)', nc.finalDmg);
+    // nc.finalDmg push 제거 — 부여한 cast (약영) 가 아닌 받은 cast (붕산) 에만 표시되도록
     if (ncSnap.consumedSources && ncSnap.consumedSources.length > 0) {
       for (const src of ncSnap.consumedSources) {
         let field = src.field || 'finalDmg';
@@ -4586,12 +4810,9 @@ function emitSnapTrace(state) {
         pushBuff(field, src.key, src.pct || 0);
       }
     } else {
-      if (ncSnap.cr) pushBuff('crShintong', 'nextCast (소비)', ncSnap.cr);
-      if (ncSnap.cd) pushBuff('cdShintong', 'nextCast (소비)', ncSnap.cd);
-      if (ncSnap.finalCR) pushBuff('finalCR', 'nextCast (소비)', ncSnap.finalCR);
-      if (ncSnap.finalCD) pushBuff('finalCD', 'nextCast (소비)', ncSnap.finalCD);
-      if (ncSnap.finalDmg) pushBuff('finalDmg', 'nextCast (소비)', ncSnap.finalDmg);
+      // ncSnap (소비된 nextCast) push 안 함 — consumedSources 가 비어있을 때만 fallback 동작이라 일반적으로 도달 X
     }
+    // localFinalDmg (본 cast 한정 — 붕산 통백 +20 등) 는 push — 그 cast 자체에 적용된 효과라 셀로 표시
     if (ncSnap.localFinalDmg) {
       pushBuff('finalDmg', ncSnap.localFinalDmgSrc || '본 cast 한정', ncSnap.localFinalDmg);
     }
@@ -4611,7 +4832,9 @@ function emitSnapTrace(state) {
     crRes: sum(bd.crRes), defDebuff: sum(bd.defDebuff),
     finalCR: sum(bd.finalCR), finalCD: sum(bd.finalCD), finalDmg: sum(bd.finalDmg),
     bd,
+    src: state._currentSource,  // SNAP 매핑용 cast 식별자 (UI 측 castRaws 매칭)
   };
+  if (CFG.debugDealDamage) console.log('[DBG][SNAP] t=' + state.t.toFixed(2) + ' src=' + state._currentSource + ' finalDmg=' + snap.finalDmg.toFixed(1) + ' nc=' + ((state.nextCast && state.nextCast.finalDmg) || 0).toFixed(1) + ' ncSnap=' + ((state._snapNextCastConsumed && state._snapNextCastConsumed.finalDmg) || 0).toFixed(1));
   TRACE(state, 'SNAP', JSON.stringify(snap));
 }
 
@@ -4708,6 +4931,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
   state._혼원_lastT = undefined;
   state._탁천_fired = false;
   state._식혼_fired = false;
+  // 자기 탁천·허 ② 차회 광역 발동권 buff (사양: 최대 2회 발동)
+  // 마스터 발동 시: ② 즉시 1회 광역 emit + 차회광역 buff 생성 (= true)
+  // 매 다음 HP 0 도달 시 (마스터 미발동 — CD 안): buff 가 광역 1회 emit + buff 소진 (= false)
+  // → 한 마스터 발동 cycle 당 총 2회 (즉시 1회 + 다음 1회)
+  state.탁천허_차회광역 = false;
   // 트리거 조건 옵션 초기화 — 신통 장착만으로 활성 (cast 무관)
   if (state.selectedSkills.has('균천·관일')) {
     state.검망남은 = 6; state.검망max = 6; state.검망증폭 = 60;
@@ -5183,51 +5411,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // record() 가 _snapBuffsCaptured 를 set 하는 조건과 applyBuff [post] 태깅 조건의
         // 기준이 되는 플래그 — pre-cast hook 의 폭파 record / applyBuff 와 구분하기 위함.
         state._inMainCast = true;
-        // === 자기 비술 발동 — 모두 cast() 후 호출 ===
-        // 사양 "공격 시 / 공격 후 / 공격할 때" — 모두 명중 (= record) 후 의미
-        // ("시전 시" 가 아닌 "공격 시" 는 attack hit 시점 → post-record)
-        state._castCountTotal = (state._castCountTotal || 0) + 1;
-        const selfBisul = (CFG.bisul && CFG.bisul.self) || [];
+        // 신통 cast 실행
         SK[sk.name].cast(state, slots);
-        // [Post-cast] 모든 비술 — 본 신통 record 후 발동 (이번 cast 자체엔 effect 미적용)
-        for (const b of selfBisul) {
-          if (!b || !b.master || !b.branch) continue;
-          // 분혼: 사양 "신통 또는 법보로 공격 시" — 공격 hit 후 발동 (cast() 후 호출)
-          if (b.master === '분혼') {
-            비술_발동_자기(state, b.master, b.branch);
-          }
-          // 악신·진: 신통/법보 4회 공격 후
-          if (b.master === '악신' && b.branch === '진' && state._castCountTotal % 4 === 0) {
-            비술_발동_자기(state, b.master, b.branch);
-          }
-          // 악신·허: "자기 모든 방어법보 파괴 시" — mirror 모델: 자기 = 더미 동일이므로 state.shields 전부 파괴
-          if (b.master === '악신' && b.branch === '허' && 모든방어법보파괴(state)) {
-            비술_발동_자기(state, b.master, b.branch);
-          }
-          // 악신·무: "적의 모든 방어법보 파괴 시" — state.shields 전부 파괴
-          if (b.master === '악신' && b.branch === '무' && 모든방어법보파괴(state)) {
-            비술_발동_자기(state, b.master, b.branch);
-          }
-          // 업화: 진 = 매 cast 후 / 무·허 = 5회 누적 후
-          if (b.master === '업화') {
-            if (b.branch === '진') {
-              비술_발동_자기(state, b.master, b.branch);
-            } else {
-              state.업화_누적 = (state.업화_누적 || 0) + 1;
-              if (state.업화_누적 >= 5) {
-                const fired = 비술_발동_자기(state, b.master, b.branch);
-                if (fired) state.업화_누적 = 0;
-              }
-            }
-          }
-          // 식혼: 사양 "신통/법보로 공격 후 사망할 때까지" — 첫 공격 후 발동 (sim 사망 미모델 → 매 cast trigger 시도, CD 160초 안에서 1회 발동)
-          if (b.master === '식혼') {
-            비술_발동_자기(state, b.master, b.branch);
-          }
-          // 탁천: 사양 "치명일격을 받았을 때" — sim 환경 자기 받는 피해 미모델 → 발동 X
-          // 로직만 유지 (PvP/대결 sim 도입 시 자기 HP 감소 로직 추가하면 자동 발동)
-          // if (b.master === '탁천') 비술_발동_자기(state, b.master, b.branch);
-        }
+        // === 자기 비술 트리거 검사 — 사양 verbatim "신통 또는 법보로 ..." (신통/법보 공통 함수)
+        // cast() 후 호출 — 사양 "공격 시 / 공격 후 / 공격할 때" 는 명중 (= record) 후 의미
+        비술_트리거검사(state);
         state._inMainCast = false;
         // 청명 유파: 임의 신통 명중 시 뇌인 1중첩 획득
         뇌인획득(state);
@@ -5570,7 +5758,11 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         state._snapBuffsCaptured = false;
         state._snapBuffsAtDmg = null;
         state._snapStacksAtDmg = null;
+        state._snapNextCastConsumed = null;  // 이전 cast 의 nextCast 소비 스냅샷 리셋
+        state._consumedNextCastSources = [];  // 이전 신통 cast 의 소비 source 가 stale 로 남지 않도록 리셋
         TREASURES[trName].cast(state);
+        // === 자기 비술 트리거 검사 — 사양 verbatim "신통 또는 법보로 ..." (신통/법보 공통 함수)
+        비술_트리거검사(state);
         state._inMainCast = false;
         // 법보 cast 후 SNAP TRACE emit — 활성 buff 히트맵에 법보 cast 칸도 표시
         emitSnapTrace(state);

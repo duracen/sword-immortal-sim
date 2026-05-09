@@ -9,6 +9,10 @@ export default defineConfig({
     fs: {
       allow: [path.resolve(__dirname, '..')],
     },
+    watch: {
+      usePolling: true,
+      interval: 200,
+    },
   },
   worker: {
     format: 'es',
