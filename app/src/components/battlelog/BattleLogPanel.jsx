@@ -6,8 +6,8 @@ import CastTimelineSummary from './CastTimelineSummary.jsx';
 import DamageBreakdown from '../simulator/DamageBreakdown.jsx';
 
 // 빌드/스킬/순서/법보 조합으로 trace 실행 → 로그 렌더
-// props: { build, skills, treasures, order, onClose, randomCrit }
-export default function BattleLogPanel({ build, skills, treasures, order, title, onClose, targetLawBody, maxTime, 불씨, bisul, 법상, 영역, randomCrit = false }) {
+// props: { build, skills, treasures, order, onClose, randomCrit, defenseTreasures, attackSetMode, defenseSetMode }
+export default function BattleLogPanel({ build, skills, treasures, order, title, onClose, targetLawBody, maxTime, 불씨, bisul, 법상, 영역, randomCrit = false, defenseTreasures, attackSetMode, defenseSetMode }) {
   const [events, setEvents] = useState([]);
   const [dmgEvents, setDmgEvents] = useState([]);
   const [filter, setFilter] = useState({ CST: true, BUF: true, STK: true, DMG: true, OPT: true });
@@ -27,6 +27,10 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
       if (bisul && (bisul.self?.length || bisul.enemy?.length)) simOpts.bisul = bisul;
       if (법상 && 법상.name) simOpts.법상 = 법상;
       if (영역) simOpts.영역 = 영역;
+      // worker 의 simOptsFor 와 일치 — defenseTreasures / attackSetMode / defenseSetMode 도 적용 (RankingTable 시뮬과 동일 결과 보장)
+      if (defenseTreasures && defenseTreasures.length > 0) simOpts.defenseTreasures = defenseTreasures;
+      if (attackSetMode && attackSetMode !== '단독') simOpts.attackSetMode = attackSetMode;
+      if (defenseSetMode && defenseSetMode !== '단독') simOpts.defenseSetMode = defenseSetMode;
       const r = simulateBuild(build, treasures, order, skills, simOpts);
       setEvents(collected);
       setDmgEvents(r.dmgEvents || []);
@@ -58,6 +62,9 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
     targetLawBody,
     maxTime,
     randomCrit,
+    JSON.stringify(defenseTreasures),
+    attackSetMode,
+    defenseSetMode,
   ]);
 
   const counts = useMemo(() => {

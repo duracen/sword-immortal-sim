@@ -566,6 +566,9 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                 bisul={bisul}
                 법상={법상}
                 영역={영역}
+                defenseTreasures={defenseTreasures}
+                attackSetMode={attackSetMode}
+                defenseSetMode={defenseSetMode}
                 onClose={() => setSelected(null)}
               />
             </div>
@@ -923,6 +926,9 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
             법상={simSnap.법상}
             영역={simSnap.영역}
             randomCrit={simSnap.randomCrit}
+            defenseTreasures={simSnap.defenseTreasures}
+            attackSetMode={simSnap.attackSetMode}
+            defenseSetMode={simSnap.defenseSetMode}
           />
         </>
       )}
