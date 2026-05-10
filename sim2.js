@@ -57,15 +57,19 @@ const CFG = {
   반허기보너스: 50,
   // 인간계 유파 (복룡/중광/이화/천로/오뢰/신소) 신통 추가 보너스
   인간계보너스: 30,
-  // === 불씨 (운명의 궁궐 상) 세트 효과 ===
-  // 총 9슬롯. 개수별 최대 급수 효과 적용 (성급 조건 생략).
+  // === 불씨 (운명의 궁궐 상·영혼의 불씨) 세트 효과 ===
+  // 총 9슬롯. 슬롯 개수 + 총 성급 둘 다 따라 1~3급 활성:
+  //   1급: 슬롯 충족 (3개 또는 6개)
+  //   2급: 슬롯 충족 + 총 성급 ≥ 6
+  //   3급: 슬롯 충족 + 총 성급 ≥ 12
   // 자동 탐색은 계산 생략, 수동 시뮬에서만 opts.불씨 전달.
   불씨: {
-    통명묘화: 0,  // 0 or 3 → 3개 시 3급 (+8 amp)
-    진무절화: 0,  // 0 or 3 or 6 → 3개=1급(+16), 6개=3급(+48)
-    태현잔화: 0,  // 0 or 3 → 3개 시 3급 (dealt +8 기댓값)
-    유리현화: 0,  // 0 or 3 → 3개 시 3급 (+15 amp)
-    진마성화: 0,  // 0 or 3 or 6 → 3개=1%/스택, 6개=3%/스택 (max 10)
+    통명묘화: 0,  // 0 or 3 (3-set, amp +4%/+6%/+8%)
+    진무절화: 0,  // 0 or 3 or 6 (6-set, dealt +16%/+32%/+48% 매 2 신통 cast)
+    태현잔화: 0,  // 0 or 3 (3-set, dealt 0~8%/0~12%/0~16% 랜덤)
+    유리현화: 0,  // 0 or 3 (3-set, amp +5%/+10%/+15%)
+    진마성화: 0,  // 0 or 3 or 6 (6-set, amp +1%/+2%/+3% per stack, max 10)
+    총성급: 12,    // 0~45 (9슬롯 × 5성). 6 이상 → 2급, 12 이상 → 3급. 기본 12 (= 12성 도달, 3급 활성)
   },
   trace: null, // function(t, tag, msg) — set by external runner for per-build trace
   preEvent: null, // function(state, ev) — hook before each event (for stack reset experiments)
@@ -276,18 +280,29 @@ function selfHpScale(state, lowVal, highVal, thresholdLow) {
   const t = (1 - ratio) / (1 - thr);
   return lowVal + (highVal - lowVal) * t;
 }
-// 불씨 세트 급수 보너스 계산 — "개수별 최대급수" (성급 조건 없이 장착 개수로만)
+// 불씨 세트 급수 보너스 계산 — 슬롯 개수 + 총 성급 둘 다 따라 1~3급 결정
+//   3-set (통명/태현/유리): 3개 = 슬롯 충족
+//   6-set (진무/진마): 3개 = 1급 슬롯, 6개 = 2/3급 슬롯
+//   2급: 슬롯 충족 + 총 성급 ≥ 6
+//   3급: 슬롯 충족 + 총 성급 ≥ 12
+// tiers = [1급값, 2급값, 3급값]
 function 불씨급수값(state, name, tiers) {
   const src = (state && state.불씨) || CFG.불씨 || {};
   const count = src[name] || 0;
   if (count <= 0) return 0;
+  const 총성급 = src.총성급 != null ? src.총성급 : 12;
   if (name === '통명묘화' || name === '태현잔화' || name === '유리현화') {
-    // 3-set: 3개 → 3급(최대)
-    if (count >= 3) return tiers[2];
+    // 3-set: 슬롯 3개 충족 시 활성 (1급). 성급 따라 2/3급 승급
+    if (count < 3) return 0;
+    if (총성급 >= 12) return tiers[2];
+    if (총성급 >= 6) return tiers[1];
+    return tiers[0];
   } else if (name === '진무절화' || name === '진마성화') {
-    // 6-set: 3개 → 1급, 6개 → 3급(최대)
-    if (count >= 6) return tiers[2];
-    if (count >= 3) return tiers[0];
+    // 6-set: 3개 = 1급 슬롯 충족, 6개 = 2/3급 슬롯 충족
+    if (count < 3) return 0;
+    if (count >= 6 && 총성급 >= 12) return tiers[2];
+    if (count >= 6 && 총성급 >= 6) return tiers[1];
+    return tiers[0]; // 3~5개 또는 6개+성급 부족 → 1급
   }
   return 0;
 }
@@ -573,8 +588,9 @@ function sumBuffAmp(state) {
   // 불씨 세트: 개수별 탑티어 효과만 적용 (누적 아님)
   s += 불씨급수값(state, '통명묘화', [4, 6, 8]);
   s += 불씨급수값(state, '유리현화', [5, 10, 15]);
-  // 진마성화: 신통 1 cast마다 +X% amp 스택 (최대 10). 3개→1%/스택, 6개→3%/스택
-  const 진마성화Per = 불씨급수값(state, '진마성화', [1, 3, 3]);
+  // 진마성화: 신통 1 cast마다 +X% amp 스택 (최대 10).
+  // 사양: 1급=1%/스택 (3개), 2급=2%/스택 (6개+6성), 3급=3%/스택 (6개+12성)
+  const 진마성화Per = 불씨급수값(state, '진마성화', [1, 2, 3]);
   if (진마성화Per > 0) s += (state.진마성화스택 || 0) * 진마성화Per;
   return s;
 }
