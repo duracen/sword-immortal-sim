@@ -2758,7 +2758,10 @@ SK['청명·천노'] = {
     // [복광] 60% 천뢰 + crRes 15% 10초 (max tier)
     천뢰발동(s, slots, 60, '천노·복광');
     applyBuff(s, '청명천노_복광', { crRes: 15 }, 10);
-    record(s, dealDamage(s, 225));
+    // 본 신통: 사양 "5회 공격, 총 225% 물리" → 5 hit × 45% 멀티히트
+    const hitCount = 5;
+    const perHit = 225 / hitCount;
+    for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
   }
 };
 SK['청명·붕운'] = {
@@ -2774,7 +2777,12 @@ SK['청명·붕운'] = {
     // [굉천] 1갈래 천뢰 90% + cr 20% 10초 (max tier)
     천뢰발동(s, slots, 90, '붕운·굉천');
     applyBuff(s, '청명붕운_굉천', { cr: 20 }, 10);
-    record(s, dealDamage(s, 225));
+    // 본 신통: 사양 "5회 공격, 총 225% 술법" → 5 hit × 45% 멀티히트
+    {
+      const hitCount = 5;
+      const perHit = 225 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
+    }
     // [파정] 다음 신통 최종 cr/cd +25% (max tier) — record 후 설정해야 다음 cast에 적용
     TRACE(s, 'OPT', `🟠붕운·파정 발동: 다음 신통 최종 치명타율 +25% · 최종 치명타 배율 +25%`);
     addNextCast(s, 'finalCR', 25);
@@ -2790,7 +2798,12 @@ SK['청명·풍뢰'] = {
     s.풍뢰남은 = 14; // 발동 가능 횟수: 10 + 천적 4 (max tier)
     s._풍뢰분수 = 0; // 재시전 시 cr 분수 carry 리셋 (사이클당 buff 초기화)
     applyBuff(s, '청명풍뢰_환우', { cr: 20 }, 10); // [환우] cr 20% (max tier) — 신통 시전 시 즉발
-    record(s, dealDamage(s, 225));  // 본 신통 먼저
+    // 본 신통: 사양 "5회 공격, 총 225% 물리" → 5 hit × 45% 멀티히트
+    {
+      const hitCount = 5;
+      const perHit = 225 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
+    }
     // === 본 신통 명중 후 ===
     // [뇌벌] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
     applyBuff(s, '청명풍뢰_뇌벌', { atk: 30 }, 10); // atk 30% (max tier) — 후속 신통/천뢰에 적용
@@ -2849,7 +2862,12 @@ SK['옥추·황룡'] = {
       record(s, dealDamage(s, 60, { noSkillMult: true, attr: '술법' }), '운한');
     }
     // === 본 신통 (신통 피해 적용) ===
-    record(s, dealDamage(s, 172));
+    // 사양: "4명의 적을 4회 공격, 총 172%" → 4 hit × 43% 멀티히트
+    {
+      const hitCount = 4;
+      const perHit = 172 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
+    }
     // [황룡] 60% 술법 추가 — 조건 없는 일반 추가 데미지, 본 신통 데미지와 함께 (record 후)
     record(s, dealDamage(s, 60, { noSkillMult: true, attr: '술법' }), '황룡');
   }
@@ -2914,9 +2932,9 @@ SK['옥추·청사'] = {
     // [명뢰] 본 신통 최종 cr +30% (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 명뢰] 발동: 본 신통 최종 cr +30% (이번 cast 한정)`);
     applyBuff(s, '옥추청사_명뢰', {}, 1); // 타임라인 시각화용 1초 marker
-    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 6회 반사 decay emit
+    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 사양 "4명 사이 4회 반사" 4 hit decay emit
     // 옥추유파Mult 는 보통 1 — 곱해도 영향 없음. localInc/localFinalCR 은 모든 hit 에 동일 적용.
-    recordMultiHit(s, 170 * 옥추유파Mult(s, slots), 6, {
+    recordMultiHit(s, 170 * 옥추유파Mult(s, slots), 4, {
       localInc: uc,
       localFinalCR: 30,
     });
@@ -2959,7 +2977,12 @@ SK['오뢰·경칩'] = {
     applyBuff(s, '오뢰경칩_침뢰', { crRes: 30 }, 15);
     // [뇌진] atk 16% max3 (max tier)
     applyBuff(s, '오뢰경칩_뇌진', { atk: 16 }, 10, 3);
-    record(s, dealDamage(s, 128));
+    // 본 신통: 사양 "4명 4회 공격, 총 128% 술법" → 4 hit × 32% 멀티히트
+    {
+      const hitCount = 4;
+      const perHit = 128 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
+    }
   }
 };
 SK['오뢰·호후'] = {
@@ -3071,7 +3094,12 @@ SK['신소·천고'] = {
     applyBuff(s, '신소천고_경뢰', { crRes: 30 }, 15);
     // [만균] crit 시 3명에게 165% 물리 (max tier) — "치명타를 입힐 경우" = 한 cast 의 crit 1회 이상 시 발동
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
-    record(s, dealDamage(s, 135, { localCD: 35 }));
+    // 본 신통: 사양 "3명 3회 공격, 총 135% 물리" → 3 hit × 45% 멀티히트
+    {
+      const hitCount = 3;
+      const perHit = 135 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit, { localCD: 35 }));
+    }
     // 발동 확률: 1 - (1 - crEff)^hits (3 hits)
     if (CFG.randomCrit) {
       let anyCrit = false;
