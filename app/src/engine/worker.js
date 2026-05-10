@@ -126,7 +126,7 @@ function defaultOrder() {
 
 let FIXED_TREASURES = ['환음요탑', '유리옥호', '참원선검'];
 let G_TREASURE_POOL = null;  // fixedTreasures ON + user-selected pool (array of names, size >=3)
-const MARKER_TIME = [41, 60, 120, 180];
+const MARKER_TIME = [41, 52, 60, 120, 180];
 function getMaxTime(markerIdx) { return MARKER_TIME[markerIdx]; }
 
 let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)

@@ -7,7 +7,7 @@ import HoverTooltip from '../common/HoverTooltip';
 const DISPLAY_ORDER = ['환음요탑', '유리옥호', '참원선검', '오염혁선', '산하옥척', '경몽비파'];
 const TREASURE_DISPLAY = DISPLAY_ORDER.filter((t) => TREASURE_NAMES.includes(t));
 
-export default function TreasurePicker({ selected, onChange, showOrder = true, maxSelect = 3, minSelect = 0 }) {
+export default function TreasurePicker({ selected, onChange, showOrder = true, maxSelect = 6, minSelect = 0 }) {
   const [dragIdx, setDragIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
 

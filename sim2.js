@@ -6037,8 +6037,10 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
     // 다음 cast의 첫 dealDamage에서 그대로 소비된다.
   }
 
-  // 마커별 누적 피해 (t ≤ marker). 34s=1cycle 끝, 60s, 120s, 180s
-  const markers = [34, 60, 120, 180];
+  // 마커별 누적 피해 (t ≤ marker). 34s=1cycle 끝, 52s, 60s, 120s, 180s
+  // ⚠️ 인덱스 의미: [0]=34s(1cycle), [1]=52s, [2]=60s, [3]=120s, [4]=180s
+  // ⚠️ rank.js 등의 cumByMarker[3] 호출 = 120s (이전 cumByMarker[2] 와 의미 동일, 인덱스만 +1)
+  const markers = [34, 52, 60, 120, 180];
   const cumByMarker = markers.map(m =>
     (state.dmgEvents || []).filter(e => e.t < m + 0.001).reduce((a, e) => a + e.amt, 0)
   );
@@ -6156,7 +6158,7 @@ if (DETAIL_ONLY) {
   const defaultOrder = buildOrder([0,1,2,3,4,5], [6,7,8]);
   let s2 = 0;
   for (let t = 0; t < 20; t++) {
-    s2 += simulateBuild(bd0.b, bd0.treasures, defaultOrder).cumByMarker[2];
+    s2 += simulateBuild(bd0.b, bd0.treasures, defaultOrder).cumByMarker[3];
   }
   bd0.c2 = s2 / 20;
   bd0.bestOrder = defaultOrder;
@@ -6178,7 +6180,7 @@ for (const bd of fullBuilds) {
     const order = buildOrder(perm, defaultTr);
     let score = 0;
     for (let t = 0; t < TRIALS_SCREEN; t++) {
-      score += simulateBuild(bd.b, bd.treasures, order).cumByMarker[2];
+      score += simulateBuild(bd.b, bd.treasures, order).cumByMarker[3];
     }
     phase1.push({ perm, score: score / TRIALS_SCREEN });
   }
@@ -6192,7 +6194,7 @@ for (const bd of fullBuilds) {
       const order = buildOrder(perm, trCombo);
       let score = 0;
       for (let t = 0; t < TRIALS_SCREEN; t++) {
-        score += simulateBuild(bd.b, bd.treasures, order).cumByMarker[2];
+        score += simulateBuild(bd.b, bd.treasures, order).cumByMarker[3];
       }
       phase2.push({ perm, trCombo, order, score: score / TRIALS_SCREEN });
     }
@@ -6206,7 +6208,10 @@ for (const bd of fullBuilds) {
     let s1 = 0, s15 = 0, s2 = 0;
     for (let t = 0; t < TRIALS_FINAL; t++) {
       const res = simulateBuild(bd.b, bd.treasures, c.order);
-      const [c1, c15, c2] = res.cumByMarker;
+      // markers = [34, 52, 60, 120, 180] — c1=34s, c15=60s, c2=120s
+      const c1 = res.cumByMarker[0];
+      const c15 = res.cumByMarker[2];
+      const c2 = res.cumByMarker[3];
       s1 += c1; s15 += c15; s2 += c2;
     }
     const avg2 = s2 / TRIALS_FINAL;

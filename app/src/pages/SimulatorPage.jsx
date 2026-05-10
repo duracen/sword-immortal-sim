@@ -95,8 +95,8 @@ function TabButton({ active, onClick, children }) {
 
 /* ─────────────────  자동 탐색  ───────────────── */
 function AutoSearch({ targetLawBody, setTargetLawBody }) {
-  const MARKER_TIMES = [41, 60, 120, 180];
-  const MARKER_LABELS = ['41초 (1사이클)', '60초', '120초', '180초'];
+  const MARKER_TIMES = [41, 52, 60, 120, 180];
+  const MARKER_LABELS = ['41초 (1사이클)', '52초', '60초', '120초', '180초'];
   const [markerIdx, setMarkerIdx] = useState(0);  // 41초 (1사이클) 기본
   // 기본은 아무것도 선택 안 된 빈 상태. 사용자가 직접 "전체 선택" 또는 카테고리/유파별로 추가.
   const [pool, setPool] = useState(() => new Set());
@@ -263,7 +263,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           </div>
         </div>
         <TreasureSetPicker value={attackSetMode} onChange={setAttackSetMode} label="공격법보 세트 모드" accentColor="amber" />
-        <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={fixedTreasureOrder} maxSelect={4} minSelect={3} />
+        <TreasurePicker selected={treasures} onChange={setTreasures} showOrder={fixedTreasureOrder} maxSelect={6} minSelect={3} />
 
         <h3 className="text-base font-bold mt-6 mb-3 text-cyan-400">2-2. 방어법보 <span className="text-xs text-slate-400 font-normal">(최대 3개 — 호신강기 합산 결정)</span></h3>
         <TreasureSetPicker value={defenseSetMode} onChange={setDefenseSetMode} label="방어법보 세트 모드" accentColor="cyan" />
@@ -296,7 +296,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           <div>
             <label className="block text-xs text-slate-400 mb-1">기준 시간</label>
             <div className="flex gap-1">
-              {[0, 1, 2, 3].map((i) => (
+              {MARKER_TIMES.map((_, i) => (
                 <button
                   key={i}
                   onClick={() => setMarkerIdx(i)}
@@ -629,8 +629,8 @@ function SplitRankings({ results, sortBy, markerTime, onRowClick }) {
 }
 
 /* ─────────────────  수동 시뮬  ───────────────── */
-const MANUAL_MARKER_TIMES = [41, 60, 120, 180];
-const MANUAL_MARKER_LABELS = ['41초 (1사이클)', '60초', '120초', '180초'];
+const MANUAL_MARKER_TIMES = [41, 52, 60, 120, 180];
+const MANUAL_MARKER_LABELS = ['41초 (1사이클)', '52초', '60초', '120초', '180초'];
 
 function ManualSim({ targetLawBody, setTargetLawBody }) {
   const [skillSel, setSkillSel] = useState({});
@@ -776,7 +776,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <h2 className="text-lg font-bold mb-3 text-amber-400">2. 법보 선택</h2>
         <h3 className="text-base font-bold mb-3 text-amber-400">2-1. 공격법보</h3>
         <TreasureSetPicker value={attackSetMode} onChange={setAttackSetMode} label="공격법보 세트 모드" accentColor="amber" />
-        <TreasurePicker selected={treasures} onChange={setTreasures} />
+        <TreasurePicker selected={treasures} onChange={setTreasures} maxSelect={6} />
 
         <h3 className="text-base font-bold mt-6 mb-3 text-cyan-400">2-2. 방어법보 <span className="text-xs text-slate-400 font-normal">(최대 3개 — 호신강기 합산 결정)</span></h3>
         <TreasureSetPicker value={defenseSetMode} onChange={setDefenseSetMode} label="방어법보 세트 모드" accentColor="cyan" />
@@ -814,7 +814,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
         <div>
           <label className="block text-xs text-slate-400 mb-1">시뮬 시간</label>
           <div className="flex gap-1">
-            {[0, 1, 2, 3].map((i) => (
+            {MANUAL_MARKER_TIMES.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setMarkerIdx(i)}
