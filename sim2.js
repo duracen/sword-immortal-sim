@@ -1670,9 +1670,11 @@ function record(state, amount, source) {
     state._currentSource = prev금오;
     const _금오의념 = CFG.법상 && (!CFG.법상.tiers || CFG.법상.tiers.의념);
     if (_금오의념) {
+      // 사양 (신통_정리.md:899): "1중첩당 자신이 입히는 피해 +1%, 받는 피해 -1%, max 20"
+      // "입히는 피해" = dealt% (atk% 가 아니라 dealt% layer)
       for (let i = 0; i < 6; i++) {
         state.법상_염백 = Math.min((state.법상_염백 || 0) + 1, 20);
-        applyBuff(state, '법상금오_염백', { atk: 1 }, 20, 20);
+        applyBuff(state, '법상금오_염백', { dmgMult: 1, cat: 'dealt' }, 20, 20);
       }
       TRACE(state, 'OPT', `🦅금오·의념: 화염깃털 6개 발사 → 염백 ${state.법상_염백}/20중첩`);
     }
@@ -4071,7 +4073,7 @@ function 법상_틱(s, opts) {
       s.법상_빙의시작처리 = true;
       법상_시작_cleanup(s, name, tiers);
     }
-    법상_매cast(s, name, tiers);
+    법상_매cast(s, name, tiers, opts && opts.castType);
   } else if (s.법상_빙의종료T <= s.t && s.법상_빙의종료T > 0 && !s.법상_빙의종료처리) {
     s.법상_빙의종료처리 = true;
     법상_종료_cleanup(s, name, tiers);
@@ -4143,7 +4145,7 @@ function 법상_시작_cleanup(s, name, tiers) {
   }
 }
 
-function 법상_매cast(s, name, tiers) {
+function 법상_매cast(s, name, tiers, castType) {
   if (name === '청교룡' && tiers.실체) {
     s.법상_교혼 = Math.min(s.법상_교혼 + 1, 10);
     TRACE(s, 'OPT', `🐉청교룡·실체 발동: 신통/법보 공격 → 교혼 +1 (${s.법상_교혼}/10)`);
@@ -4189,7 +4191,8 @@ function 법상_매cast(s, name, tiers) {
     // 여기선 stack 표시만.
     if (s.법상_염백 > 0) TRACE(s, 'OPT', `🦅금오 염백 ${s.법상_염백}/20중첩 (자기 입히는 +${s.법상_염백}%, 받는 -${s.법상_염백}%)`);
   }
-  if (name === '금오' && tiers.진령) {
+  if (name === '금오' && tiers.진령 && castType === 'skill') {
+    // 사양 (신통_정리.md:902): "금오 빙의 상태에서 신통 시전 시 추가 화염 깃털 1개" — 신통 한정, 법보 cast 시 발동 X
     TRACE(s, 'OPT', `🦅금오·진령 발동: 신통 시전 → 추가 화염깃털 1개 (150% 확정)`);
     const prev = s._currentSource; s._currentSource = `법상·${name}·화염깃털진령`;
     record(s, 법상Dmg(s, 150, { bypassDef: true }), `법상·${name}(진령)`);
@@ -4242,9 +4245,12 @@ function 법상_매cast(s, name, tiers) {
     s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
     while (s.법상_진룡각인_누적 >= 3) {
       s.법상_진룡각인_누적 -= 3;
-      TRACE(s, 'OPT', `🐉진룡·실체 트리거: 누적 3회 → 용의 숨결 5회 700% (3명)`);
+      // 사양 (신통_정리.md:932): "5회 공격하여, 총 공격력 700%" — 5 hit × 140% 멀티히트
+      TRACE(s, 'OPT', `🐉진룡·실체 트리거: 누적 3회 → 용의 숨결 5 hit × 140% (총 700%, 3명)`);
       const prev = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
-      record(s, 법상Dmg(s, 700), `법상·${name}(실체)`);
+      for (let i = 0; i < 5; i++) {
+        record(s, 법상Dmg(s, 140), `법상·${name}(실체)`);
+      }
       s._currentSource = prev;
     }
   }
@@ -4268,9 +4274,12 @@ function 법상_매cast(s, name, tiers) {
         s.법상_진룡각인_누적 = (s.법상_진룡각인_누적 || 0) + 1;
         while (s.법상_진룡각인_누적 >= 3) {
           s.법상_진룡각인_누적 -= 3;
-          TRACE(s, 'OPT', `🐉진룡·실체 트리거 (의념 경유): 누적 3회 → 용의 숨결 700%`);
+          // 사양: 5 hit × 140% (총 700%) 멀티히트
+          TRACE(s, 'OPT', `🐉진룡·실체 트리거 (의념 경유): 누적 3회 → 용의 숨결 5 hit × 140% (총 700%)`);
           const p2 = s._currentSource; s._currentSource = `법상·${name}·용의숨결`;
-          record(s, 법상Dmg(s, 700), `법상·${name}(실체)`);
+          for (let i = 0; i < 5; i++) {
+            record(s, 법상Dmg(s, 140), `법상·${name}(실체)`);
+          }
           s._currentSource = p2;
         }
       }
@@ -5781,7 +5790,8 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
     if (!ev._castSkipped && CFG.법상 && CFG.법상.name) {
       const prevSource = state._currentSource;
       const prevActiveCast = state._activeCast;
-      법상_틱(state, opts);
+      // ev.kind 'skill' 또는 'treasure' — 금오·진령 등 신통 시전 한정 효과 분별용
+      법상_틱(state, { ...(opts || {}), castType: ev.kind });
       state._currentSource = prevSource;
       state._activeCast = prevActiveCast;
     }
