@@ -365,9 +365,14 @@ function sumBuffCR(state, isShintong = true, opts) {
   return s;
 }
 // 치명타 저항 감소 합산 (crRes 필드) — 기본 저항 0 기준, 곱연산 레이어
-function sumBuffCritRes(state) {
+// shintongOnly buff (예: 오뢰·천강 [운소] 신통 치명타 차단 -40%) 는 isShintong 일 때만 합산
+function sumBuffCritRes(state, isShintong = true) {
   let s = 0;
-  for (const b of state.buffs) if (b.endT > state.t && b.crRes) s += b.crRes * (b.stackCount || 1);
+  for (const b of state.buffs) {
+    if (b.endT <= state.t || !b.crRes) continue;
+    if (b.shintongOnly && !isShintong) continue;
+    s += b.crRes * (b.stackCount || 1);
+  }
   return s;
 }
 // 공명 기본 효과 inc 기여분 (영검 2+: 신통 피해 +7~12.5%, 저체력 선형)
@@ -938,7 +943,7 @@ function dealDamage(state, base, opts = {}) {
   const ncApply = isShintong ? 1 : 0;
   const crIncPct = sumBuffCR(state, isShintong, opts) + (opts.localCR || 0) + ncCR * ncApply;
   const finalCRPct = (opts.localFinalCR || 0) + ncFinalCR * ncApply;
-  const crResPct = sumBuffCritRes(state);
+  const crResPct = sumBuffCritRes(state, isShintong);
   let cr = _baseCR * (1 + crIncPct / 100) * (1 + finalCRPct / 100) * (1 + crResPct / 100);
   const finalCDPct = (opts.localFinalCD || 0) + ncFinalCD * ncApply;
   let cd = _baseCD + sumBuffCD(state, isShintong, opts) + (opts.localCD || 0) + ncCD * ncApply + finalCDPct;
@@ -1935,18 +1940,15 @@ function 천검발동(s, slots, ampPct = 0, srcTag = '천검') {
   let amp = 1 + ampPct / 100;
   // 관일·[검망]: 천검 발동 시 발동 (max tier: 3회 + [쇄일] +3회 = 6회)
   //   [검망] 효과: 천검 효과 발동 시 입히는 피해 +40% (지속시간 없음 → 이번 천검 record 한정 localDealt) + 검세 +1
-  //   [쇄일] 효과: 검망 발동 시 천검 자체 피해 +20% (이번 천검 한정)
+  //   [쇄일] 효과: 검망 발동 시 입히는 피해 +20% 추가 증가 → 검망의 +40% 에 합산 = 총 +60% dealt (사양 verbatim "추가 증가")
   let 검망localDealt = 0;
   if (s.검망남은 > 0) {
     const used = (s.검망max || 6) - s.검망남은 + 1;
-    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → 입히는 피해 +40% (이번 천검 한정) + 천검 ×1.20 (쇄일) + 검세 +1 (${used}/${s.검망max || 6}회)`);
+    TRACE(s, 'OPT', `🟠관일·검망 발동: 천검 → 입히는 피해 +60% (검망 40 + 쇄일 20 추가, 이번 천검 한정) + 검세 +1 (${used}/${s.검망max || 6}회)`);
     s.검망남은--;
-    // [검망]: 이번 천검 record 한정 dealt +40 (사양상 지속시간 없음 → 5초 buff 가 아닌 1회용)
-    검망localDealt = 40;
-    TRACE(s, 'BUF', `🔼버프 [균천·관일 → 검망] 천검 dealt +40% (이번 천검 한정)`);
-    // [쇄일] 천검 dmg +20% (이번 천검 한정)
-    TRACE(s, 'BUF', `🔼버프 [균천·관일 → 쇄일] 천검 dmg ×1.20 (이번 천검 한정)`);
-    amp *= 1.20;
+    // [검망] +40% + [쇄일] +20% 추가 = 60% dealt (이번 천검 record 한정)
+    검망localDealt = 60;
+    TRACE(s, 'BUF', `🔼버프 [균천·관일 → 검망+쇄일] 천검 dealt +60% (검망 40 + 쇄일 20 추가, 이번 천검 한정)`);
     // 검세 +1
     if (s.famSlots.균천) 검세획득_균천(s, s.famSlots.균천, 1);
   }
@@ -2060,7 +2062,12 @@ SK['균천·현봉'] = {
       천검발동(s, slots, 80, '천검(남월)');
     }
     // === 본 신통 (물리, 현봉 +3%/검세) ===
-    record(s, dealDamage(s, 252 * selfMult));
+    // 사양: "지정한 적을 4회 공격, 총 252% 물리" → 4 hit × 63% 멀티히트 (현봉 selfMult 모든 hit 동일 적용)
+    {
+      const hitCount = 4;
+      const perHit = 252 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit * selfMult));
+    }
     // === 본 신통 명중 후 ===
     // [절진] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
     applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10); // crRes 20% 10s (max tier) — 후속 신통에 적용
@@ -2089,7 +2096,12 @@ SK['균천·관일'] = {
   cast(s, slots) {
     // [검망]/[쇄일] 은 관일 cast 와 무관 — "천검 발동 시" 트리거만 보면 됨.
     //   초기화는 simulateBuild 에서 1회, 이후 사이클 (45초) 마다 리셋 (event loop).
-    record(s, dealDamage(s, 250));
+    // 본 신통: 사양 "지정한 적을 5회 공격, 총 250% 물리" → 5 hit × 50% 멀티히트
+    {
+      const hitCount = 5;
+      const perHit = 250 / hitCount;
+      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
+    }
     s.관일End = s.t + 15;
     s.관일종료처리 = false;
     // [관일] 40% 호무 + 검세 +1 (max tier)
@@ -2957,9 +2969,11 @@ SK['오뢰·천강'] = {
     applyBuff(s, '오뢰천강_태허', { cd: 20, shintongOnly: true }, 10); // "신통 치명타 배율"
     // [통찰] 낙뢰 40% (max tier)
     낙뢰발동(s, slots, 40);
-    // [운소] crRes 40% (max tier)
-    applyBuff(s, '오뢰천강_운소', { crRes: 40 }, 15);
-    // [굉명] 방어력 20% max3 (max tier)
+    // [운소] 사양: "신통 치명타 차단 -40%" — 신통 한정 (shintongOnly)
+    applyBuff(s, '오뢰천강_운소', { crRes: 40, shintongOnly: true }, 15);
+    // [굉명] 사양: "태허 효과로 시전한 낙뢰로 적을 명중 시 방어 -20% max3 10s"
+    // 태허 평균 2회 발동 → 2 stack 부여 (낙뢰 명중 trigger 모델링)
+    applyBuff(s, '오뢰천강_굉명', { defDebuff: 20 }, 10, 3);
     applyBuff(s, '오뢰천강_굉명', { defDebuff: 20 }, 10, 3);
     // 6회 반사 decay emit
     recordMultiHit(s, 128, 6);
@@ -2975,7 +2989,9 @@ SK['오뢰·경칩'] = {
     낙뢰발동(s, slots, 40);
     // [침뢰] crRes 30% (max tier)
     applyBuff(s, '오뢰경칩_침뢰', { crRes: 30 }, 15);
-    // [뇌진] atk 16% max3 (max tier)
+    // [뇌진] 사양: "뇌명 효과로 시전한 낙뢰로 적 명중 시 atk +16% max3 10s"
+    // 뇌명 평균 2회 발동 → 2 stack 부여 (낙뢰 명중 trigger 모델링)
+    applyBuff(s, '오뢰경칩_뇌진', { atk: 16 }, 10, 3);
     applyBuff(s, '오뢰경칩_뇌진', { atk: 16 }, 10, 3);
     // 본 신통: 사양 "4명 4회 공격, 총 128% 술법" → 4 hit × 32% 멀티히트
     {
