@@ -681,11 +681,17 @@ function consumeStack(state, resource, n) {
 // 만료된 작열 스택 제거 (피해 정산 없음 — 틱에서 처리)
 function prune작열(s) {
   const before = s.작열Arr.length;
+  // 만료된 작열들 — onExpire 콜백 호출 (폭파/시간만료 공통)
+  const expired = s.작열Arr.filter(st => st.endT <= s.t);
   s.작열Arr = s.작열Arr.filter(st => st.endT > s.t);
   const after = s.작열Arr.length;
   s.stacks.작열 = after;
   if (before !== after) {
     TRACE(s, 'STK', `🔥작열 +0 → 현재 ${after}중첩 (TTL 만료, ${before}→${after})`);
+  }
+  // onExpire 콜백 호출 — 작열이 시간 만료로 사라질 때
+  for (const st of expired) {
+    if (st.onExpire) st.onExpire(s);
   }
 }
 // 작열 DoT 1tick 데미지 — 매 tick 호출 시점의 현재 buff/debuff 상태로 계산.
@@ -718,11 +724,12 @@ function dealDotDamage(s, basePct) {
   return _작열tickDmg(s, basePct);
 }
 // 작열 스택 추가 — basePct/dur 만 저장. tick 시점에 buff/debuff 재계산.
-function add작열(s, basePct, dur = 20, source) {
+// onExpire: 작열이 시간 만료 OR 폭파로 사라질 때 호출되는 콜백 (선택적)
+function add작열(s, basePct, dur = 20, source, onExpire) {
   // [열염]·[이화 유파 slot] 은 sumTypeDmg('작열DoT') 에서 자동 합산됨 — 중복 방지 위해 여기선 안 곱함
   const tickBasePct = basePct / dur; // 1초분 base % (실제 데미지는 tick 시 재계산)
   const src = source || s._currentSource || '?';
-  s.작열Arr.push({ tickBasePct, startT: s.t, endT: s.t + dur, source: src });
+  s.작열Arr.push({ tickBasePct, startT: s.t, endT: s.t + dur, source: src, onExpire });
   s.stacks.작열 = s.작열Arr.length;
   // 약화 중첩 증가 → 마상 트리거
   if (typeof 마상트리거 === 'function') 마상트리거(s);
@@ -751,8 +758,10 @@ function consume작열(s, n) {
   const before = s.작열Arr.length;
   let remainingDot = 0;
   const toConsume = Math.min(n, before);
+  const consumed = [];
   for (let i = 0; i < toConsume; i++) {
     const st = s.작열Arr.shift();
+    consumed.push(st);
     const remainSec = Math.max(0, st.endT - s.t);
     // 폭파 시점의 현재 buff/debuff 로 잔여 tick 데미지 재계산
     remainingDot += _작열tickDmg(s, st.tickBasePct) * remainSec;
@@ -761,6 +770,10 @@ function consume작열(s, n) {
   s.stacks.작열 = after;
   if (before !== after) {
     TRACE(s, 'STK', `🔥작열 +0 → 현재 ${after}중첩 (폭파 소모, ${before}→${after})`);
+  }
+  // onExpire 콜백 호출 — 작열이 폭파로 사라질 때 (시간 만료와 동일 트리거)
+  for (const st of consumed) {
+    if (st.onExpire) st.onExpire(s);
   }
   return remainingDot;
 }
@@ -875,16 +888,24 @@ function dealDamage(state, base, opts = {}) {
   // 신통 본 피해 계수 보너스 (CFG.신통계수보너스) — 본 신통 기본 피해에만 덧셈 적용
   // 분신 (_isClone) 은 base 가 raw 로 들어옴 → 보너스 적용 (본체와 동일 계수)
   // _skipShintongBonus: 멀티히트 decay emit 의 hit 2+ 에서 보너스 중복 방지
+  // metadata: _lastBaseInfo = { rawBase, bonus, fullBase } — record 가 trace src 에 사용
+  state._lastBaseInfo = null;
   if (isShintong && !opts._skipShintongBonus) {
-    if (CFG.신통계수보너스) base = base + CFG.신통계수보너스;
+    const _rawBase = base;
+    let _bonus = 0;
+    if (CFG.신통계수보너스) _bonus += CFG.신통계수보너스;
     // 합체기/반허기/인간계 유파 추가 보너스 — 본 신통의 fam 에 따라 자동 적용
     if (state._activeCast) {
       const _activeFam = SK[state._activeCast] && SK[state._activeCast].fam;
       if (_activeFam) {
-        if (CFG.합체기보너스 && 합체기_유파.has(_activeFam)) base = base + CFG.합체기보너스;
-        else if (CFG.반허기보너스 && 반허기_유파.has(_activeFam)) base = base + CFG.반허기보너스;
-        else if (CFG.인간계보너스 && 인간계_유파.has(_activeFam)) base = base + CFG.인간계보너스;
+        if (CFG.합체기보너스 && 합체기_유파.has(_activeFam)) _bonus += CFG.합체기보너스;
+        else if (CFG.반허기보너스 && 반허기_유파.has(_activeFam)) _bonus += CFG.반허기보너스;
+        else if (CFG.인간계보너스 && 인간계_유파.has(_activeFam)) _bonus += CFG.인간계보너스;
       }
+    }
+    base = _rawBase + _bonus;
+    if (_bonus !== 0) {
+      state._lastBaseInfo = { rawBase: _rawBase, bonus: _bonus, fullBase: base };
     }
   }
 
@@ -1623,7 +1644,12 @@ function record(state, amount, source) {
   else if (shieldHit > 0) poolStr = ` [호신강기 -${(shieldHit/1e8).toFixed(2)}억]`;
   else if (hpHit > 0) poolStr = ` [HP -${(hpHit/1e8).toFixed(2)}억]`;
   const poolRemStr = ` (shield=${((state.shieldRem||0)/1e8).toFixed(2)}억, hp=${((state.hpRem||0)/1e8).toFixed(2)}억)`;
-  TRACE(state, 'DMG', `[${src}] +${displayDmg.toFixed(0)}${critStr}  (누적 ${state.totalDmg.toFixed(0)})${poolStr}${poolRemStr}${activeStr}${breakdownStr}`);
+  // base+bonus 정보 (단일 record + dealDamage 호출 시) — recordMultiHit/recordEvenHit 는 src 에 이미 포함되어 metadata X
+  const _bi = state._lastBaseInfo;
+  const baseInfoStr = (_bi && !src.includes('=')) ? ` (${_bi.rawBase}+${_bi.bonus}=${_bi.fullBase}%)` : '';
+  TRACE(state, 'DMG', `[${src}${baseInfoStr}] +${displayDmg.toFixed(0)}${critStr}  (누적 ${state.totalDmg.toFixed(0)})${poolStr}${poolRemStr}${activeStr}${breakdownStr}`);
+  // metadata 소비 (다음 record 까지 carry-over 방지)
+  state._lastBaseInfo = null;
   // === 악신 분신: 본체 데미지 × N% (모든 buff/stack 동일하게 받은 후 N% 비율) ===
   // 호신강기/HP 분배 (분혼·허와 동일 패턴) — 악신·진 의 "호신강기에 대한 피해 심화 +33%" 는 호신강기 부분에 amp 합산.
   if (state._cloneDmgPending && state._cloneDmgPending > 0) {
@@ -1716,27 +1742,78 @@ function record(state, amount, source) {
   }
 }
 
-// 중복 명중/반사 감쇠: 매 hit 이 이전의 10% 만 유지 (90% 감폭)
-// 예: 100 → 10 → 1 → 0.1 → ... 식
-// N회 히트 총 배수: (1 - 0.1^N) / 0.9
-const DECAY_RATE = 0.1; // 매 hit = 이전의 10% (90% 감소)
-function multiHitMult(n) {
-  if (n <= 1) return 1;
-  return (1 - Math.pow(DECAY_RATE, n)) / (1 - DECAY_RATE);
-}
-// 사전 계산값 (DECAY_RATE = 0.1):
-//   N=2 → 1.10, N=3 → 1.110, N=4 → 1.1110, N=5 → 1.11110, N=6 → 1.11111
-//   N≥2 부터 거의 1.111 로 saturate (등비급수 합 1/0.9 = 1.1111... 수렴)
-const MH = { 2: multiHitMult(2), 3: multiHitMult(3), 4: multiHitMult(4), 5: multiHitMult(5), 6: multiHitMult(6) };
+// 멀티히트 감폭 비율 — 사용자 인게임 검증 기반:
+//   1타 → 2타: 90% 감폭 (2타 = 1타 × 0.1)
+//   2타 → 3타: 12.5% 감폭 (3타 = 2타 × 0.875)
+//   3타 → 4타: 25% 감폭 (4타 = 3타 × 0.75)
+//   4타 → 5타: 50% 감폭 (5타 = 4타 × 0.5)
+//   5+타 이후: 미명시 (일단 0 가정 — 추후 검증)
+// 누적 factor (1타 기준):
+//   1타: 1.0 / 2타: 0.1 / 3타: 0.0875 / 4타: 0.065625 / 5타: 0.0328125 / 6+타: 0
+const DECAY_FACTORS = [1.0, 0.1, 0.0875, 0.065625, 0.0328125, 0, 0, 0];
 
-// 멀티히트 decay emit — "동일 대상 중복 명중" / "N갈래 반사" 신통에서 사용.
-// hit 별로 분리해서 record() 호출. 각 hit 데미지 = (base + 신통계수보너스) × DECAY_RATE^i
-//   1타 100% / 2타 10% / 3타 1% / 4타 0.1% ...  (정확히 10% 감쇠 비율 유지)
-// 화면에는 hit 별 감폭이 그대로 노출됨 (예: "(hit 1/4, ×1.000)" / "(hit 2/4, ×0.100)").
-// 합산값은 (base + 보너스) × MH[hits] 와 동일 — 기존 1회 합산 emit 과 합계 일치.
+// 반사 신통 6회 반사 (= 7 hit) 의 인게임 검증 감폭 비율 — 2026-05-10 사용자 명시
+// 청명·투진 + 옥추·소명 인게임 raw 데이터 분석 결과:
+//   hit 1→2: ×0.10 (90% 감폭) | hit 2→3: ×0.56 (44% 감폭) | hit 3→4: ×0.50
+//   hit 4→5: ×0.50 | hit 5→6: ×0.05 (95% 감폭) | hit 6→7: ×0.50
+// 1타 기준 누적 (사용자 명시):
+const REFLECT_DECAY_7 = [1.0, 0.1, 0.056, 0.028, 0.014, 0.00068, 0.00034];
+
+// 반사 신통 4회 반사 (= 5 hit) 의 인게임 검증 감폭 비율 — 2026-05-10 사용자 검증
+// 옥추·청사 인게임 raw 데이터 (5 hit 모두 치명타) 분석 결과:
+//   hit 1→2: ×0.10 (90% 감폭) | hit 2→3: ×0.875 (12.5% 감폭)
+//   hit 3→4: ×0.571 (43% 감폭) | hit 4→5: ×0.25 (75% 감폭)
+// 1타 기준 누적 — 분자 80→8→7→4→1 / 80 패턴:
+const REFLECT_DECAY_5 = [1.0, 0.1, 0.0875, 0.05, 0.0125];
+
+// 반사 신통 식별 — recordMultiHit 시 SKILL_REFLECT 신통이면 hits 에 따라 REFLECT_DECAY 사용
+//   hits === 7 → REFLECT_DECAY_7 (6회 반사)
+//   hits === 5 → REFLECT_DECAY_5 (4회 반사)
+const SKILL_REFLECT = new Set([
+  '청명·투진', '옥추·소명', '오뢰·천강', '신소·청삭',  // 6회 반사 (7 hit)
+  '옥추·청사', '신소·환뢰',                              // 4회 반사 (5 hit)
+]);
+
+// 중복 명중 가능 신통 (사양: "동일 대상 중복 명중 가능") 의 인게임 검증 감폭 비율
+// 2026-05-10 사용자 검증 — 환성/성료 (4 hit), 용음/명화 (3 hit) cross-check 일치
 //
-// 신통계수보너스 처리: 본 신통 1회 보너스를 hit 1 에만이 아니라 합산 base 에 미리 더한 후 decay 적용.
-// → hit 2+ 에는 _skipShintongBonus 로 dealDamage 안의 보너스 덧셈 차단 (중복 방지).
+// 4 hit 패턴 (CRIT 배율 1.5 normalize 후, 환성+성료 양쪽 일치):
+//   hit 1→2: ×0.110 (89% 감폭) | hit 2→3: ×0.796 (20% 감폭) | hit 3→4: ×0.286 (71% 감폭)
+const DUPLICATE_HIT_DECAY_4 = [1.0, 0.110, 0.088, 0.025];
+
+// 3 hit 패턴 (용음+명화 일치, 분자 [100, 6, 5] / 100):
+//   hit 1→2: ×0.060 (94% 감폭) | hit 2→3: ×0.833 (17% 감폭)
+const DUPLICATE_HIT_DECAY_3 = [1.0, 0.06, 0.05];
+
+// 중복 명중 가능 신통 식별 — recordMultiHit 시 SKILL_DUPLICATE_HIT 신통이면 hits 에 따라 적용
+const SKILL_DUPLICATE_HIT = new Set([
+  // 4 hit (4명 광역, 동일 대상 중복 명중)
+  '중광·환성', '열산·성료', '형혹·업화', '형혹·함양',
+  '천로·단주', '천로·직염', '천로·유형',
+  // 3 hit (3명 광역, 동일 대상 중복 명중)
+  '열산·염폭', '이화·풍권', '오뢰·용음', '사해·명화',
+]);
+
+function multiHitFactor(i) {
+  return i < DECAY_FACTORS.length ? DECAY_FACTORS[i] : 0;
+}
+// 합산 배수 (1~N 타 합):
+//   N=1 → 1.000, N=2 → 1.875, N=3 → 2.531, N=4 → 2.859, N≥5 → 2.859 (변동 X)
+function multiHitMult(n) {
+  let s = 0;
+  for (let i = 0; i < n; i++) s += multiHitFactor(i);
+  return s;
+}
+const MH = { 2: multiHitMult(2), 3: multiHitMult(3), 4: multiHitMult(4), 5: multiHitMult(5), 6: multiHitMult(6), 7: multiHitMult(7) };
+
+// 멀티히트 emit — "동일 대상 중복 명중" / "N갈래 반사" 신통에서 사용.
+// 반사 신통: hits = 1 + 반사횟수 (예: 4회 반사 = 5 hit, 6회 반사 = 7 hit).
+// 사용자 검증 감폭 비율 (DECAY_FACTORS):
+//   1타 ×1.0 / 2타 ×0.875 (12.5% 감폭) / 3타 ×0.65625 (25% 감폭)
+//   4타 ×0.328125 (50% 감폭) / 5+타 ×0 (미검증, 추후)
+//
+// 신통계수보너스 처리: 보너스 1회 합산 후 매 hit factor 적용.
+// → 모든 hit 에 _skipShintongBonus 로 dealDamage 안의 보너스 덧셈 차단 (중복 방지).
 function recordMultiHit(state, basePct, hits, opts) {
   const _opts = opts || {};
   // type 미지정 + non-absolute → '신통' (dealDamage 와 동일 로직). 신통일 때만 보너스 합산.
@@ -1754,15 +1831,61 @@ function recordMultiHit(state, basePct, hits, opts) {
       }
     }
   }
+  // 분기 — 신통 카테고리 + hits 에 따라 다른 DECAY 테이블 사용
+  //   SKILL_REFLECT (반사) + hits === 7 → REFLECT_DECAY_7 (6회 반사)
+  //   SKILL_REFLECT (반사) + hits === 5 → REFLECT_DECAY_5 (4회 반사)
+  //   SKILL_DUPLICATE_HIT (중복 명중) + hits === 4 → DUPLICATE_HIT_DECAY_4
+  //   SKILL_DUPLICATE_HIT (중복 명중) + hits === 3 → DUPLICATE_HIT_DECAY_3
+  //   그 외: 기존 DECAY_FACTORS (fallback)
+  const isReflect = state._activeCast && SKILL_REFLECT.has(state._activeCast);
+  const isDuplicateHit = state._activeCast && SKILL_DUPLICATE_HIT.has(state._activeCast);
+  const decayTable = (isReflect && hits === 7) ? REFLECT_DECAY_7
+                   : (isReflect && hits === 5) ? REFLECT_DECAY_5
+                   : (isDuplicateHit && hits === 4) ? DUPLICATE_HIT_DECAY_4
+                   : (isDuplicateHit && hits === 3) ? DUPLICATE_HIT_DECAY_3
+                   : DECAY_FACTORS;
   const prevSrc = state._currentSource;
+  // 보너스 정보 (사양 base + 신통계수/유파 보너스 = fullBase) — trace src 에 표시
+  const bonusInfo = (fullBase !== basePct) ? `${basePct}+${(fullBase - basePct).toFixed(0)}=${fullBase.toFixed(0)}%` : `${basePct}%`;
   for (let i = 0; i < hits; i++) {
-    const factor = Math.pow(DECAY_RATE, i);
+    const factor = i < decayTable.length ? decayTable[i] : 0;
     const hitBase = fullBase * factor;
     const baseSrc = prevSrc || state._activeCast || '신통';
-    const hitSrc = `${baseSrc} (hit ${i + 1}/${hits}, ×${factor.toFixed(3)})`;
+    const hitSrc = `${baseSrc} (hit ${i + 1}/${hits}, ${bonusInfo} × ${factor.toFixed(5)})`;
     // 보너스를 미리 합산했으므로 dealDamage 내 보너스 덧셈 차단
     const hitOpts = { ..._opts, _skipShintongBonus: true };
     record(state, dealDamage(state, hitBase, hitOpts), hitSrc);
+  }
+  state._currentSource = prevSrc;
+}
+
+// 균등 멀티히트 emit — 사양 "N회 공격, 총 X% 피해" 패턴.
+// fullBase = totalBase + 신통 보너스 (신통계수/합체기/반허기/인간계 합산), hits 균등 분배.
+// 합계 = totalBase + 보너스 (1 record 와 동일 결과). 모든 hit 동일 데미지 + _skipShintongBonus.
+function recordEvenHit(state, totalBase, hits, opts) {
+  const _opts = opts || {};
+  const _isShintong = !_opts.type && !_opts.absolute && !_opts.noSkillMult;
+  let fullBase = totalBase;
+  if (_isShintong) {
+    if (CFG.신통계수보너스) fullBase += CFG.신통계수보너스;
+    if (state._activeCast) {
+      const _activeFam = SK[state._activeCast] && SK[state._activeCast].fam;
+      if (_activeFam) {
+        if (CFG.합체기보너스 && 합체기_유파.has(_activeFam)) fullBase += CFG.합체기보너스;
+        else if (CFG.반허기보너스 && 반허기_유파.has(_activeFam)) fullBase += CFG.반허기보너스;
+        else if (CFG.인간계보너스 && 인간계_유파.has(_activeFam)) fullBase += CFG.인간계보너스;
+      }
+    }
+  }
+  const perHit = fullBase / hits;
+  const prevSrc = state._currentSource;
+  // 보너스 정보 (사양 base + 신통계수/유파 보너스 = fullBase) — trace src 에 표시
+  const bonusInfo = (fullBase !== totalBase) ? `${totalBase}+${(fullBase - totalBase).toFixed(0)}=${fullBase.toFixed(0)}%` : `${totalBase}%`;
+  for (let i = 0; i < hits; i++) {
+    const baseSrc = prevSrc || state._activeCast || '신통';
+    const hitSrc = `${baseSrc} (hit ${i + 1}/${hits}, ${bonusInfo} ÷ ${hits} = ${perHit.toFixed(1)}%)`;
+    const hitOpts = { ..._opts, _skipShintongBonus: true };
+    record(state, dealDamage(state, perHit, hitOpts), hitSrc);
   }
   state._currentSource = prevSrc;
 }
@@ -1800,22 +1923,22 @@ const SKILL_HITS = {
   '천로·직염': 4,      // 4명 (중복)
   '천로·유형': 4,      // 4명 (중복)
   // 뇌전 청명
-  '청명·투진': 6,      // 6회 반사
+  '청명·투진': 7,      // "6회 반사" → 1타+6 = 7 hit
   '청명·천노': 5,      // 3명 5회 공격
   '청명·붕운': 5,      // 3명 5회 공격
-  '청명·풍뢰': 5,      // 3명 5회 공격 ← 누락되어 있던 항목
+  '청명·풍뢰': 5,      // 3명 5회 공격
   // 뇌전 옥추
   '옥추·황룡': 4,      // 4명 4회 공격
-  '옥추·소명': 6,      // 6회 반사
-  '옥추·청사': 4,      // 4회 반사
+  '옥추·소명': 7,      // "6회 반사" → 1타+6 = 7 hit
+  '옥추·청사': 5,      // "4회 반사" → 1타+4 = 5 hit
   // 뇌전 오뢰
-  '오뢰·천강': 6,      // 6회 반사
+  '오뢰·천강': 7,      // "6회 반사" → 1타+6 = 7 hit
   '오뢰·경칩': 4,      // 4명 4회
   '오뢰·용음': 3,      // 3명 (중복)
   // 뇌전 신소
   '신소·천고': 3,      // 3명 3회
-  '신소·환뢰': 4,      // 4회 반사
-  '신소·청삭': 6,      // 6회 반사
+  '신소·환뢰': 5,      // "4회 반사" → 1타+4 = 5 hit
+  '신소·청삭': 7,      // "6회 반사" → 1타+6 = 7 hit
   // 백족 주술
   '주술·태사': 3,      // 3명
   '주술·경선': 2,      // 3명 2회
@@ -1887,17 +2010,14 @@ SK['복룡·결운'] = {
     // [파군] 방어력 30% 감소 10초 (max tier)
     applyBuff(s, '복룡결운_파군', { defDebuff: 30 }, 10);
     // [현검] 본 신통 호신강기 무시 + 기본 피해 계수 +40% + [천균] +40% = 총 +80% → ×1.8
-    let base = 172 * 1.8;
+    let baseTotal = 172 * 1.8;
     // [검세] HP 60% 이하 시 최종피해 45% (max tier)
     if (hpBelow(s, 0.60)) {
       TRACE(s, 'BUF', `🔼버프 [복룡·결운 → 검세] 발동: HP ${hpPct}% ≤ 60% → 이번 cast 최종피해 ×1.45`);
-      base *= 1.45;
+      baseTotal *= 1.45;
     }
-    // [현검] 호신강기 무시 → type:'호무' (그러나 신통 피해/심화피해/최종피해 버킷은 정상 적용받아야 하므로
-    // noSkillMult 플래그는 쓰지 않음. 대신 bypassShield를 위해 type만 지정)
-    // 단, dealDamage의 isShintong 플래그는 type==='신통'일 때만 true라, type:'호무'로 바꾸면
-    // 신통피해 버킷이 날아감 → 커스텀 플래그 bypassShield 도입.
-    record(s, dealDamage(s, base, { bypassShield: true }));
+    // 본 신통: 사양 "4회 공격, 총 172% 술법" → 4 hit 균등 분배 (현검+천균+검세 totalBase 에 적용 / 보너스 분배 / bypassShield)
+    recordEvenHit(s, baseTotal, 4, { bypassShield: true });
   }
 };
 SK['복룡·붕산'] = {
@@ -2062,12 +2182,8 @@ SK['균천·현봉'] = {
       천검발동(s, slots, 80, '천검(남월)');
     }
     // === 본 신통 (물리, 현봉 +3%/검세) ===
-    // 사양: "지정한 적을 4회 공격, 총 252% 물리" → 4 hit × 63% 멀티히트 (현봉 selfMult 모든 hit 동일 적용)
-    {
-      const hitCount = 4;
-      const perHit = 252 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit * selfMult));
-    }
+    // 사양: "지정한 적을 4회 공격, 총 252% 물리" → 4 hit 균등 분배 ([현봉] selfMult 는 totalBase 에 적용)
+    recordEvenHit(s, 252 * selfMult, 4);
     // === 본 신통 명중 후 ===
     // [절진] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
     applyBuff(s, '균천현봉_절진', { crRes: 20 }, 10); // crRes 20% 10s (max tier) — 후속 신통에 적용
@@ -2096,12 +2212,8 @@ SK['균천·관일'] = {
   cast(s, slots) {
     // [검망]/[쇄일] 은 관일 cast 와 무관 — "천검 발동 시" 트리거만 보면 됨.
     //   초기화는 simulateBuild 에서 1회, 이후 사이클 (45초) 마다 리셋 (event loop).
-    // 본 신통: 사양 "지정한 적을 5회 공격, 총 250% 물리" → 5 hit × 50% 멀티히트
-    {
-      const hitCount = 5;
-      const perHit = 250 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
-    }
+    // 본 신통: 사양 "지정한 적을 5회 공격, 총 250% 물리" → 5 hit 균등 분배
+    recordEvenHit(s, 250, 5);
     s.관일End = s.t + 15;
     s.관일종료처리 = false;
     // [관일] 40% 호무 + 검세 +1 (max tier)
@@ -2138,14 +2250,16 @@ SK['참허·횡추'] = {
   fam: '참허', cat: '영검', main: 200, attr: '술법',
   cast(s, slots) {
     검심획득(s, 1);
-    // [횡추] 본 신통 15~30% 피해 증가 (저체력 선형)
-    const base = 200 * (1.15 + 0.15 * hpLowFactor(s));
+    // [횡추] 본 선법 피해 +15~30% (저체력 선형, max tier 30%)
+    const selfMult = 1.15 + 0.15 * hpLowFactor(s);
     // [현의] cr 30% 15초
     applyBuff(s, '참허횡추_현의', { cr: 30 }, 15);
-    record(s, dealDamage(s, base));
-    // [연봉] 50% 호무, 검심통명 시 +50% 추가 (= 100%)
+    // 본 신통: 사양 "5회 공격, 총 200% 술법" → 5 hit 균등 분배 ([횡추] selfMult totalBase 에 적용)
+    recordEvenHit(s, 200 * selfMult, 5);
+    // [연봉] 50% 호무 1회 + 검심통명 시 추가 1회 (사양 "추가로 1회 입힌다")
     const cm = s.stacks.검심통명 ? 1 : 0;
-    record(s, dealDamage(s, 50 * (1 + cm), { noSkillMult: true, type: '호무', attr: '술법' }), '연봉(호무)');
+    record(s, dealDamage(s, 50, { noSkillMult: true, type: '호무', attr: '술법' }), '연봉(호무)');
+    if (cm) record(s, dealDamage(s, 50, { noSkillMult: true, type: '호무', attr: '술법' }), '연봉·통명(호무)');
     // [단천] HP 60% 이하 시 160% 호무
     if (hpBelow(s, 0.60)) record(s, dealDamage(s, 160, { noSkillMult: true, type: '호무', attr: '술법' }), '단천(호무)');
   }
@@ -2157,8 +2271,8 @@ SK['참허·단진'] = {
     // [참멸] 검심 +2 + def-30% 10s — "참멸" 사양상 즉발 부여 (본 신통에도 적용)
     검심획득(s, 2);
     applyBuff(s, '참허단진_참멸', { defDebuff: 30 }, 10);
-    // 본 신통
-    record(s, dealDamage(s, 200));
+    // 본 신통: 사양 "4회 공격, 총 200% 물리" → 4 hit 균등 분배
+    recordEvenHit(s, 200, 4);
     // === 본 신통 명중 후 ===
     // [참파] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
     applyBuff(s, '참허단진_참파', { atk: 20 }, 5); // atk 20% 5s — 후속 신통에 적용
@@ -2216,8 +2330,8 @@ SK['중광·귀사'] = {
   cast(s, slots) {
     // [통찰] cr 30% 15s — 시전 시 buff, record 전 부여
     applyBuff(s, '중광귀사_통찰', { cr: 30 }, 15);
-    // 본 신통 (물리 일반)
-    record(s, dealDamage(s, 150));
+    // 본 신통: 사양 "5회 공격, 총 150% 물리" → 5 hit 균등 분배
+    recordEvenHit(s, 150, 5);
     // [여영] 36% 호무 × 2회 + [유광 max: +3회] = 총 5회
     for (let i = 0; i < 5; i++) {
       record(s, dealDamage(s, 36, { noSkillMult: true, type: '호무', attr: '물리' }), '여영(호무)');
@@ -2233,8 +2347,8 @@ SK['중광·투영'] = {
     s.동허End = s.t + 30;
     s.동허히트 = 0;
     s.동허중첩 = 0;
-    // 본 신통
-    record(s, dealDamage(s, 152));
+    // 본 신통: 사양 "4회 공격, 총 152% 물리" → 4 hit 균등 분배
+    recordEvenHit(s, 152, 4);
     // [봉예] 32% 호무 1회
     record(s, dealDamage(s, 32, { noSkillMult: true, type: '호무', attr: '물리' }), '봉예(호무)');
     // [검홍] HP 60% 이하 시 동허 발동당 18% 호무 × max 20회 (기댓값 합산)
@@ -2254,8 +2368,8 @@ SK['중광·육요'] = {
     const prev = s._currentSource; s._currentSource = '검광(트리거)';
     record(s, dealDamage(s, 23, { noSkillMult: true, type: '호무', attr: '물리' }));
     s._currentSource = prev;
-    // 본 신통
-    record(s, dealDamage(s, 150));
+    // 본 신통: 사양 "6회 공격, 총 150% 물리" → 6 hit 균등 분배
+    recordEvenHit(s, 150, 6);
   }
 };
 SK['중광·환성'] = {
@@ -2325,12 +2439,13 @@ function 염양발동(s, slots) {
   s.염양방감EndT = s.t + 10;
   TRACE(s, 'BUF', `🔻염양 방감 디버프: 방어력 -${s.염양방감 * 10}% (${prev방감}→${s.염양방감}중첩, 최대3) 10초`);
 }
-function 작열부여(s, n, perTick = 25, source) {
+function 작열부여(s, n, perTick = 25, source, onExpire) {
   // 이화 유파 slot 보너스, 열염 등은 add작열 → dealDotDamage 의 sumTypeDmg 에서 자동 합산.
   // 여기선 basePct 만 전달 (중복 방지).
+  // onExpire: 부여한 각 작열이 사라질 때 (시간 만료 OR 폭파) 호출되는 콜백
   const src = source || s._currentSource || '?';
   for (let i = 0; i < n; i++) {
-    add작열(s, perTick, 20, src); // basePct 저장, 1틱 피해는 add작열 내부에서 스냅샷
+    add작열(s, perTick, 20, src, onExpire); // basePct 저장, 1틱 피해는 add작열 내부에서 스냅샷
     // 매 stack 마다 STK trace 발생 (시간 순서 보존: stack → 폭파 → 염양 발동 순)
     const cnt = famActive(s, '열산') ? s.작열부여_누적 + 1 : 0;
     const cntStr = famActive(s, '열산') ? ` (부여카운터 ${cnt}/6)` : '';
@@ -2392,8 +2507,8 @@ SK['열산·양운'] = {
     s.적염활성 = true;
     // [양운] 염양 발동 시 atk 15% 5초 max5 → 염양발동 훅에서 처리
     // [진염] 염양 발동 시 60% 물리 (최대 3회 — 전투 누적, simulateBuild 시작 시 초기화)
-    // 본 신통 DMG
-    record(s, dealDamage(s, 212));
+    // 본 신통 DMG — "4회 공격, 총 212% 물리" 멀티히트 균등 분배
+    recordEvenHit(s, 212, 4);
     // === DMG 후 작열 부여 ===
     // [분령] 작열 3중첩 (max tier: 44%)
     작열부여(s, 3, 44, '양운·분령');
@@ -2589,7 +2704,8 @@ SK['이화·삼매'] = {
     const 소진 = s.stacks.작열 >= 4 ? 160 : 0;
     // [비화] atk 20% 5초 (max tier)
     applyBuff(s, '이화삼매_비화', { atk: 20 }, 5);
-    record(s, dealDamage(s, 135));
+    // 본 신통 DMG — "3명 5회 공격, 총 135% 술법" 멀티히트 균등 분배
+    recordEvenHit(s, 135, 5);
     if (소진) record(s, dealDamage(s, 소진, { noSkillMult: true, attr: '술법' }), '소진');
   }
 };
@@ -2599,11 +2715,12 @@ SK['천로·단주'] = {
   fam: '천로', cat: '화염', main: 128, attr: '물리',
   cast(s, slots) {
     // [광염]+[충염] 8회 cap 활성화 (main loop pre-cast 훅에서 작열 부여)
-    // 단주 cast 자체 광염 트리거는 main loop 에서 sk.name 으로 처리됨 — 여기선 카운터 reset 만 하지 않음
+    // 단주 cast 자체 광염 트리거는 main loop 에서 sk.name 으로 처리됨 — cycle 객체도 그곳에서 reset
     if (s.광염남은 == null) { s.광염남은 = 8; s.광염max = 8; }
-    // [파세] crRes-30% 15s, [신화] atk+20% 10s (즉발 buff)
+    // [파세] crRes-30% 15s
     applyBuff(s, '천로단주_파세', { crRes: 30 }, 15);
-    applyBuff(s, '천로단주_신화', { atk: 20 }, 10);
+    // [신화] 사양: 광염으로 부여한 작열 효과가 "종료되면" atk +20% 10초 (지연 발동, 콜백 방식)
+    // 사이클 객체는 main loop pre-cast hook 에서 광염 부여 시 reset/관리됨
     // 본 신통 DMG — 4명 중복 명중 decay emit
     recordMultiHit(s, 128, 4);
   }
@@ -2640,12 +2757,24 @@ SK['천로·유형'] = {
   cast(s, slots) {
     // [파군] def-30% 10s (즉발 debuff)
     applyBuff(s, '천로유형_파군', { defDebuff: 30 }, 10);
-    // 본 신통 DMG (+ [잔염] 옵션 추가 피해) — 4명 중복 decay emit
+    // 본 신통 DMG — 4명 중복 decay emit
     recordMultiHit(s, 128, 4);
-    record(s, dealDamage(s, 40, { noSkillMult: true, attr: '물리' }), '잔염');
+    // [잔염] 사양: 본 신통으로 부여한 작열 효과가 "종료되면" 3명 40% 물리 (지연 발동)
+    // 새 잔염 사이클 객체 — 작열 6중첩 부여, 모두 사라진 시점에 1회 발동 (시간 만료 OR 폭파)
+    const cycle = { 남은: 0, fired: false };
     // === DMG 후 작열 부여 ===
-    // [점화] 3중첩 + [연소] +3중첩 = 6중첩 (36%)
-    작열부여(s, 6, 36, '유형·작열');
+    // [점화] 3중첩 + [연소] +3중첩 = 6중첩 (36%) — onExpire 콜백으로 사이클 카운터 추적
+    작열부여(s, 6, 36, '유형·작열', (state) => {
+      cycle.남은--;
+      if (cycle.남은 <= 0 && !cycle.fired) {
+        cycle.fired = true;
+        TRACE(state, 'OPT', `🟠유형·잔염 발동: 작열 종료 → 3명 40% 물리`);
+        const prev잔염 = state._currentSource; state._currentSource = '잔염(트리거)';
+        record(state, dealDamage(state, 40, { noSkillMult: true, attr: '물리' }), '유형·잔염');
+        state._currentSource = prev잔염;
+      }
+    });
+    cycle.남은 = 6; // 부여한 작열 수
   }
 };
 SK['천로·운화'] = {
@@ -2754,8 +2883,8 @@ SK['청명·투진'] = {
     // [순요] 10초 창 오픈 — 이 창 안의 매 신통 cast에서 crit 시 5초 atk+25 부여
     // (event loop에서 per-cast 트리거 처리)
     s.순요End = s.t + 10;
-    // 6회 반사 — decay emit (hit 별 분리, 1타→2타 0.1배...)
-    recordMultiHit(s, 213, 6);
+    // 사양 "6회 반사" → 1타 + 6 반사 = 7 hit (decay emit)
+    recordMultiHit(s, 213, 7);
   }
 };
 SK['청명·천노'] = {
@@ -2770,10 +2899,8 @@ SK['청명·천노'] = {
     // [복광] 60% 천뢰 + crRes 15% 10초 (max tier)
     천뢰발동(s, slots, 60, '천노·복광');
     applyBuff(s, '청명천노_복광', { crRes: 15 }, 10);
-    // 본 신통: 사양 "5회 공격, 총 225% 물리" → 5 hit × 45% 멀티히트
-    const hitCount = 5;
-    const perHit = 225 / hitCount;
-    for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
+    // 본 신통: 사양 "5회 공격, 총 225% 물리" → 5 hit 균등 분배 (보너스 합산 후 / 5)
+    recordEvenHit(s, 225, 5);
   }
 };
 SK['청명·붕운'] = {
@@ -2789,12 +2916,8 @@ SK['청명·붕운'] = {
     // [굉천] 1갈래 천뢰 90% + cr 20% 10초 (max tier)
     천뢰발동(s, slots, 90, '붕운·굉천');
     applyBuff(s, '청명붕운_굉천', { cr: 20 }, 10);
-    // 본 신통: 사양 "5회 공격, 총 225% 술법" → 5 hit × 45% 멀티히트
-    {
-      const hitCount = 5;
-      const perHit = 225 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
-    }
+    // 본 신통: 사양 "5회 공격, 총 225% 술법" → 5 hit 균등 분배 (보너스 합산 후 / 5)
+    recordEvenHit(s, 225, 5);
     // [파정] 다음 신통 최종 cr/cd +25% (max tier) — record 후 설정해야 다음 cast에 적용
     TRACE(s, 'OPT', `🟠붕운·파정 발동: 다음 신통 최종 치명타율 +25% · 최종 치명타 배율 +25%`);
     addNextCast(s, 'finalCR', 25);
@@ -2810,12 +2933,8 @@ SK['청명·풍뢰'] = {
     s.풍뢰남은 = 14; // 발동 가능 횟수: 10 + 천적 4 (max tier)
     s._풍뢰분수 = 0; // 재시전 시 cr 분수 carry 리셋 (사이클당 buff 초기화)
     applyBuff(s, '청명풍뢰_환우', { cr: 20 }, 10); // [환우] cr 20% (max tier) — 신통 시전 시 즉발
-    // 본 신통: 사양 "5회 공격, 총 225% 물리" → 5 hit × 45% 멀티히트
-    {
-      const hitCount = 5;
-      const perHit = 225 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
-    }
+    // 본 신통: 사양 "5회 공격, 총 225% 물리" → 5 hit 균등 분배 (보너스 합산 후 / 5)
+    recordEvenHit(s, 225, 5);
     // === 본 신통 명중 후 ===
     // [뇌벌] "본 신통으로 적을 명중 시" — 본 신통 record 후 트리거
     applyBuff(s, '청명풍뢰_뇌벌', { atk: 30 }, 10); // atk 30% (max tier) — 후속 신통/천뢰에 적용
@@ -2874,12 +2993,8 @@ SK['옥추·황룡'] = {
       record(s, dealDamage(s, 60, { noSkillMult: true, attr: '술법' }), '운한');
     }
     // === 본 신통 (신통 피해 적용) ===
-    // 사양: "4명의 적을 4회 공격, 총 172%" → 4 hit × 43% 멀티히트
-    {
-      const hitCount = 4;
-      const perHit = 172 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
-    }
+    // 사양: "4명의 적을 4회 공격, 총 172%" → 4 hit 균등 분배 (보너스 합산 후 / 4)
+    recordEvenHit(s, 172, 4);
     // [황룡] 60% 술법 추가 — 조건 없는 일반 추가 데미지, 본 신통 데미지와 함께 (record 후)
     record(s, dealDamage(s, 60, { noSkillMult: true, attr: '술법' }), '황룡');
   }
@@ -2892,8 +3007,8 @@ SK['옥추·소명'] = {
     if (s.stacks.옥추 >= 2) applyBuff(s, '옥추소명_cd', { cd: 20, shintongOnly: true }, 20); // "신통 치명타 배율"
     // [천칙] 옥추5+ 시 5초 inc +20% (max tier) — applyBuff 가 BUF trace 자동 emit
     if (s.stacks.옥추 >= 5) applyBuff(s, '옥추소명_천칙', { dmgMult: 20, cat: 'inc' }, 5);
-    // 6회 반사 — decay emit
-    recordMultiHit(s, 170, 6);
+    // 사양 "6회 반사" → 1타 + 6 반사 = 7 hit (decay emit)
+    recordMultiHit(s, 170, 7);
     // [성류] 다음 신통 최종 cr +25. 옥추4+ 시 다음 신통 피해 +15% (max tier, inc — 신통피해 증가) — record 후 설정
     const 성류옥추4 = s.stacks.옥추 >= 4;
     TRACE(s, 'OPT', `🟠소명·성류 발동: 다음 신통 최종 치명타율 +25%${성류옥추4 ? ` · 옥추 ${s.stacks.옥추}중첩 ≥ 4 → 다음 신통 피해 +15%` : ''}`);
@@ -2944,9 +3059,9 @@ SK['옥추·청사'] = {
     // [명뢰] 본 신통 최종 cr +30% (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [옥추·청사 → 명뢰] 발동: 본 신통 최종 cr +30% (이번 cast 한정)`);
     applyBuff(s, '옥추청사_명뢰', {}, 1); // 타임라인 시각화용 1초 marker
-    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 사양 "4명 사이 4회 반사" 4 hit decay emit
+    // 본 신통 (신통 피해 적용 + 옥추유파 slot 보너스) — 사양 "4명 사이 4회 반사" → 1타 + 4 반사 = 5 hit
     // 옥추유파Mult 는 보통 1 — 곱해도 영향 없음. localInc/localFinalCR 은 모든 hit 에 동일 적용.
-    recordMultiHit(s, 170 * 옥추유파Mult(s, slots), 4, {
+    recordMultiHit(s, 170 * 옥추유파Mult(s, slots), 5, {
       localInc: uc,
       localFinalCR: 30,
     });
@@ -2975,8 +3090,8 @@ SK['오뢰·천강'] = {
     // 태허 평균 2회 발동 → 2 stack 부여 (낙뢰 명중 trigger 모델링)
     applyBuff(s, '오뢰천강_굉명', { defDebuff: 20 }, 10, 3);
     applyBuff(s, '오뢰천강_굉명', { defDebuff: 20 }, 10, 3);
-    // 6회 반사 decay emit
-    recordMultiHit(s, 128, 6);
+    // 사양 "6회 반사" → 1타 + 6 반사 = 7 hit (decay emit)
+    recordMultiHit(s, 128, 7);
   }
 };
 SK['오뢰·경칩'] = {
@@ -2993,12 +3108,8 @@ SK['오뢰·경칩'] = {
     // 뇌명 평균 2회 발동 → 2 stack 부여 (낙뢰 명중 trigger 모델링)
     applyBuff(s, '오뢰경칩_뇌진', { atk: 16 }, 10, 3);
     applyBuff(s, '오뢰경칩_뇌진', { atk: 16 }, 10, 3);
-    // 본 신통: 사양 "4명 4회 공격, 총 128% 술법" → 4 hit × 32% 멀티히트
-    {
-      const hitCount = 4;
-      const perHit = 128 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit));
-    }
+    // 본 신통: 사양 "4명 4회 공격, 총 128% 술법" → 4 hit 균등 분배 (보너스 합산 후 / 4)
+    recordEvenHit(s, 128, 4);
   }
 };
 SK['오뢰·호후'] = {
@@ -3110,12 +3221,8 @@ SK['신소·천고'] = {
     applyBuff(s, '신소천고_경뢰', { crRes: 30 }, 15);
     // [만균] crit 시 3명에게 165% 물리 (max tier) — "치명타를 입힐 경우" = 한 cast 의 crit 1회 이상 시 발동
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
-    // 본 신통: 사양 "3명 3회 공격, 총 135% 물리" → 3 hit × 45% 멀티히트
-    {
-      const hitCount = 3;
-      const perHit = 135 / hitCount;
-      for (let i = 0; i < hitCount; i++) record(s, dealDamage(s, perHit, { localCD: 35 }));
-    }
+    // 본 신통: 사양 "3명 3회 공격, 총 135% 물리" → 3 hit 균등 분배 (보너스 합산 후 / 3)
+    recordEvenHit(s, 135, 3, { localCD: 35 });
     // 발동 확률: 1 - (1 - crEff)^hits (3 hits)
     if (CFG.randomCrit) {
       let anyCrit = false;
@@ -3134,8 +3241,8 @@ SK['신소·환뢰'] = {
     applyBuff(s, '신소환뢰_구소', { atk: 15 }, 5); // [구소] atk 15% (max tier)
     // [뇌전] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·환뢰 → 뇌전] 본 신통 cd +35% (이번 cast 한정)`);
-    // 4회 반사 decay emit
-    recordMultiHit(s, 128, 4, { localCD: 35 });
+    // 사양 "4회 반사" → 1타 + 4 반사 = 5 hit (decay emit)
+    recordMultiHit(s, 128, 5, { localCD: 35 });
     // === 본 신통 명중 후 ===
     // [호탕] "본 신통으로 적에게 치명타를 입힐 경우" — 본 신통 record 후 트리거
     const crEff = Math.min(100, CFG.baseCR * (1 + sumBuffCR(s) / 100) * (1 + sumBuffCritRes(s) / 100)) / 100;
@@ -3188,8 +3295,8 @@ SK['신소·청삭'] = {
     const 천위 = 천위활성 ? 140 : 0;
     // [위능] 본 신통 cd +35 (max tier, 이번 cast 한정)
     TRACE(s, 'BUF', `🔼버프 [신소·청삭 → 위능] 본 신통 cd +35% (이번 cast 한정)`);
-    // 본 신통 (6회 반사) decay emit + 위능 cd+35 localCD
-    recordMultiHit(s, 128, 6, { localCD: 35 });
+    // 본 신통 사양 "6회 반사" → 1타 + 6 반사 = 7 hit (decay emit) + 위능 cd+35 localCD
+    recordMultiHit(s, 128, 7, { localCD: 35 });
     // 추가 피해들 (모두 일반 물리, 유파 bonus는 신통피해 버킷)
     if (칙뢰) record(s, dealDamage(s, 칙뢰, { noSkillMult: true, attr: '물리' }), '칙뢰');
     if (풍뢰) record(s, dealDamage(s, 풍뢰, { noSkillMult: true, attr: '물리' }), '풍뢰');
@@ -5364,12 +5471,25 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
         // [천로·단주 광염+충염] 8회 신통 명중 시 작열 1중첩 (단주 cast 포함, [단진]/[파월] 패턴)
         if (sk.name === '천로·단주' && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
           state.광염남은 = 8; state.광염max = 8;
+          // [신화] 새 광염 사이클 시작 — 콜백 방식 (작열 부여 시 카운터 증가, 사라질 때 감소, 0 도달 시 1회 발동)
+          state.단주_신화_currentCycle = { 남은: 0, fired: false };
         }
         if ((state.광염남은 || 0) > 0 && state.selectedSkills && state.selectedSkills.has('천로·단주')) {
           const 광염used = (state.광염max || 8) - state.광염남은 + 1;
           TRACE(state, 'OPT', `🟠단주·광염 발동: 신통 명중 → 작열 1중첩 36% (${광염used}/${state.광염max || 8}회)`);
           state.광염남은--;
-          작열부여(state, 1, 36, '단주·광염');
+          // [신화] 콜백 — 광염 작열이 사라질 때 (시간 만료 OR 폭파) 사이클 카운터 감소
+          // 카운터 0 도달 = 모든 광염 작열 사라진 시점 → atk +20% 10초 1회 발동
+          const cycle = state.단주_신화_currentCycle;
+          if (cycle) cycle.남은++;
+          작열부여(state, 1, 36, '단주·광염', cycle ? (s) => {
+            cycle.남은--;
+            if (cycle.남은 <= 0 && !cycle.fired) {
+              cycle.fired = true;
+              TRACE(s, 'OPT', `🟠단주·신화 발동: 광염 작열 종료 → atk +20% 10초`);
+              applyBuff(s, '천로단주_신화', { atk: 20 }, 10);
+            }
+          } : null);
         }
         // [균천·파월 → 제월] 즉시 (조건 없음) — 파월 cast 시 가장 먼저 발동 (시전 시 트리거보다 빠름).
         // atk+26 buff 가 본 신통 데미지에 반영, 천검도 가장 먼저 발동되어 [검망] cascade 가 본 신통 전 처리.

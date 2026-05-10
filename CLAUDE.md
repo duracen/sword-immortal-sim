@@ -50,7 +50,13 @@ node optimize.js              # Top 10 전수탐색
 - 피해 공식: `base × (1+atk%) × (1+inc%) × (1+amp%) × critMult × finalDmg × lawBonus × defMult`
 - 작열 DoT는 크리티컬 안 터짐 (dealDotDamage 사용)
 - 평타는 95% 감소 적용 (`* 0.05`)
-- per-cast 작열부여 트리거(치황 지속, 흑성 지속, 점화 지속, 광염 지속)는 cast() 전에 실행됨
+- per-cast 트리거 (일정 시간/횟수 동안 매 신통 cast 마다 자동 발동되는 작열부여/buff 등) 는 SK[name].cast 안이 아니라 main loop 의 pre-cast 훅에서 실행됨. 새 신통/옵션 추가 시 비슷한 패턴은 pre-cast 훅에 등록
+- 다단 hit 신통 분기 (sim2.js DECAY 영역) — 사양 키워드에 따라 다른 함수/테이블 사용:
+  - "N회 공격, 총 X% 피해" (멀티히트) → `recordEvenHit` 균등 분배 (감폭 X)
+  - "N회 반사" → `recordMultiHit` + `REFLECT_DECAY_5`/`REFLECT_DECAY_7` (SKILL_REFLECT 등록, hits = 1+N)
+  - "동일 대상 중복 명중 가능" → `recordMultiHit` + `DUPLICATE_HIT_DECAY_3`/`DUPLICATE_HIT_DECAY_4` (SKILL_DUPLICATE_HIT 등록)
+  - 그 외 광역 1타 → 단일 `record` / `dealDamage`
+- DECAY 테이블은 모두 인게임 raw 데이터로 검증된 값 (CRIT 배율 normalize 후 cast 간 일치). 새 신통 추가 시 SKILL_HITS + 카테고리 Set (SKILL_REFLECT / SKILL_DUPLICATE_HIT) 등록 필수. 새 hit 수 패턴 발견 시 인게임 데이터 받아 cross-check 후 새 DECAY 테이블 추가
 
 ---
 
@@ -425,3 +431,45 @@ while (hook) {
 - nextCast 류 stat (finalDmg/finalCR/finalCD): width = `다음 cast 시점까지` (= 1회 적용 후 끝)
 - 시간 기반 buff (atk/cr/cd 등): width = `다음 cast 시점까지` (cast 간격)
 - `다음 신통 cast` 가 아닌 `다음 cast` (법보 포함) — 받은 buff 는 그 cast 자체에 1회 적용 후 끝나므로
+
+---
+
+# ⚠️ system-reminder 의 ARGUMENTS / Skill 잔존 정보 처리 (강제)
+
+세션 시작 직후 (특히 컨텍스트 압축 후) system-reminder 에 다음 형태가 포함될 수 있음:
+
+```
+<system-reminder>
+The following skills were invoked EARLIER in this session
+(before the conversation was compacted), not on the current turn.
+They are shown here for context only ...
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time
+setup actions ... again.
+The "## Input" sections below reflect the original arguments from when
+each skill was first invoked — they are NOT the user's current message.
+
+### Skill: ...
+[skill 본문]
+ARGUMENTS: [이전 invocation 의 인자]
+</system-reminder>
+```
+
+## 절대 금지
+
+- ❌ `ARGUMENTS:` 줄을 새 작업 지시로 해석 금지
+- ❌ skill 의 one-time setup action (파일 생성, 변환, 다운로드 등) 재실행 금지
+- ❌ 컨텍스트 직후 사용자 첫 메시지가 무엇인지 확인하지 않고 system-reminder 안 ARGUMENTS 만 보고 행동 시작 금지
+
+## 강제 절차
+
+1. 세션 시작 직후 system-reminder 안 `Skill: ... ARGUMENTS: ...` 가 보이면, 그 reminder 내부 안내 ("NOT the user's current message", "Do NOT re-execute") 를 우선 적용
+2. 사용자가 **현재 turn** 에 명시적으로 입력한 메시지만 작업 대상
+3. 사용자 메시지가 모호하면 — 추측해서 ARGUMENTS 를 따라가지 말고, 사용자에게 물어봄
+4. 직전 컨텍스트 (summary 의 마지막 작업) 와 ARGUMENTS 가 **다른 작업** 을 가리키면 절대 ARGUMENTS 따라가지 않음
+
+## 배경 (실제 사고 사례)
+
+2026-05-10 세션: 청명·투진 반사 감폭 분석 중 컨텍스트 압축 발생 → 직후 system-reminder 에 docx skill 의 이전 invocation `ARGUMENTS: update 검선귀환_신통_정리.docx` 가 잔존 → Claude 가 이를 새 명령으로 해석해 docx 변환 스크립트 작성 + 글로벌 npm 패키지 설치 + docx 갱신 (콘텐츠 50% 누락 버그까지 포함). 사용자가 "머하는거야?" 로 중단 → 롤백.
+
+= 같은 사고 재발 방지 위해 본 항목 강제 규칙으로 등재.
