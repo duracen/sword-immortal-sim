@@ -502,8 +502,10 @@ async function optimizeBuild(build, skillsOverride, markerIdx, fixedTreasures, i
   for (const tr of treasureCombos) {
     if (isCancelled()) return { bestOrd: globalTop[0]?.ord, bestScore: globalTop[0]?.score ?? -1, bestTr: globalTop[0]?.bestTr, topResults: globalTop, cancelled: true };
     const tIdxLocal = treasureIdx;
+    // 진행률: 1 법보 조합당 0~PERM_PER_TREASURE (= 9!) 표시
+    // 법보 조합 진행은 별도 (subProgress.subDone/subTotal 에 treasureIdx 표시)
     const wrappedProgress = onOrderProgress ? (done, total, best) => {
-      onOrderProgress(tIdxLocal * PERM_PER_TREASURE + done, GRAND_TOTAL, best);
+      onOrderProgress(done, PERM_PER_TREASURE, best);
     } : null;
     // 실시간 Top K emit — perm 진행 중 새 best 발견 시 (Top K 변동분만 부분 emit)
     const onLiveTopUpdate = onPartialTop ? (currentTop) => {
