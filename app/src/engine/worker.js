@@ -139,6 +139,12 @@ let G_DEFENSE_SET = '단독';  // 방어법보 세트 모드 ('단독'|'천강'|
 let G_YEOK = null;       // 영역 (법칙) (start 시 세팅)
 let G_FIXED_TR_ORDER = false;  // 법보 순서 고정 (체크 시 user 입력 순서 그대로)
 let G_TR_LAYOUT = '789';  // '789' (default 후순위) | '189' (1번 opener + 8/9번 closer)
+// ⚡ SharedArrayBuffer 진행률 — 워커당 8 int32 (32 바이트) 슬롯.
+//   [0] orderDone, [1] orderTotal, [2] buildIdx, [3] subDone, [4] subTotal,
+//   [5] bestSoFar / 1e6 (scale), [6] validProcessed, [7] reserved
+//   postMessage 대신 Atomics.store 로 진행률 write → JSON 비용 없음, 메시지 횟수 ↓
+let G_SHARED_VIEW = null;
+let G_SHARED_OFFSET = 0;
 function simOptsFor(markerIdx) {
   const o = { maxTime: getMaxTime(markerIdx) };
   if (G_TARGET_LAW) o.targetLawBody = G_TARGET_LAW;
@@ -175,7 +181,10 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
   let counter = 0;
   // 시간 기반 emit — sim 속도와 무관하게 일정 간격으로 진행 갱신
   // 50ms 마다 (≈20fps) emit. 너무 자주 (예: 10ms) 하면 postMessage overhead 증가.
-  const EMIT_INTERVAL_MS = onOrderProgress ? 50 : 200;
+  // ⚡ EMIT_INTERVAL_MS 200ms — 메시지 빈도 ↓ (50→200, 4배 감소)
+  // setSubProgress 자주 호출 시 main thread 부하 → worker postMessage 처리 지연 → 빌드 처리 시간 ↑
+  // UI 진행률 표시 빈도는 5Hz 로 충분 (사람 눈 차이 거의 없음)
+  const EMIT_INTERVAL_MS = onOrderProgress ? 200 : 200;
   let lastEmitT = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const _now = () => ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
   // 법보 고정: 위치만 고정 (7/8/9). 법보 순서는 permute → 6! × 3! = 4,320
@@ -502,10 +511,10 @@ async function optimizeBuild(build, skillsOverride, markerIdx, fixedTreasures, i
   for (const tr of treasureCombos) {
     if (isCancelled()) return { bestOrd: globalTop[0]?.ord, bestScore: globalTop[0]?.score ?? -1, bestTr: globalTop[0]?.bestTr, topResults: globalTop, cancelled: true };
     const tIdxLocal = treasureIdx;
-    // 진행률: 1 법보 조합당 0~PERM_PER_TREASURE (= 9!) 표시
-    // 법보 조합 진행은 별도 (subProgress.subDone/subTotal 에 treasureIdx 표시)
+    // 한 법보조합 안 순서탐색 진행률: 0 ~ PERM_PER_TREASURE (4320)
+    // treasureIdx, treasureCombos.length 도 전달 — UI 에 "법보조합 X/Y" 표시
     const wrappedProgress = onOrderProgress ? (done, total, best) => {
-      onOrderProgress(done, PERM_PER_TREASURE, best);
+      onOrderProgress(done, PERM_PER_TREASURE, best, tIdxLocal + 1, treasureCombos.length);
     } : null;
     // 실시간 Top K emit — perm 진행 중 새 best 발견 시 (Top K 변동분만 부분 emit)
     const onLiveTopUpdate = onPartialTop ? (currentTop) => {
@@ -676,7 +685,20 @@ async function handleMessage(e) {
     defenseTreasures = null,
     attackSetMode = '단독',
     defenseSetMode = '단독',
+    sharedBuf = null,
+    workerIdx = 0,
   } = msg.config || {};
+  // SharedArrayBuffer 초기화 — 메인 thread 가 전달한 경우만
+  if (sharedBuf && typeof SharedArrayBuffer !== 'undefined') {
+    try {
+      G_SHARED_VIEW = new Int32Array(sharedBuf);
+      G_SHARED_OFFSET = workerIdx * 8;
+    } catch (e) {
+      G_SHARED_VIEW = null;
+    }
+  } else {
+    G_SHARED_VIEW = null;
+  }
   G_TARGET_LAW = targetLawBody;
   G_BULSSI = 불씨;
   G_BISUL = (bisul && (bisul.self?.length || bisul.enemy?.length)) ? bisul : null;
@@ -746,7 +768,23 @@ async function handleMessage(e) {
 
       // 모든 탐색 모드에서 order 진행률을 subProgress 로 실시간 업데이트
       // (큰 탐색에서도 진행 바가 움직이도록)
-      const onOrderProgress = (done, total, best) => {
+      // ⚡ SharedArrayBuffer 활성 시 Atomics.store 로 fast path (postMessage 안 함, JSON 비용 X)
+      //   비활성 (fallback) 시 기존 postMessage 사용
+      const onOrderProgress = (done, total, best, treasureIdx, treasureTotal) => {
+        if (G_SHARED_VIEW) {
+          // [0] orderDone, [1] orderTotal, [2] buildIdx, [3] subDone, [4] subTotal,
+          // [5] bestSoFar/1e6 (int32 scale; 손실 OK — 표시용)
+          // [6] treasureIdx, [7] treasureTotal
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 0, done | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 1, total | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 2, validProcessed | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 3, structIdx | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 4, structTotal | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 5, Math.floor((best || 0) / 1e6) | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 6, treasureIdx | 0);
+          Atomics.store(G_SHARED_VIEW, G_SHARED_OFFSET + 7, treasureTotal | 0);
+          return;
+        }
         self.postMessage({
           type: 'subProgress',
           workerId,
@@ -759,6 +797,8 @@ async function handleMessage(e) {
           orderDone: done,
           orderTotal: total,
           bestSoFar: best,
+          treasureIdx,
+          treasureTotal,
         });
       };
 
@@ -833,6 +873,8 @@ async function handleMessage(e) {
         await new Promise((r) => setTimeout(r, 0));
       } catch (err) {
         // 단일 빌드 평가 중 에러 (예: simulateBuild 내부 안전장치 throw) — 빌드 skip 후 다음 진행
+        // 디버그: 어떤 빌드/에러인지 콘솔에 명시 출력 (사용자가 진행 상황 확인)
+        console.error(`[worker ${workerId}] 빌드 평가 에러 (skip): ${bd.label} / ${skillLabel}`, err);
         validProcessed++;
         // skip 시에도 subProgress 진행바를 4320/4320 으로 마무리해서 멈춰 보이는 것 방지
         const _PERM = fixedTreasures ? 4320 : 362880;

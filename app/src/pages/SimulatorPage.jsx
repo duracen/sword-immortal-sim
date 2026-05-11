@@ -139,7 +139,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       return () => clearTimeout(t);
     }
   }, [selected]);
-  const { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase } = useRanking();
+  const { results, progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase, effectiveDone, skippedCount } = useRanking();
 
   const sortBy = ['41', '60', '120', '180'][markerIdx];
 
@@ -168,19 +168,17 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   }
 
   const elapsedSec = startTime && running ? (Date.now() - startTime) / 1000 : 0;
-  // 빌드 완료 + 진행 중 빌드의 순서 탐색 진행률(fractional)을 합산해 effective progress 계산
-  // → 빌드 1개도 완료 안 됐을 때도 남은 시간 추정 가능 (특히 9! 전수탐색 시)
-  let effectiveDone = progress.current;
-  for (const sp of Object.values(subProgress || {})) {
-    if (sp.orderTotal > 0) effectiveDone += sp.orderDone / sp.orderTotal;
-  }
-  // 0.001 threshold (단순 빌드 시 1.45M perms × 0.001 = 1,450 perms 만에 표시 시작)
+  // effectiveDone = useRanking 에서 race-free 로 계산한 정확한 진행도.
+  //   - progress.current (완료된 빌드 합) + 진행 중 빌드의 fractional 진행률
+  //   - sp.buildIdx >= perWorkerValid[idx] 조건으로 over-count 방지
+  // ETA = 누적 평균 공식 (가장 정확)
+  const effectiveDoneClamped = Math.min(effectiveDone || 0, progress.total);
   const estRemainSec =
-    startTime && running && effectiveDone > 0.001 && progress.total > 0
-      ? (elapsedSec / effectiveDone) * (progress.total - effectiveDone)
+    startTime && running && effectiveDoneClamped > 0.001 && progress.total > 0
+      ? (elapsedSec / effectiveDoneClamped) * (progress.total - effectiveDoneClamped)
       : 0;
   // 진행률: 완료 빌드 + 진행 중 빌드의 fractional 진행 (단일 빌드 시 진행 바가 멈추지 않도록)
-  const pct = progress.total > 0 ? Math.min(100, (effectiveDone / progress.total) * 100) : 0;
+  const pct = progress.total > 0 ? Math.min(100, (effectiveDoneClamped / progress.total) * 100) : 0;
 
   return (
     <div className="space-y-5">
@@ -479,6 +477,9 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
               {workerCount > 1 && (
                 <span className="ml-2 text-xs text-purple-300">· {workerCount}개 워커 병렬</span>
               )}
+              {skippedCount > 0 && (
+                <span className="ml-2 text-xs text-red-300">· ⚠️ 에러 skip {skippedCount}개</span>
+              )}
             </span>
             <span className="text-slate-400">
               경과 {formatDuration(elapsedSec)} · 남은 약 {formatDuration(estRemainSec)}
@@ -493,6 +494,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
               {Object.entries(subProgress).map(([wid, sp]) => {
                 const structPct = sp.structTotal > 0 ? (sp.structIdx / sp.structTotal) * 100 : 0;
                 const orderPct = sp.orderTotal > 0 ? (sp.orderDone / sp.orderTotal) * 100 : 0;
+                const trPct = sp.treasureTotal > 0 ? (sp.treasureIdx / sp.treasureTotal) * 100 : 0;
                 const workerPhase = phase[parseInt(wid)];
                 const phaseLabel = workerPhase === 'pass2' ? '2차정밀' : workerPhase === 'pass1' ? '1차빠른' : null;
                 // 행 높이 고정 — 빌드 전환 시 layout shift 방지 (모든 element 항상 렌더, 빈 값은 placeholder)
@@ -518,7 +520,17 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                     <div className="w-full bg-slate-900 rounded h-1 overflow-hidden mt-0.5">
                       <div className="h-full bg-purple-500 transition-all" style={{ width: `${structPct}%` }} />
                     </div>
-                    {/* 순서 전수탐색 진행률 — 항상 자리 차지 (값 없으면 0%, 텍스트 placeholder) */}
+                    {sp.treasureTotal > 0 && (
+                      <div className="mt-0.5">
+                        <div className="flex justify-between text-[11px] text-slate-400 font-mono">
+                          <span>법보조합</span>
+                          <span>{sp.treasureIdx} / {sp.treasureTotal} ({trPct.toFixed(1)}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-900 rounded h-1 overflow-hidden">
+                          <div className="h-full bg-cyan-500 transition-all" style={{ width: `${trPct}%` }} />
+                        </div>
+                      </div>
+                    )}
                     <div className="mt-0.5">
                       <div className="flex justify-between text-[11px] text-slate-400 font-mono">
                         <span>순서 전수탐색</span>

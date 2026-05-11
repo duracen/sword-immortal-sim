@@ -16,24 +16,11 @@ const CFG = {
   base진원: 2_200_000_000, // 진원 22억 (법보 데미지 계산용 — 환음요탑/참원선검/오염혁선 등 진원 % 기반 데미지)
   baseCR: 40,         // 기본 치명타율 (%)
   baseCD: 185,        // 기본 치명타 피해 (%)
-  baseDodge: 5,       // 기본 회피 (%)
-  // ---- 시뮬 구조 ----
-  casts: 9,           // 사이클당 캐스트 수 (신통6 + 법보3, 5s 공통쿨 순차)
-  cycleSec: 45,       // 1 사이클 = 9캐스트 완주 = 45s
-  법보CD: 32,
-  법보Slots: 3,
-  신통Slots: 6,
-  tickSec: 0.5,
-  totalCycles: 5,
-  lowHPProb: 0.5,   // (임시) targetHPRatio 기반 모델 리팩터 전까지 유지
   // ---- 방어력 감산 (공식 비공개 → 단순 근사, 리팩터 시 적용 예정) ----
   // 기본 30% 감산 (defReduction 0.7)
   defReduction: 0.7,
   debugDealDamage: false,   // [DEBUG] 본 피해 디버그 로그 — 켜면 매 sim 마다 console.log 누적 (browser devtools 메모리 폭발) → 디버그 시에만 true.
   기본방어감소: 0,       // 추가 감소 (defReduction 에 이미 +10% 반영됨 — 0 으로 둠)
-  targetMaxHP: 33_000_000_000, // 330억 HP (호신강기 별도 90억)
-  호신강기대상확률: 0.5, // 환음요탑: 대상이 호신강기 보유 확률
-  자신호신강기확률: 0.9, // 오염혁선: 자신 호신강기 활성 확률 (90억 풀이라 거의 항상 활성)
   // ---- 법보 절대값 (스크린샷 원문) ----
   법보_base_절대: 564_000_000, // 본체 5.64억
   법보_호신강기추가: 452_000_000, // 호신강기에 추가 4.52억 (대상 보유 시)
@@ -73,6 +60,7 @@ const CFG = {
   },
   trace: null, // function(t, tag, msg) — set by external runner for per-build trace
   preEvent: null, // function(state, ev) — hook before each event (for stack reset experiments)
+  verifyBuffSums: false, // [DEBUG] computeBuffSums vs 기존 sumBuff* 결과 비교 (성능 비용 큼 — 검증 시에만 true)
 };
 function TRACE(state, tag, msg) { if (CFG.trace) CFG.trace(state.t, tag, msg); }
 
@@ -599,6 +587,124 @@ function sumBuffAmp(state) {
   if (진마성화Per > 0) s += (state.진마성화스택 || 0) * 진마성화Per;
   return s;
 }
+
+// ⚡ 최적화: state.buffs 1회 순회로 모든 sum 한꺼번에 계산.
+// 호출 1회 = 8 sumBuff* 함수 호출 1회분의 비용 (~8x 효율).
+// 단, 일부 외부 보정 (옥추 stack, 검세 stack 등) 은 sum*Extras 함수에서 별도 합산.
+// opts: { type, _isLawDamage } 만 처리 (treasureOnly/shintongOnly/lawDamage 필터링)
+function computeBuffSums(state, isShintong, opts, damageAttr) {
+  const isTreasure = !!(opts && opts.type === '법보절대');
+  const isLawDamage = !!(opts && opts._isLawDamage);
+
+  let atk = 0;
+  let cr = 0;
+  let cd = 0;
+  let crRes = 0;
+  let dealt = 0;
+  let shintongInc_raw = 0;
+  let attrInc = 0;
+  let amp_raw = 0;
+  let defDebuff = 0;
+  let finalBuff = 0;
+
+  const t = state.t;
+  const buffs = state.buffs;
+  const len = buffs.length;
+  for (let i = 0; i < len; i++) {
+    const b = buffs[i];
+    if (b.endT <= t) continue;
+    const c = b.stackCount || 1;
+    const shintongOnly = b.shintongOnly;
+    const treasureOnly = b.treasureOnly;
+
+    if (b.atk) atk += b.atk * c;
+
+    // shintongOnly / treasureOnly 게이팅 (cr/cd/dealt 공통)
+    let crGate, cdGate, dealtGate;
+    if (b.cr || b.cd || (b.cat === 'dealt' && b.dmgMult)) {
+      if (shintongOnly && !isShintong) {
+        crGate = false; cdGate = false; dealtGate = false;
+      } else if (treasureOnly && !isTreasure) {
+        crGate = false; cdGate = false; dealtGate = false;
+      } else {
+        crGate = true; cdGate = true; dealtGate = true;
+      }
+    }
+    if (b.cr && crGate) cr += b.cr * c;
+    if (b.cd && cdGate) cd += b.cd * c;
+    if (b.cat === 'dealt' && b.dmgMult && dealtGate) dealt += b.dmgMult * c;
+
+    if (b.crRes) {
+      if (shintongOnly && !isShintong) {} else crRes += b.crRes * c;
+    }
+
+    if (b.cat === 'inc' && b.dmgMult) {
+      if (b.attr) {
+        if (b.attr === damageAttr) attrInc += b.dmgMult * c;
+      } else {
+        shintongInc_raw += b.dmgMult * c;
+      }
+    }
+
+    if (b.cat === 'amp' && b.dmgMult) amp_raw += b.dmgMult * c;
+
+    if (b.defDebuff) defDebuff += b.defDebuff * c;
+
+    if (b.cat === 'final' && b.dmgMult) finalBuff += b.dmgMult * c;
+  }
+
+  // 현염법체 atk +9 — sumBuffAtk extra
+  if (!isLawDamage && (state.catSlots.화염 || 0) >= 2 && (state.stacks.작열 || 0) > 0) atk += 9;
+
+  // 뇌인/공명뇌전 cr — sumBuffCR extra
+  if (!isLawDamage) {
+    if (isShintong && famActive(state, '청명')) cr += state.stacks.뇌인 * 5;
+    if (isShintong && (state.catSlots.뇌전 || 0) >= 2) cr += 11;
+  }
+
+  return { atk, cr, cd, crRes, dealt, shintongInc_raw, attrInc, amp_raw, defDebuff, final: finalBuff };
+}
+
+// sumShintongInc 의 buff 외 보정값 (slot/stack/공명/독고/명공현주)
+function sumShintongIncExtras(state) {
+  let s = 0;
+  if (방어법보Active(state, '명공현주')) s += 8;
+  if (famActive(state, '옥추')) s += state.stacks.옥추;
+  if (famActive(state, '옥추') && state.stacks.옥추 > 0) s += state.famSlots.옥추 * 2.5;
+  if (famActive(state, '신소') && state.stacks.신소 > 0) s += state.famSlots.신소 * 4;
+  if (famActive(state, '참허') && state.stacks.검심통명) s += state.famSlots.참허 * 3;
+  if (famActive(state, '복룡') && hpBelow(state, 0.70)) s += state.famSlots.복룡 * 4;
+  s += 공명inc(state);
+  if (famActive(state, '주술')) {
+    pruneDokgo(state);
+    s += (state.독고.강체 || 0) * 2.5;
+    s += (state.독고.환체 || 0) * 2.5;
+  }
+  return s;
+}
+
+// sumBuffAmp 의 buff 외 보정값 (검세/통명묘화/유리현화/진마성화)
+function sumBuffAmpExtras(state) {
+  let s = 0;
+  if (famActive(state, '균천')) s += state.stacks.검세 * 1.5;
+  s += 불씨급수값(state, '통명묘화', [4, 6, 8]);
+  s += 불씨급수값(state, '유리현화', [5, 10, 15]);
+  const 진마성화Per = 불씨급수값(state, '진마성화', [1, 2, 3]);
+  if (진마성화Per > 0) s += (state.진마성화스택 || 0) * 진마성화Per;
+  return s;
+}
+
+// sumBuffDealt 의 buff 외 보정값 (태현잔화) — isShintong 일 때만
+function sumBuffDealtExtras(state, isShintong) {
+  if (!isShintong) return 0;
+  const 태현기댓값 = 불씨급수값(state, '태현잔화', [4, 6, 8]);
+  if (태현기댓값 > 0) {
+    if (CFG.randomCrit) return (state._tahyunRoll ?? 태현기댓값);
+    return 태현기댓값;
+  }
+  return 0;
+}
+
 function applyBuff(state, key, spec, dur, maxStack = 1) {
   const isWeak = !!(spec.defDebuff || spec.crRes);
   const postTag = state._snapBuffsCaptured ? ' [post]' : '';
@@ -680,18 +786,34 @@ function consumeStack(state, resource, n) {
 // ---- 작열 개별 타이머 헬퍼 ----
 // 만료된 작열 스택 제거 (피해 정산 없음 — 틱에서 처리)
 function prune작열(s) {
-  const before = s.작열Arr.length;
-  // 만료된 작열들 — onExpire 콜백 호출 (폭파/시간만료 공통)
-  const expired = s.작열Arr.filter(st => st.endT <= s.t);
-  s.작열Arr = s.작열Arr.filter(st => st.endT > s.t);
-  const after = s.작열Arr.length;
-  s.stacks.작열 = after;
-  if (before !== after) {
-    TRACE(s, 'STK', `🔥작열 +0 → 현재 ${after}중첩 (TTL 만료, ${before}→${after})`);
+  // ⚡ 최적화: in-place filter — 1회 순회로 expired/live 분리, expired 는 lazy alloc
+  const arr = s.작열Arr;
+  const t = s.t;
+  const before = arr.length;
+  let writeIdx = 0;
+  let expired = null;
+  for (let i = 0; i < before; i++) {
+    const st = arr[i];
+    if (st.endT <= t) {
+      if (st.onExpire) {
+        if (!expired) expired = [];
+        expired.push(st);
+      }
+    } else {
+      if (writeIdx !== i) arr[writeIdx] = st;
+      writeIdx++;
+    }
+  }
+  arr.length = writeIdx;
+  s.stacks.작열 = writeIdx;
+  if (before !== writeIdx) {
+    TRACE(s, 'STK', `🔥작열 +0 → 현재 ${writeIdx}중첩 (TTL 만료, ${before}→${writeIdx})`);
   }
   // onExpire 콜백 호출 — 작열이 시간 만료로 사라질 때
-  for (const st of expired) {
-    if (st.onExpire) st.onExpire(s);
+  if (expired) {
+    for (let i = 0; i < expired.length; i++) {
+      expired[i].onExpire(s);
+    }
   }
 }
 // 작열 DoT 1tick 데미지 — 매 tick 호출 시점의 현재 buff/debuff 상태로 계산.
@@ -917,12 +1039,43 @@ function dealDamage(state, base, opts = {}) {
   const _baseCR = opts._isClone ? (CFG.baseCR * _clonePct / 100) : CFG.baseCR;
   const _baseCD = opts._isClone ? (CFG.baseCD * _clonePct / 100) : CFG.baseCD;
 
+  // === 속성별 피해 증가 (scope: 물리/술법 매칭 — 모든 피해 type) ===
+  // 세트 보너스 (천강 = 물리, 현명 = 술법) 등은 buff.attr 로 분류되어 여기서 처리
+  const _damageAttr = getDamageAttr(state, type, opts);
+
+  // ⚡ 최적화: state.buffs 1회 순회로 모든 sum 한꺼번에 계산 (sumBuff* 8개 통합)
+  const _sums = computeBuffSums(state, isShintong, opts, _damageAttr);
+
+  // [DEBUG] 검증 모드 — 새 sum 결과 vs 기존 함수 결과 비교 (CFG.verifyBuffSums=true 시)
+  if (CFG.verifyBuffSums) {
+    const _eps = 1e-6;
+    const _chk = (name, ref, got) => {
+      if (Math.abs(ref - got) > _eps) {
+        console.error(`[verifyBuffSums] ${name} mismatch: ref=${ref}, got=${got}, type=${type}, isShintong=${isShintong}, attr=${_damageAttr}, lawDamage=${!!opts._isLawDamage}`);
+      }
+    };
+    _chk('atk', sumBuffAtk(state, opts), _sums.atk);
+    _chk('cr', sumBuffCR(state, isShintong, opts), _sums.cr);
+    _chk('cd', sumBuffCD(state, isShintong, opts), _sums.cd);
+    _chk('crRes', sumBuffCritRes(state, isShintong), _sums.crRes);
+    _chk('dealt', sumBuffDealt(state, isShintong, opts), _sums.dealt + sumBuffDealtExtras(state, isShintong));
+    _chk('shintongInc', sumShintongInc(state), _sums.shintongInc_raw + sumShintongIncExtras(state));
+    _chk('attrInc', sumBuffAttrInc(state, _damageAttr), _sums.attrInc);
+    _chk('amp', sumBuffAmp(state), _sums.amp_raw + sumBuffAmpExtras(state));
+    _chk('defDebuff', sumBuffDefDebuff(state), _sums.defDebuff);
+    let _refFinal = 0;
+    for (const b of state.buffs) {
+      if (b.endT > state.t && b.cat === 'final' && b.dmgMult) _refFinal += b.dmgMult * (b.stackCount || 1);
+    }
+    _chk('final', _refFinal, _sums.final);
+  }
+
   // === 공격력 (scope: 모든 피해 — 단, opts.noAtkBuff=true 면 atk buff 미적용) ===
   // noAtkBuff: 진원 기반 법보 피해 (환음요탑/유리옥호/오염혁선 본체, 참원선검 본체) 에서 사용 —
   // 법보 진원 기반 피해는 공격력 buff 영향 받지 않음 (오직 진원 비례).
   const atkBuff = (opts && opts.noAtkBuff)
     ? (opts.localAtk || 0)
-    : (sumBuffAtk(state, opts) + (opts.localAtk || 0));
+    : (_sums.atk + (opts.localAtk || 0));
 
   // === 유형별 피해 증가 (scope: 해당 유형만) ===
   const typePct = sumTypeDmg(state, type) + (opts.localTypePct || 0);
@@ -930,18 +1083,15 @@ function dealDamage(state, base, opts = {}) {
   // === 신통 피해 증가 (scope: 신통만) ===
   // nextCast.inc: "다음번에 입히는 신통 피해 +N%" (e.g., 옥추·소명 [성류] 옥추4+ 시 15%)
   const ncInc = state.nextCast.inc || 0;
-  const shintongPct = isShintong ? (sumShintongInc(state) + (opts.localInc || 0) + ncInc) : 0;
+  const shintongPct = isShintong ? (_sums.shintongInc_raw + sumShintongIncExtras(state) + (opts.localInc || 0) + ncInc) : 0;
 
-  // === 속성별 피해 증가 (scope: 물리/술법 매칭 — 모든 피해 type) ===
-  // 세트 보너스 (천강 = 물리, 현명 = 술법) 등은 buff.attr 로 분류되어 여기서 처리
-  const _damageAttr = getDamageAttr(state, type, opts);
-  const attrPct = sumBuffAttrInc(state, _damageAttr);
+  const attrPct = _sums.attrInc;
 
   // === 심화 피해 증가 (scope: 신통만) ===
-  const ampPct = isShintong ? (sumBuffAmp(state) + (opts.localAmp || 0)) : 0;
+  const ampPct = isShintong ? (_sums.amp_raw + sumBuffAmpExtras(state) + (opts.localAmp || 0)) : 0;
 
   // === 입히는 피해 증가 (scope: 모든 유형) ===
-  let dealtPct = sumBuffDealt(state, isShintong, opts) + (opts.localDealt || 0);
+  let dealtPct = _sums.dealt + sumBuffDealtExtras(state, isShintong) + (opts.localDealt || 0);
   // 불씨 진무절화: 직전 2회 신통 시전 후 저장된 증가치 — 신통 본 피해만 소비
   if (isShintong && state.진무절화스택 > 0) {
     dealtPct += state.진무절화스택;
@@ -962,12 +1112,12 @@ function dealDamage(state, base, opts = {}) {
 
   // === 크리티컬 ===
   const ncApply = isShintong ? 1 : 0;
-  const crIncPct = sumBuffCR(state, isShintong, opts) + (opts.localCR || 0) + ncCR * ncApply;
+  const crIncPct = _sums.cr + (opts.localCR || 0) + ncCR * ncApply;
   const finalCRPct = (opts.localFinalCR || 0) + ncFinalCR * ncApply;
-  const crResPct = sumBuffCritRes(state, isShintong);
+  const crResPct = _sums.crRes;
   let cr = _baseCR * (1 + crIncPct / 100) * (1 + finalCRPct / 100) * (1 + crResPct / 100);
   const finalCDPct = (opts.localFinalCD || 0) + ncFinalCD * ncApply;
-  let cd = _baseCD + sumBuffCD(state, isShintong, opts) + (opts.localCD || 0) + ncCD * ncApply + finalCDPct;
+  let cd = _baseCD + _sums.cd + (opts.localCD || 0) + ncCD * ncApply + finalCDPct;
   if (opts.forceCrit) cr = 100;
   // 법보 확정 cr (오염혁선 효과 등) — type='법보절대' 일 때만 적용
   if (type === '법보절대' && state.법보_확정크리) cr = 100;
@@ -1007,11 +1157,8 @@ function dealDamage(state, base, opts = {}) {
   const localFinalDmg = opts.localFinalDmg || 0;
   // 법상/비술 cat:'final' buff — 모든 type 에 적용 (신통/비신통 무관)
   // 예: 청교룡 진령 (적 받는 최종피해 +20%), 적난새 실체 (자기 최종피해 +20%)
-  for (const b of state.buffs) {
-    if (b.endT > state.t && b.cat === 'final' && b.dmgMult) {
-      finalPct += b.dmgMult * (b.stackCount || 1);
-    }
-  }
+  // ⚡ 최적화: _sums.final 재사용 (computeBuffSums 가 미리 계산)
+  finalPct += _sums.final;
   // localFinalDmg: 호출 cast 가 명시한 final 보너스 — 법보 (환음요탑/참원선검) 도 적용
   finalPct += localFinalDmg;
   if (isShintong) {
@@ -1041,7 +1188,7 @@ function dealDamage(state, base, opts = {}) {
     }
     prune염양방감(state);
     감소 += (state.염양방감 || 0) * 10;
-    감소 += sumBuffDefDebuff(state);
+    감소 += _sums.defDebuff;
     감소 = Math.min(감소, 100);
     if (감소 > 0) defMult = CFG.defReduction + (1 - CFG.defReduction) * (감소 / 100);
   }
@@ -5333,16 +5480,36 @@ function simulateBuild(build, treasures, orderOverride, skillsOverride, opts) {
     // 계약합 만료 추적 (drift 방지용 STK 발생) — buff prune 전후 비교
     const 계약전 = (typeof 계약합 === 'function') ? 계약합(state) : 0;
     // buff prune — 모든 buff 가 개별 TTL stack (endTs 배열) 사용
-    for (const b of state.buffs) {
+    // ⚡ 최적화: in-place filter (배열 alloc + spread 제거 → GC pressure 감소)
+    const _tCutoff = state.t - 0.1;
+    let _buffsWrite = 0;
+    for (let i = 0; i < state.buffs.length; i++) {
+      const b = state.buffs[i];
       if (!b.endTs || !Array.isArray(b.endTs)) {
         // legacy buff (endT 만 있음) — endTs 변환
         b.endTs = [b.endT];
       }
-      b.endTs = b.endTs.filter(et => et > state.t - 0.1);
-      b.stackCount = b.endTs.length;
-      b.endT = b.endTs.length > 0 ? Math.max(...b.endTs) : 0;
+      // in-place filter on b.endTs + maxEndT 계산 동시 (filter 새 배열 alloc + Math.max spread 회피)
+      const endTs = b.endTs;
+      let _endTsWrite = 0;
+      let _maxEndT = 0;
+      for (let j = 0; j < endTs.length; j++) {
+        const et = endTs[j];
+        if (et > _tCutoff) {
+          endTs[_endTsWrite++] = et;
+          if (et > _maxEndT) _maxEndT = et;
+        }
+      }
+      endTs.length = _endTsWrite;
+      b.stackCount = _endTsWrite;
+      b.endT = _endTsWrite > 0 ? _maxEndT : 0;
+      // state.buffs 도 in-place filter
+      if (b.endT > _tCutoff) {
+        if (_buffsWrite !== i) state.buffs[_buffsWrite] = b;
+        _buffsWrite++;
+      }
     }
-    state.buffs = state.buffs.filter(b => b.endT > state.t - 0.1);
+    state.buffs.length = _buffsWrite;
     // 계약합 변화 시 STK 트레이스 (UI lane 동기화용)
     if (typeof 계약합 === 'function') {
       const 계약후 = 계약합(state);

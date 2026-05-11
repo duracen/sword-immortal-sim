@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { FAMILIES, SK } from '../engine';
 
 // 조합 수 C(n,k)
@@ -170,15 +170,47 @@ export function useRanking() {
   const [workerCount, setWorkerCount] = useState(0);
   const [error, setError] = useState(null);
   const [phase, setPhase] = useState({});  // { [workerId]: 'pass1' | 'pass2' | 'single' }
+  // ⚡ effectiveDone: 진행률 계산용 정확한 진행도 (progress.current + 진행 중 빌드 frac).
+  // race-free: 워커가 보내는 sp.buildIdx 와 perWorkerValid 를 비교해 over-count 방지.
+  // useMemo 로 계산 — useState/useEffect 안 씀 → setState cascade 무한 루프 차단.
+  // ⚡ skippedCount: 빌드 평가 중 에러로 skip 된 빌드 누계 (분산 원인 추적용)
+  const [skippedCount, setSkippedCount] = useState(0);
   const workersRef = useRef([]);
   const perWorkerProgressRef = useRef([]);
   const perWorkerResultsRef = useRef([]);
   const cancelTimeoutRef = useRef(null);
+  // perWorkerValid 를 outer scope ref 로 유지 — useEffect 에서 effectiveDone 계산 시 접근.
+  const perWorkerValidStateRef = useRef([]);
+  // SharedArrayBuffer polling interval handle — 모든 워커 done / cancel 시 clearInterval.
+  const pollHandleRef = useRef(null);
 
   useEffect(() => () => {
     workersRef.current.forEach((w) => w.terminate());
     if (cancelTimeoutRef.current) clearTimeout(cancelTimeoutRef.current);
+    if (pollHandleRef.current) { clearInterval(pollHandleRef.current); pollHandleRef.current = null; }
   }, []);
+
+  // ⚡ effectiveDone 계산 — useMemo 로 derived value (setState 없음 → 무한 루프 불가능)
+  // race-free 공식:
+  //   total = sum(perWorkerValid[idx])  ← progress.current
+  //   for each sp[idx]:
+  //     if sp.buildIdx >= perWorkerValid[idx]: total += sp.orderDone / sp.orderTotal
+  //     else: skip (sp 가 가리키는 빌드가 이미 progress.current 에 포함된 stale 메시지 → over-count 방지)
+  const effectiveDone = useMemo(() => {
+    if (!running) return 0;
+    const valids = perWorkerValidStateRef.current || [];
+    let total = 0;
+    for (let i = 0; i < valids.length; i++) total += valids[i] || 0;
+    for (let i = 0; i < valids.length; i++) {
+      const sp = subProgress[i];
+      if (!sp || !sp.orderTotal || sp.buildIdx == null) continue;
+      const valid = valids[i] || 0;
+      if (sp.buildIdx >= valid) {
+        total += sp.orderDone / sp.orderTotal;
+      }
+    }
+    return total;
+  }, [progress.current, subProgress, running]);
 
   const start = useCallback((config) => {
     // 이전 취소의 강제종료 타이머가 살아있으면 새 워커도 죽일 수 있으니 먼저 해제
@@ -207,9 +239,26 @@ export function useRanking() {
     setPass2Progress({ done: 0, total: 0 });
     setSubProgress({});
     setPhase({});
+    setSkippedCount(0);
     setError(null);
     setRunning(true);
     setStartTime(Date.now());
+
+    // ⚡ SharedArrayBuffer — 진행률 fast path (postMessage 횟수 ↓)
+    //   각 워커당 8 int32 (32 바이트) 슬롯. cross-origin isolated 환경 필요.
+    const useShared = typeof SharedArrayBuffer !== 'undefined'
+      && (typeof crossOriginIsolated === 'undefined' || crossOriginIsolated);
+    let sharedBuf = null;
+    let sharedView = null;
+    if (useShared) {
+      try {
+        sharedBuf = new SharedArrayBuffer(N * 8 * 4);
+        sharedView = new Int32Array(sharedBuf);
+      } catch (e) {
+        sharedBuf = null;
+        sharedView = null;
+      }
+    }
 
     // 조합 수가 아주 많을 때(C(56,6)=32M급) 워커는 이제 stream 방식으로 돌기 때문에
     // 메모리는 O(1) 고정. 다만 실행 시간은 순서 탐색(6!=720)까지 곱해 사용자가 기다릴 수
@@ -233,7 +282,9 @@ export function useRanking() {
     for (const b of workerBuckets) b.structures.sort((a, b2) => a.total - b2.total);
     const ranges = workerBuckets.map((b) => ({ structures: b.structures, load: b.load }));
     // 워커별 raw consumed (chunk 진행도) 와 valid processed (유효 빌드 평가 완료) 분리 트래킹
-    const perWorkerValidRef = { current: new Array(N).fill(0) };
+    // outer ref 와 별칭 — useEffect 의 effectiveDone 계산에서 동일한 backing array 사용
+    perWorkerValidStateRef.current = new Array(N).fill(0);
+    const perWorkerValidRef = perWorkerValidStateRef;
     // Pass 2 (정밀 재검증) 진행도 별도 트래킹 — Pass 1 끝나도 진행률 멈추지 않도록
     const perWorkerPass2Ref = { current: new Array(N).fill({ done: 0, total: 0 }) };
     // 워커별 "현재 구조(label) 안에서 몇 번째 신통조합 보고 있는지" — label 바뀌면 리셋
@@ -324,7 +375,14 @@ export function useRanking() {
       resultsDirty = false;
     };
     const flushInterval = setInterval(aggregateResults, 250);
-    const stopFlush = () => { clearInterval(flushInterval); };
+    const stopFlush = () => {
+      clearInterval(flushInterval);
+      // ⚡ SharedArrayBuffer polling 도 같이 정리
+      if (pollHandleRef.current) {
+        clearInterval(pollHandleRef.current);
+        pollHandleRef.current = null;
+      }
+    };
     const onNewResult = (r) => {
       if (!r) return;
       const skillKey = (r.skills || []).slice().sort().join(',');
@@ -376,12 +434,17 @@ export function useRanking() {
           // 증분 방식: 방금 완료한 result 1건을 global map 에 반영.
           perWorkerProgressRef.current[idx] = msg.current;
           if (msg.validProcessed !== undefined) perWorkerValidRef.current[idx] = msg.validProcessed;
+          // ⚡ skip 카운트 (빌드 평가 에러)
+          if (msg.skipped) setSkippedCount((prev) => prev + 1);
           // Pass 2 진행률 추적
           if (msg.phase === 'pass2' && msg.pass2Done !== undefined) {
             perWorkerPass2Ref.current[idx] = { done: msg.pass2Done, total: msg.pass2Total || 0 };
           }
           if (msg.newResult) onNewResult(msg.newResult);
           if (msg.phase) setPhase((prev) => prev[idx] === msg.phase ? prev : ({ ...prev, [idx]: msg.phase }));
+          // race-safe: 별도 sp reset 안 함 — effectiveDone useMemo 가 sp.buildIdx < valid 이면 frac skip.
+          // sp 는 다음 buildStart subProgress msg 가 즉시 새 skillLabel/orderDone 으로 갱신.
+          // 중간 setSubProgress 없으면 화면이 "옛 skillLabel + orderDone=0" 으로 표시되는 stale 구간이 사라짐.
           aggregateProgress();
           // setResults 는 250ms throttle 로 자동 flush (aggregateResults 호출 안 함)
         } else if (msg.type === 'scanHeartbeat') {
@@ -420,6 +483,14 @@ export function useRanking() {
             const orderTotal = (msg.orderTotal != null)
               ? msg.orderTotal
               : (skillChanged ? null : (prevRow.orderTotal ?? null));
+            // ⚡ 법보조합 카운터 — 신통조합 1개 안 N개 법보조합 평가 중 몇번째인지 표시
+            //   msg 가 없으면 prevRow 유지 (skillChanged 시 reset)
+            const treasureIdx = (msg.treasureIdx != null)
+              ? msg.treasureIdx
+              : (skillChanged ? null : (prevRow.treasureIdx ?? null));
+            const treasureTotal = (msg.treasureTotal != null)
+              ? msg.treasureTotal
+              : (skillChanged ? null : (prevRow.treasureTotal ?? null));
             return {
               ...prev,
               [idx]: {
@@ -432,6 +503,11 @@ export function useRanking() {
                 structTotal,
                 orderDone,
                 orderTotal,
+                treasureIdx,
+                treasureTotal,
+                // ⚡ buildIdx: 워커 내부 진행 중 빌드 idx (validProcessed 기준).
+                // effectiveDone 계산 시 perWorkerValid 와 비교 → race 시 over-count 방지.
+                buildIdx: msg.buildIdx ?? null,
               },
             };
           });
@@ -484,15 +560,50 @@ export function useRanking() {
           workerId: idx,
           workerCount: N,
           structures: range.structures,
+          sharedBuf,       // SharedArrayBuffer (null 이면 fallback postMessage)
+          workerIdx: idx,
         },
       });
     });
+
+    // ⚡ SharedArrayBuffer polling — 100ms 마다 모든 워커 진행률 read → setSubProgress merge
+    //   sp[i] 가 존재할 때만 (buildStart postMessage 받은 후) 갱신.
+    if (sharedView) {
+      const pollHandle = setInterval(() => {
+        setSubProgress((prev) => {
+          let changed = false;
+          let next = prev;
+          for (let i = 0; i < N; i++) {
+            const sp = prev[i];
+            if (!sp) continue;
+            const offset = i * 8;
+            const done = Atomics.load(sharedView, offset + 0);
+            const total = Atomics.load(sharedView, offset + 1);
+            // bestSoFar/1e6 으로 scale → 복원
+            const bestScaled = Atomics.load(sharedView, offset + 5);
+            const best = bestScaled * 1e6;
+            const treasureIdx = Atomics.load(sharedView, offset + 6);
+            const treasureTotal = Atomics.load(sharedView, offset + 7);
+            // 변화 없으면 skip
+            if (sp.orderDone === done && sp.orderTotal === total && sp.bestSoFar === best
+                && sp.treasureIdx === treasureIdx && sp.treasureTotal === treasureTotal) continue;
+            if (!changed) { next = { ...prev }; changed = true; }
+            next[i] = { ...sp, orderDone: done, orderTotal: total, bestSoFar: best, treasureIdx, treasureTotal };
+          }
+          return changed ? next : prev;
+        });
+      }, 100);
+      // 종료/cancel 시 정리 — workersRef 마지막 워커가 종료될 때 stop
+      pollHandleRef.current = pollHandle;
+    }
   }, []);
 
   const cancel = useCallback(() => {
     setCancelling(true);
     const cancelledWorkers = workersRef.current;
     cancelledWorkers.forEach((w) => w.postMessage({ type: 'cancel' }));
+    // ⚡ SharedArrayBuffer polling 정리
+    if (pollHandleRef.current) { clearInterval(pollHandleRef.current); pollHandleRef.current = null; }
     if (cancelTimeoutRef.current) clearTimeout(cancelTimeoutRef.current);
     cancelTimeoutRef.current = setTimeout(() => {
       cancelTimeoutRef.current = null;
@@ -507,5 +618,5 @@ export function useRanking() {
     }, 3000);
   }, []);
 
-  return { results, progress, pass2Progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase };
+  return { results, progress, pass2Progress, subProgress, running, cancelling, startTime, start, cancel, workerCount, error, phase, effectiveDone, skippedCount };
 }
