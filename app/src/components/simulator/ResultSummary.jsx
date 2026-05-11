@@ -2,15 +2,17 @@ import { formatKR, formatFull } from '../../utils/formatting';
 
 export default function ResultSummary({ result, highlight }) {
   if (!result) return null;
-  const [c41, c60, c120, c180] = result.cumByMarker;
+  // cumByMarker = [34s(1cycle), 52s, 60s, 120s, 180s] — markers 5개
+  const [c41, c52, c60, c120, c180] = result.cumByMarker;
   const items = [
     { label: '41초 (1사이클)', t: 41, v: c41, color: 'text-amber-400' },
+    { label: '52초', t: 52, v: c52, color: 'text-amber-400' },
     { label: '60초', t: 60, v: c60, color: 'text-amber-300' },
     { label: '120초', t: 120, v: c120, color: 'text-amber-200' },
     { label: '180초', t: 180, v: c180, color: 'text-amber-100' },
   ];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
       {items.map((x) => {
         const dim = highlight && highlight !== x.t;
         const on = highlight === x.t;

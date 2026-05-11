@@ -636,10 +636,12 @@ async function evaluateSkillCombo(bd, markerIdx, fixedTreasures, isCancelled, op
       treasuresArr: tr || [],
       orderArr: t.ord,
       orderRank: idx + 1,   // 이 신통 조합 내에서 몇 번째 우수 순서인지
+      // cumByMarker = [34s, 52s, 60s, 120s, 180s] — markerIdx 0~4 매핑
       s41: markerIdx === 0 ? cum[0] : null,
-      s60: markerIdx === 1 ? cum[1] : null,
-      s120: markerIdx === 2 ? cum[2] : null,
-      s180: markerIdx === 3 ? cum[3] : null,
+      s52: markerIdx === 1 ? cum[1] : null,
+      s60: markerIdx === 2 ? cum[2] : null,
+      s120: markerIdx === 3 ? cum[3] : null,
+      s180: markerIdx === 4 ? cum[4] : null,
       order: orderStr,
       cat,
     });
@@ -793,10 +795,12 @@ async function handleMessage(e) {
             treasuresArr: t.bestTr || [],
             orderArr: t.ord,
             orderRank: idx + 1,
+            // cumByMarker = [34s, 52s, 60s, 120s, 180s] — markerIdx 0~4 매핑
             s41: markerIdx === 0 ? cum[0] : null,
-            s60: markerIdx === 1 ? cum[1] : null,
-            s120: markerIdx === 2 ? cum[2] : null,
-            s180: markerIdx === 3 ? cum[3] : null,
+            s52: markerIdx === 1 ? cum[1] : null,
+            s60: markerIdx === 2 ? cum[2] : null,
+            s120: markerIdx === 3 ? cum[3] : null,
+            s180: markerIdx === 4 ? cum[4] : null,
             order: orderStr,
             cat,
             partial: true,

@@ -7,7 +7,19 @@ import HoverTooltip from '../common/HoverTooltip';
 const DISPLAY_ORDER = ['환음요탑', '유리옥호', '참원선검', '오염혁선', '산하옥척', '경몽비파'];
 const TREASURE_DISPLAY = DISPLAY_ORDER.filter((t) => TREASURE_NAMES.includes(t));
 
-export default function TreasurePicker({ selected, onChange, showOrder = true, maxSelect = 6, minSelect = 0 }) {
+export default function TreasurePicker({ selected, onChange, showOrder = true, showOrderEditor = true, maxSelect = 6, minSelect = 0, order = null }) {
+  // order 가 주어지면 각 법보의 시전 순서 (1-based) 를 계산 — 없으면 selected.indexOf + 1
+  // order = [{kind: 'skill'|'treasure', idx, ...}, ...]
+  const treasureSlotMap = order ? (() => {
+    const m = {};
+    order.forEach((o, slotIdx) => {
+      if (o.kind === 'treasure') {
+        const tr = selected[o.idx];
+        if (tr) m[tr] = slotIdx + 1; // 1-based
+      }
+    });
+    return m;
+  })() : null;
   const [dragIdx, setDragIdx] = useState(null);
   const [dragOverIdx, setDragOverIdx] = useState(null);
 
@@ -107,7 +119,7 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
                 {tr}
                 {on && showOrder && (
                   <span className="ml-2 text-xs bg-amber-500 text-slate-950 rounded-full w-4 h-4 inline-flex items-center justify-center">
-                    {idx + 1}
+                    {treasureSlotMap ? (treasureSlotMap[tr] ?? (idx + 1)) : (idx + 1)}
                   </span>
                 )}
                 {on && !showOrder && (
@@ -119,8 +131,8 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, m
         })}
       </div>
 
-      {/* 2. 법보 순서 변경 (showOrder 활성 + 1개 이상 선택 시) */}
-      {showOrder && selected.length > 0 && (
+      {/* 2. 법보 순서 변경 (showOrder + showOrderEditor 모두 활성 + 1개 이상 선택 시) */}
+      {showOrder && showOrderEditor && selected.length > 0 && (
         <div className="mt-3 p-3 bg-slate-900/60 border border-slate-700 rounded-md">
           <div className="text-xs text-slate-400 mb-2">
             ⬌ <span className="font-semibold text-slate-300">법보 시전 순서</span>

@@ -268,6 +268,21 @@ function parseEvents(events) {
     for (const s of arr) {
       if (s.end === null) s.end = s.ttlEnd ?? s.start + 20;
     }
+    // 0초 span 제거 — 작열 부여 + 즉시 폭파 (형혹 60%) 로 stack 0 ↔ +1 토글로 인한 의미 없는 짧은 막대 제거
+    // 그 후 인접 span 통합 (gap < 1s)
+    const filtered = arr.filter((s) => s.end - s.start > 0.01);
+    const merged = [];
+    for (const s of filtered) {
+      const last = merged[merged.length - 1];
+      if (last && s.start - last.end < 1.0) {
+        last.end = s.end;
+        if (s.peak > (last.peak || 0)) last.peak = s.peak;
+        if (s.counts) last.counts = [...(last.counts || []), ...s.counts];
+      } else {
+        merged.push({ ...s });
+      }
+    }
+    stackSpans[key] = merged;
   }
   for (const c of castRaws) casts.push(c);
 

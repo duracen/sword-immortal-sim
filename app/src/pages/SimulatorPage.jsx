@@ -116,7 +116,7 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   // 세트 모드 ('단독' | '천강' | '현명') — 공격법보/방어법보 각각 분리
   const [attackSetMode, setAttackSetMode] = useState('단독');
   const [defenseSetMode, setDefenseSetMode] = useState('단독');
-  const [searchMode, setSearchMode] = useState('exhaustive');  // 'fast' | 'exhaustive' (빠른 탐색 UI 숨김 — 메모리 안정성 검증 후 복원 예정)
+  const [searchMode, setSearchMode] = useState('exhaustive');  // 'fast' (ILS 휴리스틱) | 'exhaustive' (전수탐색)
   // 자동 탐색 전체에 동일 불씨 세트 적용 — 실 인게임에서 불씨는 고정됨
   const [불씨, set불씨] = useState({
     통명묘화: 0, 진무절화: 0, 태현잔화: 0, 유리현화: 0, 진마성화: 0,
@@ -340,26 +340,55 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
           </div>
         </div>
 
-        {/* 탐색 모드 — 정밀 탐색만 사용 (빠른 탐색은 메모리 안정성 검증 중) */}
+        {/* 탐색 모드 — 빠른 탐색 (ILS 휴리스틱) / 정밀 탐색 (전수탐색) */}
         <div>
           <label className="block text-xs text-slate-400 mb-1">탐색 방식</label>
           <div className="flex gap-1">
             <button
-              className="px-3 py-1.5 rounded text-sm bg-amber-500 text-slate-950 font-bold cursor-default"
-              disabled
+              onClick={() => setSearchMode('fast')}
+              className={`px-3 py-1.5 rounded text-sm ${
+                searchMode === 'fast'
+                  ? 'bg-amber-500 text-slate-950 font-bold'
+                  : 'bg-slate-700 hover:bg-slate-600'
+              }`}
+            >
+              ⚡ 빠른 탐색
+            </button>
+            <button
+              onClick={() => setSearchMode('exhaustive')}
+              className={`px-3 py-1.5 rounded text-sm ${
+                searchMode === 'exhaustive'
+                  ? 'bg-amber-500 text-slate-950 font-bold'
+                  : 'bg-slate-700 hover:bg-slate-600'
+              }`}
             >
               🔬 정밀 탐색
             </button>
           </div>
-          <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-            정밀 탐색: 모든 빌드 × 모든 시전 순서를 전수탐색. 유파 1슬롯에서 시너지가 필수인 신통 15개 (예: 균천·진악, 주술·제율 등) 는 자동 제외 (단, 풀이 10개 이하면 그대로 포함).
-          </div>
-          <div className="text-[11px] text-amber-400 mt-1 leading-relaxed bg-amber-950/20 border border-amber-700/40 rounded p-2">
-            ⚠ <strong>정밀 탐색은 매우 오래 걸립니다</strong> (9! = 362,880 순열 × 법보 조합).<br />
-            · 신통 6개 + 법보 3개 선택: 1 빌드 × 9! = 362,880회 시뮬<br />
-            · 신통 풀이 커질수록 시간이 기하급수적으로 증가<br />
-            · 권장: 신통 풀을 6~12개로 좁혀서 사용.
-          </div>
+          {searchMode === 'fast' ? (
+            <>
+              <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                빠른 탐색: ILS 휴리스틱으로 시전 순서 최적화 (전수탐색 대비 ~36배 빠름, 약 99.5% 정확도).
+              </div>
+              <div className="text-[11px] text-cyan-400 mt-1 leading-relaxed bg-cyan-950/20 border border-cyan-700/40 rounded p-2">
+                ⚡ Pass 1 (전체 빌드 빠른 탐색) → Pass 2 (상위 빌드만 정밀 재탐색) 흐름<br />
+                · 신통 풀이 커도 비교적 빠르게 결과 도출<br />
+                · 일부 빌드의 best 순서를 놓칠 수 있음 (최적 ranking 약 99.5%)
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                정밀 탐색: 모든 빌드 × 모든 시전 순서를 전수탐색. 유파 1슬롯에서 시너지가 필수인 신통 15개 (예: 균천·진악, 주술·제율 등) 는 자동 제외 (단, 풀이 10개 이하면 그대로 포함).
+              </div>
+              <div className="text-[11px] text-amber-400 mt-1 leading-relaxed bg-amber-950/20 border border-amber-700/40 rounded p-2">
+                ⚠ <strong>정밀 탐색은 매우 오래 걸립니다</strong> (9! = 362,880 순열 × 법보 조합).<br />
+                · 신통 6개 + 법보 3개 선택: 1 빌드 × 9! = 362,880회 시뮬<br />
+                · 신통 풀이 커질수록 시간이 기하급수적으로 증가<br />
+                · 권장: 신통 풀을 6~12개로 좁혀서 사용.
+              </div>
+            </>
+          )}
         </div>
 
         {/* 기댓값 모드 안내 (확률·랜덤 효과 처리 방식) */}
@@ -683,30 +712,106 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
     return out;
   }, [build, skillSel]);
 
-  // 시전 순서 초기화는 신통/법보 "내용" 변경 시에만 수행
-  // 시간(markerIdx)이나 상대 법체(targetLawBody) 변경엔 영향 없음
+  // 시전 순서 초기화 — 신통/법보 "내용" 변경 시:
+  //   - 기존 사용자 순서 유지 (제거된 것만 빠짐, 빠진 자리 위 항목들이 앞으로 당겨짐)
+  //   - 새로 추가된 신통/법보는 마지막에 append
   const orderSig = useMemo(
-    () => selectedSkills.map((s) => s.name).join('|') + '||' + treasures.join('|'),
+    () => selectedSkills.map((s) => s.name).slice().sort().join('|') + '||' + treasures.slice().sort().join('|'),
     [selectedSkills, treasures]
   );
   const lastSigRef = useRef(null);
+  const orderRef = useRef(null);
+  useEffect(() => { orderRef.current = order; }, [order]);
   useEffect(() => {
     if (!canEditOrder) return;
-    if (lastSigRef.current === orderSig) return; // 같은 빌드·법보 조합이면 사용자가 편집한 순서 유지
+    if (lastSigRef.current === orderSig) return;
     lastSigRef.current = orderSig;
-    // 신통 6개 + 법보 선택 수만큼의 순서 배열 생성 (법보 부족해도 신통만으로 표시)
-    const ord = [];
-    for (let i = 0; i < 6; i++) ord.push({ kind: 'skill', idx: i });
-    for (let i = 0; i < treasures.length; i++) ord.push({ kind: 'treasure', idx: i });
-    const decorated = ord.map((it) => {
-      if (it.kind === 'skill') {
-        const s = selectedSkills[it.idx];
-        return { ...it, label: s?.name || `skill${it.idx}`, cat: s?.fam };
+
+    const curSkillNames = selectedSkills.map((s) => s.name);
+    const curTreasures = treasures;
+    const skillNameToIdx = {};
+    curSkillNames.forEach((n, i) => { skillNameToIdx[n] = i; });
+    const trNameToIdx = {};
+    curTreasures.forEach((n, i) => { trNameToIdx[n] = i; });
+    const prevOrder = orderRef.current;
+
+    const newOrder = [];
+    const seenSkills = new Set();
+    const seenTreasures = new Set();
+    // 1) 기존 order 의 항목 중 현재 유효한 것만 유지 (자연스럽게 앞으로 당겨짐)
+    if (prevOrder) {
+      for (const item of prevOrder) {
+        if (item.kind === 'skill' && curSkillNames.includes(item.label)) {
+          newOrder.push({
+            kind: 'skill',
+            idx: skillNameToIdx[item.label],
+            label: item.label,
+            cat: selectedSkills.find((s) => s.name === item.label)?.fam || item.cat,
+          });
+          seenSkills.add(item.label);
+        } else if (item.kind === 'treasure' && curTreasures.includes(item.label)) {
+          newOrder.push({
+            kind: 'treasure',
+            idx: trNameToIdx[item.label],
+            label: item.label,
+            cat: '법보',
+          });
+          seenTreasures.add(item.label);
+        }
       }
-      return { ...it, label: treasures[it.idx], cat: '법보' };
-    });
-    setOrder(decorated);
+    }
+    // 2) 새로 추가된 신통은 마지막에
+    for (const n of curSkillNames) {
+      if (!seenSkills.has(n)) {
+        const sk = selectedSkills.find((s) => s.name === n);
+        newOrder.push({ kind: 'skill', idx: skillNameToIdx[n], label: n, cat: sk?.fam });
+      }
+    }
+    // 3) 새로 추가된 법보는 마지막에
+    for (const n of curTreasures) {
+      if (!seenTreasures.has(n)) {
+        newOrder.push({ kind: 'treasure', idx: trNameToIdx[n], label: n, cat: '법보' });
+      }
+    }
+    setOrder(newOrder);
   }, [canEditOrder, orderSig, selectedSkills, treasures]);
+
+  // 시전 순서(7번) 에서 순서 변경 시 → 1번 신통 + 2번 공격법보 도 같이 변경 (sync)
+  const handleOrderChange = (newOrder) => {
+    // 새 신통 순서대로 selectedSkills 재배치 후 skillSel (fam 별 그룹) 재구성
+    const newSelectedSkills = [];
+    const newTreasures = [];
+    for (const item of newOrder) {
+      if (item.kind === 'skill') {
+        const oldSkill = selectedSkills[item.idx];
+        if (oldSkill) newSelectedSkills.push(oldSkill);
+      } else if (item.kind === 'treasure') {
+        const oldTr = treasures[item.idx];
+        if (oldTr) newTreasures.push(oldTr);
+      }
+    }
+    // skillSel 재구성 (fam 별 그룹, fam 순서 = 새 시전 순서 따름)
+    if (newSelectedSkills.length === selectedSkills.length) {
+      const newSkillSel = {};
+      for (const s of newSelectedSkills) {
+        if (!newSkillSel[s.fam]) newSkillSel[s.fam] = [];
+        newSkillSel[s.fam].push(s.name);
+      }
+      setSkillSel(newSkillSel);
+    }
+    // treasures 재구성 (새 시전 순서대로)
+    if (newTreasures.length === treasures.length) {
+      setTreasures(newTreasures);
+    }
+    // order 의 skill/treasure idx 재할당 (새 selectedSkills/treasures 와 일치)
+    let skillIdx = 0, trIdx = 0;
+    const reIdxOrder = newOrder.map(item => {
+      if (item.kind === 'skill') return { ...item, idx: skillIdx++ };
+      if (item.kind === 'treasure') return { ...item, idx: trIdx++ };
+      return item;
+    });
+    setOrder(reIdxOrder);
+  };
 
   const { result, running, run } = useSimulation();
 
@@ -774,9 +879,9 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
 
       <section>
         <h2 className="text-lg font-bold mb-3 text-amber-400">2. 법보 선택</h2>
-        <h3 className="text-base font-bold mb-3 text-amber-400">2-1. 공격법보</h3>
+        <h3 className="text-base font-bold mb-3 text-amber-400">2-1. 공격법보 <span className="text-xs text-slate-400 font-normal">(최대 3개)</span></h3>
         <TreasureSetPicker value={attackSetMode} onChange={setAttackSetMode} label="공격법보 세트 모드" accentColor="amber" />
-        <TreasurePicker selected={treasures} onChange={setTreasures} maxSelect={6} />
+        <TreasurePicker selected={treasures} onChange={setTreasures} maxSelect={3} showOrder={true} showOrderEditor={false} order={order} />
 
         <h3 className="text-base font-bold mt-6 mb-3 text-cyan-400">2-2. 방어법보 <span className="text-xs text-slate-400 font-normal">(최대 3개 — 호신강기 합산 결정)</span></h3>
         <TreasureSetPicker value={defenseSetMode} onChange={setDefenseSetMode} label="방어법보 세트 모드" accentColor="cyan" />
@@ -806,7 +911,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       {canEditOrder && order && (
         <section>
           <h2 className="text-lg font-bold mb-3 text-amber-400">7. 시전 순서 (드래그로 변경)</h2>
-          <OrderEditor items={order} onChange={setOrder} />
+          <OrderEditor items={order} onChange={handleOrderChange} />
         </section>
       )}
 
