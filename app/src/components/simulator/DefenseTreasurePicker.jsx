@@ -1,4 +1,4 @@
-import { DEFENSE_TREASURES, DEFENSE_TREASURE_NAMES } from '../../engine';
+import { DEFENSE_TREASURES, DEFENSE_TREASURE_NAMES, CFG } from '../../engine';
 import HoverTooltip from '../common/HoverTooltip';
 
 export default function DefenseTreasurePicker({ selected, onChange, maxSelect = 3 }) {
@@ -10,11 +10,9 @@ export default function DefenseTreasurePicker({ selected, onChange, maxSelect = 
     }
   }
 
-  // 호신강기 합산
-  const totalShield = selected.reduce((sum, name) => {
-    const dt = DEFENSE_TREASURES[name];
-    return sum + (dt ? dt.shield : 0);
-  }, 0);
+  // 호신강기 합산 — 방어 × 2316.20% + 10억 (방어법보 툴팁 공식)
+  const perShield = (CFG.baseDEF || 0) * 23.1620 + 10e8;
+  const totalShield = selected.reduce((sum, name) => sum + (DEFENSE_TREASURES[name] ? perShield : 0), 0);
 
   return (
     <div>
@@ -50,10 +48,7 @@ export default function DefenseTreasurePicker({ selected, onChange, maxSelect = 
                   <div className="text-xs font-bold text-cyan-300 mb-1">
                     🛡️ {dt.name}
                   </div>
-                  <div className="text-[12px] text-amber-300 mb-1">
-                    호신강기 {(dt.shield / 1e8).toFixed(2)}억 · 재사용 {dt.cd}초
-                  </div>
-                  <div className="text-[12px] text-slate-200 leading-relaxed whitespace-pre-line">{dt.desc}</div>
+                  <div className="text-[12px] text-slate-200 leading-relaxed whitespace-pre-line">{dt.desc.split("56.14억").join((perShield / 1e8).toFixed(2) + "억")}</div>
                 </>
               }
             >

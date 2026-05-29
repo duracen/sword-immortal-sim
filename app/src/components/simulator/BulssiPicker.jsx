@@ -5,6 +5,7 @@ import HoverTooltip from '../common/HoverTooltip';
 // AutoSearch / ManualSim 양쪽에서 재사용.
 export default function BulssiPicker({ value, onChange }) {
   const total = (value.통명묘화||0)+(value.진무절화||0)+(value.태현잔화||0)+(value.유리현화||0)+(value.진마성화||0);
+  const total중 = (value.육봉진화||0)+(value.환검현화||0)+(value.중악첩화||0)+(value.현어령화||0)+(value.열반륜화||0);
   const sets = [
     { key: '통명묘화', choices: [0, 3], desc: '3개: amp +8 (신통 피해 심화)' },
     { key: '진무절화', choices: [0, 3, 6], desc: '3개: 2cast마다 +16 dealt / 6개: +48 dealt (다음 신통)' },
@@ -12,13 +13,20 @@ export default function BulssiPicker({ value, onChange }) {
     { key: '유리현화', choices: [0, 3], desc: '3개: amp +15 (신통 피해 심화)' },
     { key: '진마성화', choices: [0, 3, 6], desc: '3개: 신통 cast당 amp +1%/스택 / 6개: +3%/스택 (max 10중첩)' },
   ];
-  return (
-    <div>
+  const sets중 = [
+    { key: '육봉진화', choices: [0, 3], desc: '3개: 법보 피해 심화 +6%' },
+    { key: '환검현화', choices: [0, 3, 6], desc: '3개: 공격법보 입히는 피해 무작위 0~12% / 6개: 0~24%' },
+    { key: '중악첩화', choices: [0, 3, 6], desc: '3개: 법보 2회마다 다음 법보 +24% / 6개: +48%' },
+    { key: '현어령화', choices: [0, 3], desc: '3개: 방어법보 호신강기 계수 +6% (미러: 대상 호신강기↑)' },
+    { key: '열반륜화', choices: [0, 3], desc: '3개: 방어법보 파괴 후 10초 받는 피해 -8% (미러: 플레이어 데미지↓)' },
+  ];
+  const renderGroup = (label, sets, t) => (
+    <div className="mb-3">
       <div className="text-sm text-slate-400 mb-2">
-        불씨 세트 장착 (<span className={total > 9 ? 'text-red-400' : ''}>{total}</span>/9)
+        불씨 세트 ({label}) 장착 (<span className={t > 9 ? "text-red-400" : ""}>{t}</span>/9)
       </div>
       <div className="flex flex-wrap gap-2">
-        {sets.map(({ key, choices, desc }) => (
+        {sets.map(({ key, choices }) => (
           <HoverTooltip
             key={key}
             className="border-pink-600"
@@ -41,8 +49,8 @@ export default function BulssiPicker({ value, onChange }) {
                     onClick={() => onChange({ ...value, [key]: n })}
                     className={`px-2.5 h-7 text-xs rounded font-semibold ${
                       (value[key] || 0) === n
-                        ? 'bg-amber-500 text-slate-950'
-                        : 'bg-slate-700 hover:bg-slate-600'
+                        ? "bg-amber-500 text-slate-950"
+                        : "bg-slate-700 hover:bg-slate-600"
                     }`}
                   >
                     {n}
@@ -53,9 +61,13 @@ export default function BulssiPicker({ value, onChange }) {
           </HoverTooltip>
         ))}
       </div>
-      {total > 9 && (
-        <div className="mt-2 text-xs text-red-400">⚠ 9개 초과 장착 불가</div>
-      )}
+      {t > 9 && <div className="mt-2 text-xs text-red-400">⚠ 9개 초과 장착 불가</div>}
+    </div>
+  );
+  return (
+    <div>
+      {renderGroup("상", sets, total)}
+      {renderGroup("중", sets중, total중)}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { FAMILIES, SK, TREASURE_NAMES } from '../../engine';
-import { lookupOption, SKILL_OPTIONS, STACK_DESCS, TRIGGER_DESCS, TREASURE_DESCS } from '../../utils/skillOptions';
+import { FAMILIES, SK, TREASURE_NAMES, CFG } from '../../engine';
+import { lookupOption, SKILL_OPTIONS, STACK_DESCS, TRIGGER_DESCS, TREASURE_DESCS, makeTreasureDesc } from '../../utils/skillOptions';
 
 const TREASURE_PREFIXES = new Set(Object.keys(TREASURE_DESCS));
 
@@ -95,7 +95,7 @@ function parseEvents(events) {
     식혼마주: 140,  // 진/허/무 모두 140초 (cr/감면/호신강기 흡수 buff)
     혼원마주: 12,   // 허의 12초 신통/치명타 차단 (자기 효과)
     청교룡: 20, 적난새: 20, 청반룡: 20, 금오: 20,
-    청룡: 20, 주작: 20, 진룡: 20, 봉황: 20,
+    청룡: 20, 주작: 20, 진룡: 20, 봉황: 20, 천룡: 20, 천봉: 20,
     영역: 10 };     // 영역 발동 — 자기 버프 10초 지속
   // 같은 시각/종류 트리거는 합쳐서 count 누적 (×N 표시용)
   function pushTrigger(tg) {
@@ -478,6 +478,8 @@ const TRIGGER_STYLE = {
   주작:   { bg: 'bg-rose-600', icon: '🦅', ring: 'ring-rose-300' },
   진룡:   { bg: 'bg-cyan-400', icon: '🐉', ring: 'ring-cyan-300' },
   봉황:   { bg: 'bg-rose-500', icon: '🦅', ring: 'ring-rose-300' },
+  천룡:   { bg: 'bg-teal-400', icon: '🐉', ring: 'ring-teal-300' },
+  천봉:   { bg: 'bg-orange-500', icon: '🦅', ring: 'ring-orange-300' },
   // 영역 (법칙) — 보라계열 + 🌐 아이콘
   영역:   { bg: 'bg-violet-700', icon: '🌐', ring: 'ring-violet-300' },
   // 영압대결 — 전투 시작 0~6초간 cast 발사 불가 (평타만)
@@ -617,7 +619,8 @@ export default function CastTimelineSummaryV2({ events }) {
             const tooltipSide = leftPct > 60 ? 'right-0' : 'left-0';
             // 모든 cast 라벨을 left-anchor 로 통일 (0s 처럼) — 잘림 방지 + 시각 통일
             // 툴팁 내용: 법보면 법보 설명, 신통이면 모든 옵션 설명
-            const treasureDesc = c.isTreasure ? (TREASURE_DESCS[c.name] || '') : '';
+            // 사용자 진원/공격력 stat 기반 동적 desc — 진원/공격력 변경 시 자동 갱신
+            const treasureDesc = c.isTreasure ? makeTreasureDesc(c.name, (CFG.base진원 || 22e8) / 1e8, (CFG.baseATK || 2e8) / 1e8) : '';
             const skillOpts = !c.isTreasure ? (SKILL_OPTIONS[c.name] || null) : null;
             return (
               <div

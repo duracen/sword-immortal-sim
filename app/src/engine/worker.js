@@ -132,6 +132,7 @@ function getMaxTime(markerIdx) { return MARKER_TIME[markerIdx]; }
 let G_TARGET_LAW = null; // worker 전역 (start 시 세팅)
 let G_BULSSI = null;     // 불씨 세트 (start 시 세팅)
 let G_BISUL = null;      // 비술 (start 시 세팅)
+let G_DEATH_END = false;  // 죽으면종료 모드 (최속 처치 랭킹)
 let G_BEOPSANG = null;   // 법상 (start 시 세팅)
 let G_DEFENSE_TREASURES = null;  // 방어법보 (호신강기 결정)
 let G_ATTACK_SET = '단독';   // 공격법보 세트 모드 ('단독'|'천강'|'현명')
@@ -157,8 +158,16 @@ function simOptsFor(markerIdx) {
   if (G_DEFENSE_SET && G_DEFENSE_SET !== '단독') o.defenseSetMode = G_DEFENSE_SET;
   // worker 의 sweep 시 simulateBuild 결과는 cumByMarker 만 사용 → lite 모드로 dmgEvents/buffs 등 GC 힌트
   // (main thread BattleLogPanel 의 simulateBuild 는 별개라 영향 X)
+  if (G_DEATH_END) o.죽으면종료 = true;
   o.lite = true;
   return o;
+}
+
+// 죽으면종료 모드 score: killTime↑(빠를수록 high) → 동일 시 총딜↓(클수록 high). 미사망은 killer 아래.
+function scoreFor(r, markerIdx) {
+  if (!G_DEATH_END) return r.cumByMarker[markerIdx];
+  const total = r.cumByMarker[markerIdx] || 0;
+  return (r.killTime != null) ? (1e18 - r.killTime * 1e12 + total) : total;
 }
 
 // 순서 전수탐색 — topK 상위 순서를 유지 (기본 1개, 작은 탐색에선 10개)
@@ -214,7 +223,7 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
       for (const trPerm of trPermList) {
         if (isCancelled()) return { topResults, cancelled: true };
         const full = arrangeSlots(skPerm, trPerm);
-        const sc = simulateBuild(build, treasures, full, skillsOverride, simOpts).cumByMarker[markerIdx];
+        const sc = scoreFor(simulateBuild(build, treasures, full, skillsOverride, simOpts), markerIdx);
         consider(sc, full);
         counter++;
         if (_now() - lastEmitT >= EMIT_INTERVAL_MS) {
@@ -231,7 +240,7 @@ async function optimizeOrderExhaustive(build, treasures, markerIdx, skillsOverri
     const slots = defaultOrder();
     for (const perm of permutations(slots)) {
       if (isCancelled()) return { topResults, cancelled: true };
-      const sc = simulateBuild(build, treasures, perm, skillsOverride, simOpts).cumByMarker[markerIdx];
+      const sc = scoreFor(simulateBuild(build, treasures, perm, skillsOverride, simOpts), markerIdx);
       consider(sc, perm);
       counter++;
       if (_now() - lastEmitT >= EMIT_INTERVAL_MS) {
@@ -290,7 +299,7 @@ async function ilsOrderSearch(build, skills, treasures, markerIdx, fixedTreasure
 
   function simulate(order) {
     simCount++;
-    return simulateBuild(build, treasures, order, skills, simOpts).cumByMarker[markerIdx];
+    return scoreFor(simulateBuild(build, treasures, order, skills, simOpts), markerIdx);
   }
 
   // === Seed 생성 ===
@@ -645,6 +654,7 @@ async function evaluateSkillCombo(bd, markerIdx, fixedTreasures, isCancelled, op
       treasuresArr: tr || [],
       orderArr: t.ord,
       orderRank: idx + 1,   // 이 신통 조합 내에서 몇 번째 우수 순서인지
+      killTime: (G_DEATH_END && r.killTime != null) ? r.killTime : null,
       // cumByMarker = [34s, 52s, 60s, 120s, 180s] — markerIdx 0~4 매핑
       s41: markerIdx === 0 ? cum[0] : null,
       s52: markerIdx === 1 ? cum[1] : null,
@@ -687,7 +697,43 @@ async function handleMessage(e) {
     defenseSetMode = '단독',
     sharedBuf = null,
     workerIdx = 0,
+    baseStat = null,  // 사용자 정의 기준 스탯 (localStorage 에서 전달)
+    죽으면종료 = false,  // 최속 처치 랭킹 모드
   } = msg.config || {};
+  // 사용자 기준 스탯 → worker 의 CFG 갱신 (main thread 와 분리된 module instance 라 별도 set 필요)
+  if (baseStat) {
+    const { CFG: workerCFG } = m.exports;
+    if (workerCFG) {
+      if (baseStat.baseATK != null) workerCFG.baseATK = baseStat.baseATK * 1e8;
+      if (baseStat.base진원 != null) workerCFG.base진원 = baseStat.base진원 * 1e8;
+      if (baseStat.baseHP != null) workerCFG.baseHP = baseStat.baseHP * 1e8;
+      if (baseStat.baseDEF != null) workerCFG.baseDEF = baseStat.baseDEF * 1e8;
+      if (baseStat.baseCR != null) workerCFG.baseCR = baseStat.baseCR;
+      if (baseStat.baseCD_신통 != null) {
+        workerCFG.baseCD_신통 = baseStat.baseCD_신통;
+        workerCFG.baseCD = baseStat.baseCD_신통;  // legacy 호환
+      }
+      if (baseStat.baseCD_법보 != null) workerCFG.baseCD_법보 = baseStat.baseCD_법보;
+      if (baseStat.baseCRRes != null) workerCFG.baseCRRes = baseStat.baseCRRes;
+      if (baseStat.baseCRBlock_신통 != null) workerCFG.baseCRBlock_신통 = baseStat.baseCRBlock_신통;
+      if (baseStat.baseCRBlock_법보 != null) workerCFG.baseCRBlock_법보 = baseStat.baseCRBlock_법보;
+      // crit_buff_* 제거됨 — 유뢰법체 4셋 효과로 통합 (CFG.유뢰법체_계열4개_최종피해)
+      if (baseStat.자기_피해심화_신통 != null) workerCFG.자기_피해심화_신통 = baseStat.자기_피해심화_신통;
+      if (baseStat.받는_피해감면_신통 != null) workerCFG.받는_피해감면_신통 = baseStat.받는_피해감면_신통;
+      if (baseStat.자기_피해심화_법보 != null) workerCFG.자기_피해심화_법보 = baseStat.자기_피해심화_법보;
+      if (baseStat.받는_피해감면_법보 != null) workerCFG.받는_피해감면_법보 = baseStat.받는_피해감면_법보;
+      // 영혼의 불씨 강도 (numeric) → 신통/법보 dmg 분모 동시 derive
+      if (baseStat.영혼의불씨강도 != null) workerCFG.영혼의불씨강도 = baseStat.영혼의불씨강도;
+      if (baseStat.적_영혼의불씨강도 != null) workerCFG.적_영혼의불씨강도 = baseStat.적_영혼의불씨강도;
+      if (m.exports.compute영혼의불씨강도Reduction) {
+        const _r = m.exports.compute영혼의불씨강도Reduction();
+        workerCFG.받는_피해감소_신통 = _r;
+        workerCFG.받는_피해감소_법보 = _r;
+      }
+      // baseCR / baseCRRes 변경 후 baseCritRate 재계산 (공식: 10 + 120 × (CR-CRRes)/(CR+CRRes))
+      if (m.exports.refreshBaseCritRate) m.exports.refreshBaseCritRate();
+    }
+  }
   // SharedArrayBuffer 초기화 — 메인 thread 가 전달한 경우만
   if (sharedBuf && typeof SharedArrayBuffer !== 'undefined') {
     try {
@@ -700,6 +746,7 @@ async function handleMessage(e) {
     G_SHARED_VIEW = null;
   }
   G_TARGET_LAW = targetLawBody;
+  G_DEATH_END = !!죽으면종료;
   G_BULSSI = 불씨;
   G_BISUL = (bisul && (bisul.self?.length || bisul.enemy?.length)) ? bisul : null;
   G_BEOPSANG = (법상 && 법상.name) ? 법상 : null;

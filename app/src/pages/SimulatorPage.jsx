@@ -12,6 +12,8 @@ import YeokPicker from '../components/simulator/YeokPicker.jsx';
 import ResultSummary from '../components/simulator/ResultSummary.jsx';
 import RankingTable from '../components/ranking/RankingTable.jsx';
 import BattleLogPanel from '../components/battlelog/BattleLogPanel.jsx';
+import StatEditor, { DEFAULT_STAT, applyStatToCFG } from '../components/simulator/StatEditor.jsx';
+import useLocalStorage from '../hooks/useLocalStorage.js';
 import { useSimulation } from '../hooks/useSimulation';
 import { useRanking } from '../hooks/useRanking';
 import { validateBuild, buildArray, buildLabel, defaultOrder } from '../utils/buildHelpers';
@@ -53,8 +55,16 @@ function TargetLawBodyPicker({ value, onChange }) {
 }
 
 export default function SimulatorPage() {
-  const [mode, setMode] = useState('auto');
+  // 탭 상태도 localStorage 보존 — 새로고침 시 마지막 선택 유지
+  const [mode, setMode] = useLocalStorage('simMode', 'auto');
   const [targetLawBody, setTargetLawBody] = useState(null);
+  // 기준 스탯 — localStorage 자동 저장/로드 (브라우저 껐다 켜도 유지)
+  const [savedStat, setSavedStat] = useLocalStorage('simBaseStat', DEFAULT_STAT);
+  // 저장된 stat 에 누락 필드 (새로 추가된 필드 등) 가 있으면 DEFAULT_STAT 으로 보완
+  const stat = useMemo(() => ({ ...DEFAULT_STAT, ...savedStat }), [savedStat]);
+  const setStat = setSavedStat;
+  // 페이지 최초 로드 시 즉시 CFG 적용 (StatEditor 의 useEffect 보다 빠르게 — sim 첫 실행 보장)
+  useEffect(() => { applyStatToCFG(stat); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-5">
@@ -66,13 +76,14 @@ export default function SimulatorPage() {
           🛠 수동 시뮬 (원하는 조합 직접 실행)
         </TabButton>
       </div>
+      <StatEditor stat={stat} onChange={setStat} />
       {/* 둘 다 항상 마운트 — 탭 전환 시 진행 중인 자동탐색/워커/결과가 날아가지 않도록
           active 가 아닌 탭은 CSS 로 숨김 (state 유지) */}
       <div style={{ display: mode === 'auto' ? 'block' : 'none' }}>
-        <AutoSearch targetLawBody={targetLawBody} setTargetLawBody={setTargetLawBody} />
+        <AutoSearch targetLawBody={targetLawBody} setTargetLawBody={setTargetLawBody} stat={stat} />
       </div>
       <div style={{ display: mode === 'manual' ? 'block' : 'none' }}>
-        <ManualSim targetLawBody={targetLawBody} setTargetLawBody={setTargetLawBody} />
+        <ManualSim targetLawBody={targetLawBody} setTargetLawBody={setTargetLawBody} stat={stat} />
       </div>
     </div>
   );
@@ -94,7 +105,7 @@ function TabButton({ active, onClick, children }) {
 }
 
 /* ─────────────────  자동 탐색  ───────────────── */
-function AutoSearch({ targetLawBody, setTargetLawBody }) {
+function AutoSearch({ targetLawBody, setTargetLawBody, stat }) {
   const MARKER_TIMES = [41, 52, 60, 120, 180];
   const MARKER_LABELS = ['41초 (1사이클)', '52초', '60초', '120초', '180초'];
   const [markerIdx, setMarkerIdx] = useState(0);  // 41초 (1사이클) 기본
@@ -117,6 +128,8 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
   const [attackSetMode, setAttackSetMode] = useState('단독');
   const [defenseSetMode, setDefenseSetMode] = useState('단독');
   const [searchMode, setSearchMode] = useState('exhaustive');  // 'fast' (ILS 휴리스틱) | 'exhaustive' (전수탐색)
+  const [죽으면종료, set죽으면종료] = useState(false);  // 최속 처치 랭킹 모드
+  const [cpuFraction, setCpuFraction] = useLocalStorage('simCpuFraction', 2 / 3);  // 스레드(CPU 코어) 사용 비율
   // 자동 탐색 전체에 동일 불씨 세트 적용 — 실 인게임에서 불씨는 고정됨
   const [불씨, set불씨] = useState({
     통명묘화: 0, 진무절화: 0, 태현잔화: 0, 유리현화: 0, 진마성화: 0,
@@ -164,6 +177,9 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
       defenseTreasures,
       attackSetMode,
       defenseSetMode,
+      죽으면종료,
+      cpuFraction,
+      baseStat: stat,  // worker 의 CFG 갱신용 (localStorage 저장된 사용자 stat)
     });
   }
 
@@ -303,6 +319,38 @@ function AutoSearch({ targetLawBody, setTargetLawBody }) {
                   }`}
                 >
                   {MARKER_LABELS[i]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">랭킹 방식</label>
+            <label className={죽으면종료 ? 'flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer text-sm bg-amber-500 text-slate-950 font-bold' : 'flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer text-sm bg-slate-700'}>
+              <input type="checkbox" checked={죽으면종료} onChange={(e) => set죽으면종료(e.target.checked)} className="accent-amber-500" />
+              죽으면 종료 (최속 처치)
+            </label>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">
+              스레드 사용 <span className="text-slate-300">(CPU 코어 비율 — 높을수록 빠름, 탐색 중 PC 부담↑)</span>
+            </label>
+            <div className="flex gap-1 flex-wrap">
+              {[
+                { v: 0.5, label: '50%', hint: 'CPU 코어의 절반만 사용 — 탐색 중에도 PC 여유 많음 (느림)' },
+                { v: 2 / 3, label: '2/3 (기본)', hint: '코어의 약 67% — UI/OS 여유 확보 (기본값)' },
+                { v: 1, label: '100%', hint: '전체 코어 사용 — 가장 빠름, 탐색 중 PC 느려짐/발열↑' },
+              ].map((o) => (
+                <button
+                  key={o.label}
+                  onClick={() => setCpuFraction(o.v)}
+                  title={o.hint}
+                  className={`px-3 py-1.5 rounded text-sm ${
+                    Math.abs((cpuFraction || (2 / 3)) - o.v) < 0.01
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'bg-slate-700'
+                  }`}
+                >
+                  {o.label}
                 </button>
               ))}
             </div>
@@ -629,7 +677,7 @@ function getBuildLawCat(build) {
 
 function SplitRankings({ results, sortBy, markerTime, onRowClick }) {
   const key = `s${sortBy}`;
-  const sortedAll = useMemo(() => [...results].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)), [results, key]);
+  const sortedAll = useMemo(() => [...results].sort((a, b) => { if (a.killTime != null || b.killTime != null) { const _x = a.killTime != null ? a.killTime : Infinity, _y = b.killTime != null ? b.killTime : Infinity; if (_x !== _y) return _x - _y; } return (b[key] ?? 0) - (a[key] ?? 0); }), [results, key]);
 
   return (
     <div className="space-y-4">
@@ -673,7 +721,7 @@ function SplitRankings({ results, sortBy, markerTime, onRowClick }) {
 const MANUAL_MARKER_TIMES = [41, 52, 60, 120, 180];
 const MANUAL_MARKER_LABELS = ['41초 (1사이클)', '52초', '60초', '120초', '180초'];
 
-function ManualSim({ targetLawBody, setTargetLawBody }) {
+function ManualSim({ targetLawBody, setTargetLawBody, stat }) {
   const [skillSel, setSkillSel] = useState({});
   // 법보는 기본 미선택 — 사용자가 직접 3개 선택해야 시뮬 실행 가능
   const [treasures, setTreasures] = useState([]);
@@ -788,37 +836,26 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
     setOrder(newOrder);
   }, [canEditOrder, orderSig, selectedSkills, treasures]);
 
-  // 시전 순서(7번) 에서 순서 변경 시 → 1번 신통 + 2번 공격법보 도 같이 변경 (sync)
+  // 시전 순서(7번) 에서 순서 변경 시 — 같은 fam 신통이 비연속으로 배치 가능
+  //   skillSel 재그룹화 X (이전 버그: 청명 2개가 강제로 인접 배치되어 user 의 cast order 가 깨짐)
+  //   order 만 갱신 — order.idx 는 기존 selectedSkills 의 position 그대로 유지
+  //   sim 은 order.idx → chosen[idx] 로 skill 룩업, fam 그룹 무관
   const handleOrderChange = (newOrder) => {
-    // 새 신통 순서대로 selectedSkills 재배치 후 skillSel (fam 별 그룹) 재구성
-    const newSelectedSkills = [];
+    // treasures 는 fam 무관 → 시전 순서대로 재배치 가능
     const newTreasures = [];
     for (const item of newOrder) {
-      if (item.kind === 'skill') {
-        const oldSkill = selectedSkills[item.idx];
-        if (oldSkill) newSelectedSkills.push(oldSkill);
-      } else if (item.kind === 'treasure') {
+      if (item.kind === 'treasure') {
         const oldTr = treasures[item.idx];
         if (oldTr) newTreasures.push(oldTr);
       }
     }
-    // skillSel 재구성 (fam 별 그룹, fam 순서 = 새 시전 순서 따름)
-    if (newSelectedSkills.length === selectedSkills.length) {
-      const newSkillSel = {};
-      for (const s of newSelectedSkills) {
-        if (!newSkillSel[s.fam]) newSkillSel[s.fam] = [];
-        newSkillSel[s.fam].push(s.name);
-      }
-      setSkillSel(newSkillSel);
-    }
-    // treasures 재구성 (새 시전 순서대로)
     if (newTreasures.length === treasures.length) {
       setTreasures(newTreasures);
     }
-    // order 의 skill/treasure idx 재할당 (새 selectedSkills/treasures 와 일치)
-    let skillIdx = 0, trIdx = 0;
+    // skill 은 selectedSkills 그대로, order 만 재구성
+    let trIdx = 0;
     const reIdxOrder = newOrder.map(item => {
-      if (item.kind === 'skill') return { ...item, idx: skillIdx++ };
+      if (item.kind === 'skill') return item;  // skill idx 유지 (기존 selectedSkills 의 position)
       if (item.kind === 'treasure') return { ...item, idx: trIdx++ };
       return item;
     });
@@ -851,6 +888,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       영역,
       randomCrit,
       slotMap: { ...slotMap },
+      runId: Date.now(),  // 매 실행마다 다른 값 — 랜덤 모드에서 같은 빌드로 재시뮬해도 BattleLogPanel trace 재실행 보장
     };
     setSimSnap(snapshot);
     run({
@@ -923,7 +961,17 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
       {canEditOrder && order && (
         <section>
           <h2 className="text-lg font-bold mb-3 text-amber-400">7. 시전 순서 (드래그로 변경)</h2>
-          <OrderEditor items={order} onChange={handleOrderChange} />
+          <OrderEditor items={order.map(o => {
+            // label/cat 동적 계산 — order.idx 가 가리키는 현재 skill/treasure 로 갱신
+            if (o.kind === 'skill') {
+              const sk = selectedSkills[o.idx];
+              return sk ? { ...o, label: sk.name, cat: sk.fam } : o;
+            }
+            if (o.kind === 'treasure') {
+              return { ...o, label: treasures[o.idx] || o.label };
+            }
+            return o;
+          })} onChange={handleOrderChange} />
         </section>
       )}
 
@@ -1031,6 +1079,7 @@ function ManualSim({ targetLawBody, setTargetLawBody }) {
             defenseTreasures={simSnap.defenseTreasures}
             attackSetMode={simSnap.attackSetMode}
             defenseSetMode={simSnap.defenseSetMode}
+            runId={simSnap.runId}
           />
         </>
       )}

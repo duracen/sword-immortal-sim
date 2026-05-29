@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { TREASURE_NAMES } from '../../engine';
-import { TREASURE_DESCS } from '../../utils/skillOptions';
+import { TREASURE_NAMES, CFG } from '../../engine';
+import { TREASURE_DESCS, makeTreasureDesc } from '../../utils/skillOptions';
 import HoverTooltip from '../common/HoverTooltip';
 
 // 표시 순서 (시전 기본 순서와 동일): 환음요탑 → 유리옥호 → 참원선검 → 오염혁선 → 산하옥척 → 경몽비파
@@ -95,7 +95,8 @@ export default function TreasurePicker({ selected, onChange, showOrder = true, s
         {TREASURE_DISPLAY.map((tr) => {
           const on = selected.includes(tr);
           const idx = selected.indexOf(tr);
-          const desc = TREASURE_DESCS[tr];
+          // 사용자 진원/공격력 stat 기반 동적 desc — 진원/공격력 변경 시 자동 갱신
+          const desc = makeTreasureDesc(tr, (CFG.base진원 || 22e8) / 1e8, (CFG.baseATK || 2e8) / 1e8);
           return (
             <HoverTooltip
               key={tr}

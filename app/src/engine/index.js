@@ -20,6 +20,7 @@ try {
 
 export const {
   CFG,
+  DEFAULT_STAT,
   SK,
   FAMILIES,
   TREASURES,
@@ -28,6 +29,14 @@ export const {
   TREASURE_SETS,
   simulateBuild,
   selectSkillsForBuild,
+  computeBaseCritRate,
+  refreshBaseCritRate,
+  compute영혼의불씨강도Reduction,
+  compute겁규어령Reduction,
+  compute도의경지Increase,
+  compute천마위압Increase,
+  compute성물억제도법보Increase,
+  compute법상위세Increase,
 } = m.exports;
 
 // Vite HMR: sim2.js (?raw) 변경 시 전체 페이지 리로드 (수작업 new Function 캐시 무효화)

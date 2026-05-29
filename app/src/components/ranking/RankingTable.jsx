@@ -12,7 +12,7 @@ const MEDALS = ['🥇', '🥈', '🥉'];
 
 export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }) {
   const key = `s${sortBy}`;
-  const sorted = useMemo(() => [...results].sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)), [results, key]);
+  const sorted = useMemo(() => [...results].sort((a, b) => { if (a.killTime != null || b.killTime != null) { const _x = a.killTime != null ? a.killTime : Infinity, _y = b.killTime != null ? b.killTime : Infinity; if (_x !== _y) return _x - _y; } return (b[key] ?? 0) - (a[key] ?? 0); }), [results, key]);
   const list = sorted.slice(0, limit);
 
   return (
@@ -49,6 +49,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                       {r.cat}
                     </span>
                     {r.label}
+                    {r.killTime != null && <span className="ml-2 text-[11px] text-rose-300 font-bold">⚔{r.killTime.toFixed(0)}초 처치</span>}
                     {r.orderRank && r.orderRank > 1 && (
                       <span className="ml-2 text-[11px] text-slate-300">(순서 #{r.orderRank})</span>
                     )}
@@ -98,6 +99,7 @@ export default function RankingTable({ results, sortBy, onRowClick, limit = 10 }
                 {r.cat}
               </span>
               <span className="font-medium text-slate-100 text-sm break-keep">{r.label}</span>
+              {r.killTime != null && <span className="text-[11px] text-rose-300 font-bold">⚔{r.killTime.toFixed(0)}초</span>}
               {r.orderRank && r.orderRank > 1 && (
                 <span className="text-[10px] text-slate-300">(#{r.orderRank})</span>
               )}

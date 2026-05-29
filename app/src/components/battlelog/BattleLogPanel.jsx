@@ -7,7 +7,7 @@ import DamageBreakdown from '../simulator/DamageBreakdown.jsx';
 
 // 빌드/스킬/순서/법보 조합으로 trace 실행 → 로그 렌더
 // props: { build, skills, treasures, order, onClose, randomCrit, defenseTreasures, attackSetMode, defenseSetMode }
-export default function BattleLogPanel({ build, skills, treasures, order, title, onClose, targetLawBody, maxTime, 불씨, bisul, 법상, 영역, randomCrit = false, defenseTreasures, attackSetMode, defenseSetMode }) {
+export default function BattleLogPanel({ build, skills, treasures, order, title, onClose, targetLawBody, maxTime, 불씨, bisul, 법상, 영역, randomCrit = false, defenseTreasures, attackSetMode, defenseSetMode, runId }) {
   const [events, setEvents] = useState([]);
   const [dmgEvents, setDmgEvents] = useState([]);
   const [filter, setFilter] = useState({ CST: true, BUF: true, STK: true, DMG: true, OPT: true });
@@ -47,6 +47,7 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
   }
 
   // 빌드/스킬/순서/법보/불씨/시간/법체 변경 시 자동 재실행
+  //   runId — 외부에서 강제 재실행 트리거 (랜덤 모드에서 같은 빌드 재시뮬 시)
   useEffect(() => {
     runTrace();
     /* eslint-disable-next-line */
@@ -65,6 +66,7 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
     JSON.stringify(defenseTreasures),
     attackSetMode,
     defenseSetMode,
+    runId,
   ]);
 
   const counts = useMemo(() => {
@@ -94,7 +96,7 @@ export default function BattleLogPanel({ build, skills, treasures, order, title,
       {err && <div className="bg-red-950/50 border border-red-700 rounded p-3 text-red-300 text-sm">에러: {err}</div>}
 
       {events.length > 0 && <CastTimelineSummary events={events} />}
-      {dmgEvents.length > 0 && <DamageBreakdown dmgEvents={dmgEvents} />}
+      {dmgEvents.length > 0 && <DamageBreakdown dmgEvents={dmgEvents} events={events} />}
 
       {events.length > 0 && (
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-3 space-y-3">

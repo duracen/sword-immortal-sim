@@ -223,8 +223,9 @@ export function useRanking() {
     workersRef.current = [];
 
     const cores = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
-    // CPU 코어의 2/3 사용 (UI/OS 여유 확보, 최소 1 / 최대 16)
-    const cpuCount = Math.max(1, Math.min(16, Math.floor((cores * 2) / 3)));
+    // CPU 코어 사용 비율 — 사용자 설정 (config.cpuFraction: 0.5 / 0.667 / 1.0). 기본 2/3. 최소 1 / 최대 16.
+    const _cpuFrac = (typeof config.cpuFraction === 'number' && config.cpuFraction > 0) ? config.cpuFraction : (2 / 3);
+    const cpuCount = Math.max(1, Math.min(16, Math.floor(cores * _cpuFrac)));
 
     // 구조(= 유파 분포) 단위로 enumerate — 각 구조의 총 신통 조합 수 계산.
     // 정밀 탐색 시 유파 시너지 필수 신통을 1슬롯 유파에서 제외 — 단 작은 풀(<=10) 은 사용자 직접 선택이므로 그대로 존중.
@@ -321,6 +322,13 @@ export function useRanking() {
     // 카테고리별 = 해당 cat 의 빌드 중 Top 10
     // aggregateResults 시 5 버킷 union 후 setResults
     const sortKey = `s${['41','52','60','120','180'][config.markerIdx || 0]}`;
+    const _deathEnd = !!config.죽으면종료;
+    // 죽으면종료 모드: killTime↑(빠를수록 high) → 동일 시 총딜↓. 미사망은 killer 아래.
+    const getScore = (r) => {
+      if (!_deathEnd) return r[sortKey] ?? 0;
+      const total = r[sortKey] ?? 0;
+      return (r.killTime != null) ? (1e18 - r.killTime * 1e12 + total) : total;
+    };
     const BUCKET_LIMIT = 10;
     const CATS = ['영검', '화염', '뇌전', '백족'];
     function makeBucket() {
@@ -336,7 +344,7 @@ export function useRanking() {
     function recomputeLow(bucket) {
       let lo = Infinity, loK = null;
       for (const [k, v] of bucket.map) {
-        const s = v[sortKey] ?? 0;
+        const s = getScore(v);
         if (s < lo) { lo = s; loK = k; }
       }
       bucket.lowScore = lo;
@@ -345,7 +353,7 @@ export function useRanking() {
     function tryInsert(bucket, k, r, score) {
       const ex = bucket.map.get(k);
       if (ex) {
-        if (score > (ex[sortKey] ?? 0)) {
+        if (score > getScore(ex)) {
           bucket.map.set(k, r);
           if (k === bucket.lowKey) recomputeLow(bucket);
           return true;
@@ -390,7 +398,7 @@ export function useRanking() {
         .map((o) => (o.kind === 'skill' ? `s${o.idx}` : `t${o.idx}`))
         .join('>');
       const k = skillKey + '|' + r.treasures + '|' + orderKey;
-      const score = r[sortKey] ?? 0;
+      const score = getScore(r);
       let changed = tryInsert(buckets.overall, k, r, score);
       if (r.cat && buckets[r.cat]) {
         if (tryInsert(buckets[r.cat], k, r, score)) changed = true;

@@ -147,7 +147,7 @@ function parentOf(rawSrc) {
   return { parent: src, child: src };
 }
 
-export default function DamageBreakdown({ dmgEvents }) {
+export default function DamageBreakdown({ dmgEvents, events = [] }) {
   const grouped = useMemo(() => {
     if (!dmgEvents || dmgEvents.length === 0) return null;
     function normalizeSrc(raw) {
@@ -220,7 +220,7 @@ export default function DamageBreakdown({ dmgEvents }) {
       } else if (법상Match) {
         // 법상별로 통합 (8개 법상 — 용/새 아이콘 자동)
         const lawName = 법상Match[1];
-        const isYong = ['청교룡', '청반룡', '청룡', '진룡'].includes(lawName);
+        const isYong = ['청교룡', '청반룡', '청룡', '진룡', '천룡'].includes(lawName);
         parent = `${isYong ? '🐉' : '🦅'} 법상·${lawName}`;
       } else if (영역Match) {
         // 영역(제왕의 정) / 영역(제왕의 정)·천위 / 영역(제왕의 정)·AOE 등 — 영역명별로 통합
@@ -302,13 +302,26 @@ export default function DamageBreakdown({ dmgEvents }) {
       if (!castCountByParent[p]) castCountByParent[p] = new Set();
       castCountByParent[p].add(ev.t);
     }
+    // 비술/영역/법상 시전(발동) 횟수 — events 트레이스의 발동 OPT 로 카운트.
+    //   "지속시간 동안 나간 데미지 tick 수"가 아니라 "그 자체를 시전/소환한 횟수" (사용자 지시).
+    const activationCount = {};
+    const bumpAct = (k) => { activationCount[k] = (activationCount[k] || 0) + 1; };
+    for (const ev of (events || [])) {
+      if (ev.tag !== 'OPT' || !ev.msg) continue;
+      let mm = ev.msg.match(/🔮(분혼|식혼|탁천|악신|혼원|업화)마주·([무허진])/);
+      if (mm) { bumpAct(`🔮 비술·${mm[1]}마주(${mm[2]})`); continue; }
+      mm = ev.msg.match(/(?:🐉|🦅)법상·([가-힣]+) 빙의 시작/);
+      if (mm) { const y = ['청교룡','청반룡','청룡','진룡','천룡'].includes(mm[1]); bumpAct(`${y ? '🐉' : '🦅'} 법상·${mm[1]}`); continue; }
+      const PFX = '🌐영역 [';
+      if (ev.msg.indexOf(PFX) === 0) { const e2 = ev.msg.indexOf('] 발동'); if (e2 > 0) { bumpAct('🌐 영역·' + ev.msg.slice(PFX.length, e2)); continue; } }
+    }
     // 평면 항목 — 그룹 차트와 동일하게 부모 단위 1행
     const flatList = groupList.map((g) => {
       const totalRecords = g.segs.reduce((a, s) => a + s.count, 0);
       // 신통 cast count: parent 와 일치하는 activeCast 의 unique t
       const castCount = castCountByParent[g.parent]?.size || 0;
       // cast 가 추적되지 않는 그룹 (유파 효과/평타/작열 DoT) 은 record 수를 그대로 사용
-      const fires = castCount > 0 ? castCount : totalRecords;
+      const fires = activationCount[g.parent] != null ? activationCount[g.parent] : (castCount > 0 ? castCount : totalRecords);
       return {
         parent: g.parent,
         total: g.total,
@@ -320,7 +333,7 @@ export default function DamageBreakdown({ dmgEvents }) {
       };
     });
     return { total, groups: groupList, flat: flatList };
-  }, [dmgEvents]);
+  }, [dmgEvents, events]);
 
   if (!grouped) return null;
   const { total, groups, flat } = grouped;
@@ -344,7 +357,7 @@ export default function DamageBreakdown({ dmgEvents }) {
                 <span className="text-slate-100 font-medium truncate min-w-0 flex-1 mr-2">
                   <span className="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" style={{ background: baseColor }} />
                   {g.parent}
-                  <span className="text-slate-300 ml-1.5 text-[11px]">({g.segs.length}항목)</span>
+                  <span className="text-slate-300 ml-1.5 text-[11px]">({flat[gi].count}회, {g.segs.length}항목)</span>
                 </span>
                 <span className="text-amber-300 font-semibold shrink-0">{formatKR(g.total)}</span>
                 <span className="text-slate-300 ml-1 shrink-0 text-[11px]">{g.pct.toFixed(1)}%</span>

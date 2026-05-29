@@ -49,3 +49,8 @@ Screenshot_*.png
 
 # 생성된 docx (md 가 원본, docx 는 필요 시 로컬에서 재생성)
 검선귀환_신통_정리.docx
+
+# calibration / 디버그 스크래치 (루트 _프리픽스) — 본체 아님, 로컬 전용
+/_*.js
+/_*.svg
+/_*.txt
